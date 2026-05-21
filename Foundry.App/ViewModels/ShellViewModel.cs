@@ -117,9 +117,14 @@ public sealed partial class ShellViewModel : ObservableObject
             var req = $"Resolve this electrical validation finding by editing the design, then return the full " +
                       $"updated project: [{finding.Code}] {finding.Title}. {finding.Description} " +
                       $"Suggested fix: {finding.Fix}. Make the minimal change that resolves it.";
-            var result = await _reviser.ReviseAsync(Project, req, _cts.Token);
+            var result = await _reviser.ReviseAsync(Project, req, _cts.Token, forceEdit: true);
             if (result.Ok && result.Project is not null)
-                ApplyRevision(result.Project, $"Applied a fix for {finding.Code}: {finding.Title}.");
+            {
+                bool stillThere = result.Project.Findings.Any(f => f.Code == finding.Code && f.Title == finding.Title);
+                ApplyRevision(result.Project, stillThere
+                    ? $"Reworked the design for {finding.Code}, but the check still flags it — may need a manual change."
+                    : $"Fixed {finding.Code}: {finding.Title}. Re-validated.");
+            }
             else
                 Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
         }

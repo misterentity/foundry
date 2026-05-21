@@ -56,6 +56,12 @@ Rules: connection endpoints are "ALIAS.PIN" using the component aliases and pin 
 "components". Net is one of power|ground|signal|i2c. Every component needs power and ground nets where
 applicable. Pin kind is power|ground|input|output|bidir|analog. Mark input-only and strapping pins.
 
+Power source — ALWAYS include it (never omit it):
+- Portable/battery designs: add the battery as a component AND a BOM line, with realistic "capacityMah"
+  (e.g. a single 18650 ≈ 3000), plus its charger/regulator (e.g. TP4056 + 3.3 V LDO) as components/BOM.
+- USB- or mains-powered: add the input (USB-C / DC jack) + regulator as components and BOM lines.
+- Wire the power/ground rails from the source through the regulator to each component.
+
 Enclosure — design it for THIS device, not a generic box:
 - Size inner [L,W,H] (mm) to the actual parts plus ~3–5 mm clearance and the standoff height; don't guess round numbers.
 - Add a cutout for EVERY external interface: USB/DC-power, each connector/header, buttons, status LEDs (small
@@ -105,18 +111,22 @@ Output ONLY the JSON object.
         return new GenerationResult(true, project, "Generated.");
     }
 
-    /// <summary>Apply a chat request to the current design and return a fully revised project.</summary>
-    public async Task<GenerationResult> ReviseAsync(Project.Project current, string request, CancellationToken ct = default)
+    /// <summary>
+    /// Apply a chat request to the current design and return a fully revised project. When
+    /// <paramref name="forceEdit"/> is true (e.g. validation auto-fix) the model MUST return an
+    /// updated design — a prose-only reply is treated as a failure, not a Q&amp;A answer.
+    /// </summary>
+    public async Task<GenerationResult> ReviseAsync(Project.Project current, string request, CancellationToken ct = default, bool forceEdit = false)
     {
         if (!_ai.HasKey) return new GenerationResult(false, null, "Add your Anthropic API key in Settings to edit the design by chat.");
         if (string.IsNullOrWhiteSpace(request)) return new GenerationResult(false, null, "Tell me what to change.");
 
-        Diagnostics.AppLog.Info("revise", $"revise pass started · model {_model}", request);
+        Diagnostics.AppLog.Info("revise", $"revise pass started · model {_model}{(forceEdit ? " · force-edit" : "")}", request);
         string raw;
         try
         {
             var user = $"Current design (Foundry JSON):\n{BuildGenJson(current)}\n\nRequested change:\n{request}";
-            raw = await _ai.CompleteAsync(ReviseSystemPrompt, user, _model, ct);
+            raw = await _ai.CompleteAsync(forceEdit ? EditOnlySystemPrompt : ReviseSystemPrompt, user, _model, ct);
         }
         catch (Exception ex)
         {
@@ -127,6 +137,11 @@ Output ONLY the JSON object.
         var json = ExtractJson(raw);
         if (json is null)
         {
+            if (forceEdit)   // a fix must produce a design edit, never a prose answer
+            {
+                Diagnostics.AppLog.Warn("revise", "force-edit returned no JSON design");
+                return new GenerationResult(false, null, "The model didn't return an updated design. Try again or rephrase the fix.");
+            }
             // The model answered a question / gave advice rather than editing the design — show its prose.
             Diagnostics.AppLog.Info("revise", "answered (no design change)");
             return new GenerationResult(true, null, raw.Trim());
@@ -173,6 +188,15 @@ Output ONLY the JSON object.
         "the components you define.\n" +
         "Decide which it is from their message. Output ONLY prose (for a question) or ONLY the JSON object (for a change). " +
         "Do not announce or restate which mode you chose — just answer directly, or just output the JSON.";
+
+    private const string EditOnlySystemPrompt = SystemPrompt +
+        "\n\n--- FIX MODE ---\n" +
+        "You are revising an EXISTING design supplied as JSON to resolve a specific issue. Apply the change " +
+        "and return the FULL updated project as ONE JSON object in the schema above, preserving everything the " +
+        "change doesn't affect and keeping connection endpoints consistent with the components you define. " +
+        "For a strapping/conflicting GPIO, move the net to a real free GPIO on that chip; for a logic-level " +
+        "mismatch, insert a level shifter (add the part + nets); for a missing rail, add the connection. " +
+        "Output ONLY the JSON object — no prose, no markdown fences.";
 
     private static string BuildGenJson(Project.Project p)
     {
@@ -375,10 +399,10 @@ Include the main sketch and any helper/config files. Do NOT include the pin-map 
             Ref = Str(e, "ref", Str(e, "alias", "part")),
             Alias = Str(e, "alias", "PART"),
             Name = Str(e, "name", "Part"),
-            LogicV = e.TryGetProperty("logicV", out var lv) && lv.ValueKind == JsonValueKind.Number ? lv.GetDouble() : null,
+            LogicV = e.TryGetProperty("logicV", out var lv) && lv.ValueKind != JsonValueKind.Null ? Num(lv) : null,
             InputVRange = e.TryGetProperty("inputV", out var iv) && iv.ValueKind == JsonValueKind.Array && iv.GetArrayLength() >= 2
-                ? new[] { iv[0].GetDouble(), iv[1].GetDouble() } : null,
-            OutputV = e.TryGetProperty("outputV", out var ov) && ov.ValueKind == JsonValueKind.Number ? ov.GetDouble() : null,
+                ? new[] { Num(iv[0]), Num(iv[1]) } : null,
+            OutputV = e.TryGetProperty("outputV", out var ov) && ov.ValueKind != JsonValueKind.Null && ov.ValueKind != JsonValueKind.Array ? Num(ov) : null,
             CurrentMaActive = Int(e, "currentMa", 0),
             CapacityMah = Int(e, "capacityMah", 0),
             Pins = Arr(e, "pins").Select(p => new PinSpec
@@ -412,10 +436,10 @@ Include the main sketch and any helper/config files. Do NOT include the pin-map 
             {
                 Face = Str(c, "face", "side"), Shape = Str(c, "shape", "rect"), Label = Str(c, "label", ""),
                 Size = c.TryGetProperty("size", out var sz) && sz.ValueKind == JsonValueKind.Array
-                    ? sz.EnumerateArray().Select(x => x.GetDouble()).ToArray() : null,
-                D = c.TryGetProperty("d", out var d) && d.ValueKind == JsonValueKind.Number ? d.GetDouble() : null,
+                    ? sz.EnumerateArray().Select(x => Num(x)).ToArray() : null,
+                D = c.TryGetProperty("d", out var d) && d.ValueKind == JsonValueKind.Number ? Num(d) : null,
                 Pos = c.TryGetProperty("pos", out var p) && p.ValueKind == JsonValueKind.Array
-                    ? p.EnumerateArray().Select(x => x.GetDouble()).ToArray() : new double[] { 0, 0 },
+                    ? p.EnumerateArray().Select(x => Num(x)).ToArray() : new double[] { 0, 0 },
             }).ToList(),
         };
     }
@@ -462,9 +486,22 @@ Include the main sketch and any helper/config files. Do NOT include the pin-map 
     private static string Str(JsonElement e, string name, string fallback) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
     private static int Int(JsonElement e, string name, int fallback) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : fallback;
+        e.TryGetProperty(name, out var v) ? (int)Math.Round(Num(v, fallback)) : fallback;
     private static double Dbl(JsonElement e, string name, double fallback) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : fallback;
+        e.TryGetProperty(name, out var v) ? Num(v, fallback) : fallback;
     private static bool Bool(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && (v.ValueKind == JsonValueKind.True);
+
+    /// <summary>Read a number from a JSON value, tolerating decimals, out-of-range ints, and numeric strings
+    /// (the model sometimes returns e.g. capacityMah:3000.0, currentMa:0.08, or "2.0"). Never throws.</summary>
+    private static double Num(JsonElement v, double fallback = 0)
+    {
+        if (v.ValueKind == JsonValueKind.Number)
+            return v.TryGetDouble(out var d) ? d : fallback;
+        if (v.ValueKind == JsonValueKind.String && double.TryParse(
+                new string((v.GetString() ?? "").Where(ch => char.IsDigit(ch) || ch is '.' or '-' or '+').ToArray()),
+                System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s))
+            return s;
+        return fallback;
+    }
 }
