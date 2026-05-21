@@ -1,3 +1,6 @@
+using Foundry.Core.Kb;
+using Foundry.Core.Validation;
+
 namespace Foundry.Core.Project;
 
 /// <summary>
@@ -46,18 +49,7 @@ public static class DemoData
             new BomLine { Qty=1, Name="Cable Gland M12",             Mpn="M12-GLAND-PG7",     Price=0.85, Stock=28,   Lead="low",   Dist="Amazon",  Note="Sensor lead" },
         },
 
-        Connections = new()
-        {
-            new Connection { From="MCU.3V3",    To="SENSOR.VCC",  Net="power" },
-            new Connection { From="MCU.GND",    To="SENSOR.GND",  Net="ground" },
-            new Connection { From="MCU.GPIO34", To="SENSOR.AOUT", Net="signal" },
-            new Connection { From="BAT.+",      To="REG.VIN",     Net="power" },
-            new Connection { From="BAT.-",      To="REG.GND",     Net="ground" },
-            new Connection { From="REG.VOUT",   To="MCU.5V",      Net="power" },
-            new Connection { From="REG.GND",    To="MCU.GND",     Net="ground" },
-            new Connection { From="MCU.GPIO0",  To="BTN1.A",      Net="signal" },
-            new Connection { From="BTN1.B",     To="MCU.GND",     Net="ground" },
-        },
+        Connections = SoilMoistureConnections(),
 
         Enclosure = new Enclosure
         {
@@ -93,29 +85,7 @@ public static class DemoData
             },
         },
 
-        Findings = new()
-        {
-            new Finding { Severity="warn", Code="PWR-02", Num="W·02",
-                Title="Battery life sensitive to Wi-Fi duty cycle",
-                Description="Current draw of 84 mA active dominates the budget. At the configured 1 sample / 6 h, estimated life is 41 days. Reducing TX power to 8.5 dBm or batching reports would push past 60 days.",
-                Refs=new(){ "MCU.WIFI","BAT.+" }, Fix="Auto-tune duty" },
-            new Finding { Severity="warn", Code="PIN-04", Num="W·04",
-                Title="GPIO0 used as input — boot strap pin",
-                Description="GPIO0 is a strapping pin on ESP32. If the user-button is pressed during boot the chip will enter download mode. Consider GPIO13 or add a 10kΩ pull-up.",
-                Refs=new(){ "MCU.GPIO0","BTN1" }, Fix="Remap to GPIO13" },
-            new Finding { Severity="info", Code="BOM-01", Num="i·01",
-                Title="Cable gland M12 has limited stock at preferred distributor",
-                Description="28 units at Amazon; lead time may slip. Mouser MPN PG7-GLD substitute is in stock at $0.92.",
-                Refs=new(){ "M12-GLAND-PG7" }, Fix="Swap to PG7-GLD" },
-            new Finding { Severity="pass", Code="VLT-00", Num="OK",
-                Title="Voltage / logic levels consistent",
-                Description="All signal lines operate at 3.3V. Sensor output range (0–3V) is within MCU ADC range (0–3.3V). No 5V→3.3V mismatches detected.",
-                Refs=new(), Fix=null },
-            new Finding { Severity="pass", Code="I2C-00", Num="OK",
-                Title="No I²C address collisions",
-                Description="Project does not use I²C — check skipped.",
-                Refs=new(), Fix=null },
-        },
+        Findings = BuildDemoFindings(),
 
         Assembly = new()
         {
@@ -141,6 +111,39 @@ public static class DemoData
 
         Chat = CreateChatHistory(),
     };
+
+    public static List<Connection> SoilMoistureConnections() => new()
+    {
+        new Connection { From="MCU.3V3",    To="SENSOR.VCC",  Net="power" },
+        new Connection { From="MCU.GND",    To="SENSOR.GND",  Net="ground" },
+        new Connection { From="MCU.GPIO34", To="SENSOR.AOUT", Net="signal" },
+        new Connection { From="BAT.+",      To="REG.VIN",     Net="power" },
+        new Connection { From="BAT.-",      To="REG.GND",     Net="ground" },
+        new Connection { From="REG.VOUT",   To="MCU.5V",      Net="power" },
+        new Connection { From="REG.GND",    To="MCU.GND",     Net="ground" },
+        new Connection { From="MCU.GPIO0",  To="BTN1.A",      Net="signal" },
+        new Connection { From="BTN1.B",     To="MCU.GND",     Net="ground" },
+    };
+
+    /// <summary>
+    /// Demo findings = real engine output (electrical) + one curated sourcing info finding.
+    /// Demonstrates Phase 2: the warnings and passes are computed deterministically, not hand-written.
+    /// </summary>
+    public static List<Finding> BuildDemoFindings()
+    {
+        var findings = RulesEngine.Validate(SoilMoistureConnections(), ComponentKb.Demo(), batteryGoalDays: 60);
+
+        var sourcing = new Finding
+        {
+            Severity = "info", Code = "BOM-01", Num = "i·01",
+            Title = "Cable gland M12 has limited stock at preferred distributor",
+            Description = "28 units at Amazon; lead time may slip. Mouser MPN PG7-GLD substitute is in stock at $0.92.",
+            Refs = new() { "M12-GLAND-PG7" }, Fix = "Swap to PG7-GLD",
+        };
+        int firstPass = findings.FindIndex(f => f.Severity == "pass");
+        findings.Insert(firstPass < 0 ? findings.Count : firstPass, sourcing);
+        return findings;
+    }
 
     public static List<ChatMessage> CreateChatHistory() => new()
     {
