@@ -1,0 +1,57 @@
+<UserControl x:Class="Foundry.App.Views.NewProjectView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:Foundry.App.Controls">
+  <Border Background="{StaticResource Brush.Bg}">
+    <DockPanel>
+      <Border DockPanel.Dock="Top" Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Height="38">
+        <Button HorizontalAlignment="Left" Command="{Binding CancelCommand}" Background="Transparent" BorderThickness="0,0,1,0"
+                BorderBrush="{StaticResource Brush.Hairline}" Padding="18,0" Cursor="Hand">
+          <StackPanel Orientation="Horizontal">
+            <c:IconControl Glyph="chev" IconSize="10" Stroke="{StaticResource Brush.InkMute}"/>
+            <TextBlock Style="{StaticResource Kicker}" Margin="6,0,0,0" Text="ALL PROJECTS"/>
+          </StackPanel>
+        </Button>
+      </Border>
+
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="780" Margin="32,40,32,60">
+          <TextBlock Style="{StaticResource Kicker}" Text="NEW PROJECT"/>
+          <TextBlock Style="{StaticResource PageH1}" FontSize="60" LineHeight="68" Margin="0,8,0,0">
+            <Run Text="What do you want to "/><Run Text="build?" Foreground="{DynamicResource Brush.Accent}"/>
+          </TextBlock>
+          <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
+                     Text="Describe the device in plain language. Foundry picks parts, wires them, generates starter firmware and a printable enclosure, and validates the design — all from this one prompt."/>
+
+          <TextBox Style="{StaticResource FieldInput}" Margin="0,24,0,0" MinHeight="120" TextWrapping="Wrap" AcceptsReturn="True"
+                   VerticalContentAlignment="Top" FontSize="14"
+                   Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"/>
+
+          <WrapPanel Margin="0,14,0,0">
+            <TextBlock Style="{StaticResource Kicker}" VerticalAlignment="Center" Margin="0,0,12,8" Text="TRY"/>
+            <ItemsControl ItemsSource="{Binding Examples}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" FontSize="10" Padding="10,6"
+                          Command="{Binding DataContext.UseExampleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                          CommandParameter="{Binding}" Content="{Binding}"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </WrapPanel>
+
+          <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+            <Button Style="{StaticResource BtnPrimary}" Command="{Binding GenerateCommand}">
+              <StackPanel Orientation="Horizontal">
+                <c:IconControl Glyph="spark" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/>
+                <TextBlock Text="GENERATE"/>
+              </StackPanel>
+            </Button>
+            <TextBlock VerticalAlignment="Center" Margin="14,0,0,0" FontFamily="{StaticResource Font.Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" MaxWidth="460" Text="{Binding Status}"/>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+    </DockPanel>
+  </Border>
+</UserControl>

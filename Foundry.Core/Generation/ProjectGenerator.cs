@@ -1,0 +1,243 @@
+using System.Text.Json;
+using Foundry.Core.Ai;
+using Foundry.Core.Firmware;
+using Foundry.Core.Kb;
+using Foundry.Core.Project;
+using Foundry.Core.Validation;
+
+namespace Foundry.Core.Generation;
+
+public sealed record GenerationResult(bool Ok, Project.Project? Project, string Message);
+
+/// <summary>
+/// Turns a plain-language prompt into a populated <see cref="Project.Project"/> via one structured
+/// Claude call (PRD §7), then runs the deterministic engines over the result — validation findings,
+/// firmware/pin-map, and KPIs are computed locally, not taken from the model. Defensive parsing
+/// (PRD §13): a malformed response yields an error, never a crash.
+/// </summary>
+public sealed class ProjectGenerator
+{
+    private readonly IAnthropicClient _ai;
+    private readonly string _model;
+
+    public ProjectGenerator(IAnthropicClient ai, string? model = null)
+    {
+        _ai = ai;
+        _model = string.IsNullOrWhiteSpace(model) ? ModelCatalog.DefaultModelId : model;
+    }
+
+    private const string SystemPrompt = """
+You are Foundry, an AI hardware-design studio. Given a maker's request, design a complete, buildable
+electronics project and return it as ONE JSON object — no prose, no markdown fences. Use this exact shape:
+
+{
+ "title": "short product name",
+ "summary": "one or two sentences",
+ "subsystems": [{"role":"Controller","name":"ESP32 DevKit v1","mpn":"ESP32-DEVKITC-32E",
+                 "specs":[["Logic","3.3 V"],["Idle","12 mA"]]}],
+ "components": [{"alias":"MCU","ref":"esp32_devkit","name":"ESP32 DevKit v1","logicV":3.3,
+                 "inputV":[3.0,5.5],"currentMa":80,
+                 "pins":[{"name":"3V3","kind":"power"},{"name":"GND","kind":"ground"},
+                         {"name":"GPIO34","kind":"analog","inputOnly":true},
+                         {"name":"GPIO0","kind":"bidir","strapping":true}]}],
+ "bom": [{"qty":1,"name":"ESP32 DevKit v1","mpn":"ESP32-DEVKITC-32E","price":8.5,"stock":1442,
+          "lead":"Stock","dist":"DigiKey","note":"Wi-Fi MCU"}],
+ "connections": [{"from":"MCU.GPIO34","to":"SENSOR.AOUT","net":"signal"}],
+ "enclosure": {"inner":[62,48,26],"wall":2.0,"lid":"snap","standoffs":4,
+               "cutouts":[{"face":"side","shape":"rect","size":[9.5,6.5],"pos":[12,18],"label":"USB-C"},
+                          {"face":"top","shape":"circle","d":6,"pos":[40,10],"label":"Reset"}]},
+ "firmwarePlatform": "Arduino C++",
+ "assembly": [{"title":"Prepare the enclosure","body":"...","chips":["enclosure.stl"]}]
+}
+
+Rules: connection endpoints are "ALIAS.PIN" using the component aliases and pin names you define in
+"components". Net is one of power|ground|signal|i2c. Every component needs power and ground nets where
+applicable. Pin kind is power|ground|input|output|bidir|analog. Mark input-only and strapping pins.
+Keep it realistic and minimal. Output ONLY the JSON object.
+""";
+
+    public async Task<GenerationResult> GenerateAsync(string prompt, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey)
+            return new GenerationResult(false, null, "Add your Anthropic API key in Settings to generate a project.");
+        if (string.IsNullOrWhiteSpace(prompt))
+            return new GenerationResult(false, null, "Describe what you want to build.");
+
+        string raw;
+        try { raw = await _ai.CompleteAsync(SystemPrompt, prompt, _model, ct); }
+        catch (Exception ex) { return new GenerationResult(false, null, $"Generation failed: {ex.Message}"); }
+
+        var json = ExtractJson(raw);
+        if (json is null) return new GenerationResult(false, null, "The model did not return valid JSON. Try again.");
+
+        try
+        {
+            var project = Map(json, prompt);
+            return new GenerationResult(true, project, "Generated.");
+        }
+        catch (Exception ex)
+        {
+            return new GenerationResult(false, null, $"Could not parse the design: {ex.Message}");
+        }
+    }
+
+    /// <summary>Tolerate accidental markdown fences / leading prose by extracting the outermost JSON object.</summary>
+    private static string? ExtractJson(string raw)
+    {
+        int start = raw.IndexOf('{');
+        int end = raw.LastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+        var slice = raw[start..(end + 1)];
+        try { using var _ = JsonDocument.Parse(slice); return slice; }
+        catch { return null; }
+    }
+
+    private Project.Project Map(string json, string prompt)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var project = new Project.Project
+        {
+            Id = "p_" + DateTime.Now.ToString("HHmmss"),
+            Title = Str(root, "title", "Untitled project"),
+            Prompt = prompt,
+            Status = "READY",
+            Updated = DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+            Subsystems = MapSubsystems(root),
+            Bom = MapBom(root),
+            Connections = MapConnections(root),
+            Enclosure = MapEnclosure(root),
+            Assembly = MapAssembly(root),
+        };
+
+        var kb = new ComponentKb(MapComponents(root));
+        var platform = Str(root, "firmwarePlatform", "Arduino C++").Contains("python", StringComparison.OrdinalIgnoreCase)
+            ? FirmwarePlatform.MicroPython : FirmwarePlatform.ArduinoCpp;
+
+        project.Firmware = FirmwareGenerator.Generate(project.Connections, kb, platform);
+        project.Findings = RulesEngine.Validate(project.Connections, kb, batteryGoalDays: 0);
+        project.Validation = project.Findings.Any(f => f.Severity == "fail") ? "fail"
+            : project.Findings.Any(f => f.Severity == "warn") ? "warn" : "pass";
+
+        var peakMa = kb.All.Sum(c => c.CurrentMaActive);
+        project.Kpis = new ProjectKpis
+        {
+            Parts = project.Bom.Sum(b => b.Qty),
+            Cost = project.Bom.Sum(b => b.Qty * b.Price),
+            CurrentMa = peakMa,
+            BatteryDays = 0,
+            PrintGrams = (int)EstimatePrintGrams(project.Enclosure),
+        };
+
+        project.Chat = new List<ChatMessage>
+        {
+            new() { Role = "user", Text = prompt, Time = DateTime.Now.ToString("HH:mm") },
+            new() { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"),
+                    Text = Str(root, "summary", "Designed your project. Review the tabs, then iterate by chat."),
+                    Pipeline = IPipeline.Stages.Select(s => new PipelineStage(s, "done")).ToList() },
+        };
+        return project;
+    }
+
+    private static List<Subsystem> MapSubsystems(JsonElement root) =>
+        Arr(root, "subsystems").Select((e, i) => new Subsystem
+        {
+            Id = "s" + i, Role = Str(e, "role", "Subsystem"), Name = Str(e, "name", "Part"), Mpn = Str(e, "mpn", ""),
+            Specs = Arr(e, "specs").Where(p => p.ValueKind == JsonValueKind.Array && p.GetArrayLength() >= 2)
+                .Select(p => new SpecPair(p[0].GetString() ?? "", p[1].GetString() ?? "")).ToList(),
+        }).ToList();
+
+    private static List<BomLine> MapBom(JsonElement root) =>
+        Arr(root, "bom").Select(e => new BomLine
+        {
+            Qty = Int(e, "qty", 1), Name = Str(e, "name", "Part"), Mpn = Str(e, "mpn", ""),
+            Price = Dbl(e, "price", 0), Stock = Int(e, "stock", 0),
+            Lead = Str(e, "lead", "—"), Dist = Str(e, "dist", "DigiKey"), Note = Str(e, "note", ""),
+        }).ToList();
+
+    private static List<Connection> MapConnections(JsonElement root) =>
+        Arr(root, "connections").Select(e => new Connection
+        {
+            From = Str(e, "from", ""), To = Str(e, "to", ""), Net = Str(e, "net", "signal"),
+        }).Where(c => c.From.Length > 0 && c.To.Length > 0).ToList();
+
+    private static List<ComponentSpec> MapComponents(JsonElement root) =>
+        Arr(root, "components").Select(e => new ComponentSpec
+        {
+            Ref = Str(e, "ref", Str(e, "alias", "part")),
+            Alias = Str(e, "alias", "PART"),
+            Name = Str(e, "name", "Part"),
+            LogicV = e.TryGetProperty("logicV", out var lv) && lv.ValueKind == JsonValueKind.Number ? lv.GetDouble() : null,
+            InputVRange = e.TryGetProperty("inputV", out var iv) && iv.ValueKind == JsonValueKind.Array && iv.GetArrayLength() >= 2
+                ? new[] { iv[0].GetDouble(), iv[1].GetDouble() } : null,
+            OutputV = e.TryGetProperty("outputV", out var ov) && ov.ValueKind == JsonValueKind.Number ? ov.GetDouble() : null,
+            CurrentMaActive = Int(e, "currentMa", 0),
+            CapacityMah = Int(e, "capacityMah", 0),
+            Pins = Arr(e, "pins").Select(p => new PinSpec
+            {
+                Name = Str(p, "name", "?"),
+                Kind = ParseKind(Str(p, "kind", "bidir")),
+                InputOnly = Bool(p, "inputOnly"),
+                Strapping = Bool(p, "strapping"),
+            }).ToList(),
+        }).ToList();
+
+    private static Enclosure MapEnclosure(JsonElement root)
+    {
+        if (!root.TryGetProperty("enclosure", out var e) || e.ValueKind != JsonValueKind.Object)
+            return new Enclosure { Inner = new double[] { 60, 40, 25 }, Wall = 2.0, Lid = "snap" };
+        return new Enclosure
+        {
+            Inner = e.TryGetProperty("inner", out var inner) && inner.ValueKind == JsonValueKind.Array
+                ? inner.EnumerateArray().Select(x => x.GetDouble()).ToArray() : new double[] { 60, 40, 25 },
+            Wall = Dbl(e, "wall", 2.0),
+            Lid = Str(e, "lid", "snap"),
+            Standoffs = Int(e, "standoffs", 4),
+            MassGrams = 0,
+            PrintTime = "",
+            Cutouts = Arr(e, "cutouts").Select(c => new Cutout
+            {
+                Face = Str(c, "face", "side"), Shape = Str(c, "shape", "rect"), Label = Str(c, "label", ""),
+                Size = c.TryGetProperty("size", out var sz) && sz.ValueKind == JsonValueKind.Array
+                    ? sz.EnumerateArray().Select(x => x.GetDouble()).ToArray() : null,
+                D = c.TryGetProperty("d", out var d) && d.ValueKind == JsonValueKind.Number ? d.GetDouble() : null,
+                Pos = c.TryGetProperty("pos", out var p) && p.ValueKind == JsonValueKind.Array
+                    ? p.EnumerateArray().Select(x => x.GetDouble()).ToArray() : new double[] { 0, 0 },
+            }).ToList(),
+        };
+    }
+
+    private static List<AssemblyStep> MapAssembly(JsonElement root) =>
+        Arr(root, "assembly").Select((e, i) => new AssemblyStep
+        {
+            N = i + 1, Title = Str(e, "title", $"Step {i + 1}"), Body = Str(e, "body", ""),
+            Chips = Arr(e, "chips").Select(c => c.GetString() ?? "").Where(s => s.Length > 0).ToList(),
+        }).ToList();
+
+    private static double EstimatePrintGrams(Enclosure e)
+    {
+        if (e.Inner.Length < 3) return 0;
+        double l = e.Inner[0] + 2 * e.Wall, w = e.Inner[1] + 2 * e.Wall, h = e.Inner[2] + e.Wall;
+        double shellCm3 = (l * w * h - e.Inner[0] * e.Inner[1] * e.Inner[2]) / 1000.0;
+        return Math.Round(shellCm3 * 1.24 * 0.3); // PETG density × ~30% infill-equivalent wall
+    }
+
+    private static PinKind ParseKind(string k) => k.ToLowerInvariant() switch
+    {
+        "power" => PinKind.Power, "ground" => PinKind.Ground, "input" => PinKind.Input,
+        "output" => PinKind.Output, "analog" => PinKind.Analog, _ => PinKind.Bidir,
+    };
+
+    // ---- defensive JSON helpers ----
+    private static IEnumerable<JsonElement> Arr(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var a) && a.ValueKind == JsonValueKind.Array ? a.EnumerateArray() : Enumerable.Empty<JsonElement>();
+    private static string Str(JsonElement e, string name, string fallback) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
+    private static int Int(JsonElement e, string name, int fallback) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : fallback;
+    private static double Dbl(JsonElement e, string name, double fallback) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : fallback;
+    private static bool Bool(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var v) && (v.ValueKind == JsonValueKind.True);
+}

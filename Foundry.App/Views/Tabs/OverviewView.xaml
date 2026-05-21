@@ -12,11 +12,16 @@
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Style="{StaticResource Kicker}"
-                     Text="{Binding Project.Id, StringFormat='{}{0} · UPDATED 2026-05-20 14:21'}"/>
-          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
-            <Run Text="Cap. Soil Moisture "/><Run Text="Sentinel." Foreground="{DynamicResource Brush.Accent}"/>
+          <TextBlock Style="{StaticResource Kicker}">
+            <TextBlock.Text>
+              <MultiBinding StringFormat="{}{0} · UPDATED {1}">
+                <Binding Path="Project.Id"/>
+                <Binding Path="Project.Updated"/>
+              </MultiBinding>
+            </TextBlock.Text>
           </TextBlock>
+          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68"
+                     Text="{Binding Project.Title}"/>
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13"
                      TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0" HorizontalAlignment="Left"
                      Text="Battery-powered, IP65 capacitive sensor that texts you when soil is dry. Compiled from a single prompt — every output below is derived from the same canonical Project document, so it stays mutually consistent as you iterate."/>

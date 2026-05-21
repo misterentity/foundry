@@ -41,7 +41,8 @@ public partial class App : Application
         switch (Environment.GetEnvironmentVariable("FOUNDRY_START"))
         {
             case "projects": main.ShowProjects(); break;
-            case "workspace": main.ShowWorkspace(); break;
+            case "newproject": main.ShowNewProject(); break;
+            case "workspace": main.OpenSample(); break;
             case "settings": main.ShowSettings(); break;
         }
 

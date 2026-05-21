@@ -32,6 +32,9 @@
       <DataTemplate DataType="{x:Type vm:ProjectsViewModel}">
         <views:ProjectsView/>
       </DataTemplate>
+      <DataTemplate DataType="{x:Type vm:NewProjectViewModel}">
+        <views:NewProjectView/>
+      </DataTemplate>
       <DataTemplate DataType="{x:Type vm:ShellViewModel}">
         <views:ShellView/>
       </DataTemplate>

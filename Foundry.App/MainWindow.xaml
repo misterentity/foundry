@@ -110,19 +110,11 @@
               <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Margin="0,0,22,0">
                   <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                  <TextBlock Text="CLAUDE · SONNET 4.6" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,22,0">
-                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Ok}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                  <TextBlock Text="SIDECAR build123d · 127.0.0.1:8731" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,22,0">
-                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Ok}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                  <TextBlock Text="NEXAR OK" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
+                  <TextBlock Text="FOUNDRY" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
-                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Warn}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                  <TextBlock Text="DIGIKEY RATE-LIMIT 40%" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
+                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Ok}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                  <TextBlock Text="LOCAL-FIRST · WINDOWS 11" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
                 </StackPanel>
               </StackPanel>
 
