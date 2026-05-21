@@ -2,6 +2,8 @@
 fastapi>=0.110
 uvicorn>=0.29
 
-# Optional fidelity upgrade (boolean cutouts, fillets, STEP export). The sidecar
-# falls back to the built-in mesh builder in enclosure.py when this is absent.
-# build123d>=0.7
+# CSG enclosure builder (real boolean cutouts + standoffs). enclosure.py falls back to
+# the dependency-free box shell if these are missing, so the sidecar always runs.
+trimesh>=4.4
+manifold3d>=2.5
+numpy>=1.26
