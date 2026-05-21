@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -9,6 +10,8 @@ namespace Foundry.App;
 
 public partial class MainWindow : Window
 {
+    private bool _forceClose;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -44,6 +47,24 @@ public partial class MainWindow : Window
         encoder.Frames.Add(BitmapFrame.Create(rtb));
         using var fs = File.Create(path);
         encoder.Save(fs);
+    }
+
+    /// <summary>Really close the window (used by tray Quit) instead of hiding to tray.</summary>
+    public void ForceClose()
+    {
+        _forceClose = true;
+        Close();
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        // App lives in the tray: the X / close button hides the window instead of exiting.
+        if (!_forceClose && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FOUNDRY_SHOT")))
+        {
+            e.Cancel = true;
+            Hide();
+        }
+        base.OnClosing(e);
     }
 
     private void Titlebar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

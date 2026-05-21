@@ -1,0 +1,39 @@
+name: release
+
+# Tag a version (e.g. v0.4.2) to build the installer and publish a GitHub Release.
+# The in-app updater (tray → Check for updates) downloads the FoundrySetup.exe asset.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Test
+        run: dotnet test Foundry.Tests -c Release
+
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish Foundry.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o build/publish
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" build\foundry.iss'
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/AppPackages/FoundrySetup.exe
+          generate_release_notes: true

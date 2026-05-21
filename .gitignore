@@ -26,3 +26,6 @@ build/AppPackages/
 
 # Local Claude settings
 .claude/settings.local.json
+
+# Publish output
+build/publish/

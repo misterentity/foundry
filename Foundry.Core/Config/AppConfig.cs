@@ -19,6 +19,10 @@ public sealed class AppConfig
     /// <summary>STL | 3MF | STEP</summary>
     public string EnclosureFormat { get; set; } = "STL";
     public string Units { get; set; } = "mm";
+
+    // ---- updates (GitHub releases) ----
+    public string UpdateOwner { get; set; } = AppInfo.DefaultUpdateOwner;
+    public string UpdateRepo { get; set; } = AppInfo.DefaultUpdateRepo;
 }
 
 public static class ConfigStore

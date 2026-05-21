@@ -144,6 +144,30 @@
             </StackPanel>
           </Border>
 
+          <!-- UPDATES -->
+          <Border Style="{StaticResource Card}" Margin="0,18,0,0">
+            <StackPanel>
+              <Grid>
+                <TextBlock Style="{StaticResource Serif}" FontSize="24" Text="Updates"/>
+                <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource Brush.Accent}" Text="{Binding CurrentVersion}"/>
+              </Grid>
+              <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,8,0,0"
+                         Text="Foundry checks GitHub Releases for newer versions and can download + run the installer. Also available from the system-tray icon."/>
+              <Grid Margin="0,16,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                  <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Margin="0,0,0,8" Text="GITHUB OWNER"/>
+                  <TextBox Style="{StaticResource FieldInput}" Text="{Binding UpdateOwner}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                  <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Margin="0,0,0,8" Text="REPO"/>
+                  <TextBox Style="{StaticResource FieldInput}" Text="{Binding UpdateRepo}"/>
+                </StackPanel>
+                <Button Grid.Column="2" Style="{StaticResource Btn}" VerticalAlignment="Bottom" Command="{Binding CheckUpdatesCommand}" Content="CHECK NOW"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
           <!-- SAVE -->
           <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
             <Button Style="{StaticResource BtnPrimary}" Command="{Binding SaveCommand}" Content="SAVE SETTINGS"/>

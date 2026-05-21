@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Foundry.Core;
 using Foundry.Core.Ai;
 using Foundry.Core.Config;
 using Foundry.Core.Security;
@@ -33,6 +35,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _firmwarePlatform = _config.FirmwarePlatform;
         _outputFolder = _config.OutputFolder;
         _enclosureFormat = _config.EnclosureFormat;
+        _updateOwner = _config.UpdateOwner;
+        _updateRepo = _config.UpdateRepo;
 
         foreach (var m in ModelCatalog.Fallback) Models.Add(m);
         RefreshSummaries();
@@ -66,6 +70,11 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _testResult = "";
     [ObservableProperty] private bool _isTesting;
     [ObservableProperty] private string _saveResult = "";
+
+    // ---- updates ----
+    [ObservableProperty] private string _updateOwner;
+    [ObservableProperty] private string _updateRepo;
+    public string CurrentVersion => $"v{AppInfo.Version}";
 
     private void RefreshSummaries()
     {
@@ -136,8 +145,17 @@ public sealed partial class SettingsViewModel : ObservableObject
         _config.FirmwarePlatform = FirmwarePlatform;
         _config.OutputFolder = OutputFolder;
         _config.EnclosureFormat = EnclosureFormat;
+        _config.UpdateOwner = UpdateOwner;
+        _config.UpdateRepo = UpdateRepo;
         ConfigStore.Save(_config);
         SaveResult = $"Saved · {DateTime.Now:HH:mm}";
+    }
+
+    [RelayCommand]
+    private async Task CheckUpdates()
+    {
+        Save(); // persist owner/repo so the check uses the current values
+        if (Application.Current is App app) await app.CheckForUpdatesAsync(interactive: true);
     }
 
     [RelayCommand] private void Back() => _onBack();

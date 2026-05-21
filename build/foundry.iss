@@ -1,12 +1,15 @@
-; Foundry — Inno Setup script (unsigned dev installer, PRD §11/§15 Phase 6).
+; Foundry — Inno Setup script (unsigned installer, PRD §11/§15 Phase 6).
 ; Build:  iscc build\foundry.iss   (requires Inno Setup 6)
-; Expects build\publish (dotnet publish output) and sidecar\dist\foundry-cad (PyInstaller bundle).
+; Expects build\publish (dotnet publish output). The frozen Python CAD sidecar
+; (sidecar\dist\foundry-cad, optional) is bundled if present.
 
 #define AppName "Foundry"
 #define AppVersion "0.4.1"
 #define AppPublisher "Foundry"
 
 [Setup]
+; Stable AppId so the updater's installer upgrades in place instead of side-by-side.
+AppId={{8F3A2C71-2E2F-4D5E-9B7A-F0C1D2E3A401}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
@@ -18,13 +21,16 @@ OutputBaseFilename=FoundrySetup
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64
 WizardStyle=modern
+CloseApplications=yes
+RestartApplications=no
 
 [Files]
 ; WPF app (from: dotnet publish Foundry.App -c Release -r win-x64 -o build\publish)
 Source: "publish\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
-; Frozen Python CAD sidecar (from: pyinstaller build\sidecar.spec)
-Source: "..\sidecar\dist\foundry-cad\*"; DestDir: "{app}\sidecar"; Flags: recursesubdirs createallsubdirs
+; Frozen Python CAD sidecar (optional — only if pyinstaller build\sidecar.spec was run)
+Source: "..\sidecar\dist\foundry-cad\*"; DestDir: "{app}\sidecar"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\Foundry.exe"
