@@ -13,14 +13,26 @@ See [`PRD.md`](PRD.md) for the full spec and [`PLAN.md`](PLAN.md) for the phased
 
 ## Status
 
-- **Phase 0 (shell)** and **Phase 1 (core clone, parity)** are complete: the full UI —
-  onboarding, project library, and the workspace (rail / main / chat) with all seven tabs
-  (Overview, BOM, Wiring, Enclosure, Firmware, Validation, Guide) — bound to the canonical
-  Project. Wiring and enclosure are drawn as vector diagrams; firmware shows a syntax-highlighted
-  code view.
-- AI calls sit behind `IAnthropicClient` / `IPipeline` with **offline stubs**, so the app runs
-  with no API key. Phases 2–6 (validation engine, firmware gen, build123d CAD sidecar + 3D
-  preview, live sourcing, packaging) are planned in `PLAN.md`.
+All phased milestones (PRD §15) are implemented:
+
+- **Phase 0–1 — shell + core clone:** onboarding, project library, and the workspace
+  (rail / main / chat) with all seven tabs, bound to the canonical Project. Real Anthropic
+  Messages API (`/v1/models` + Messages with prompt caching) behind `IAnthropicClient`, with
+  offline stubs so the app runs with no key.
+- **Phase 2 — validation:** deterministic rules engine (power budget, voltage/logic levels,
+  pin conflicts, strapping/input-only pins, power-ground sanity, I²C collisions); demo findings
+  are engine-generated.
+- **Phase 3 — firmware:** `pinmap.h` derived from the netlist + Arduino C++/MicroPython project,
+  exportable to a folder.
+- **Phase 4 — enclosure CAD:** Python sidecar (FastAPI on 127.0.0.1) turns the schema into an STL;
+  HelixToolkit 3D preview with graceful offline fallback.
+- **Phase 5 — sourcing:** Nexar/Octopart provider (+ offline fallback), per-MPN caching, cart
+  links + DigiKey BOM CSV, live/offline BOM tab.
+- **Phase 6 — settings + exports + packaging:** full Settings view (keys, model dropdown,
+  generation/export/sourcing), BOM/guide/firmware/STL exports, and `build/` packaging scaffolding.
+
+30 unit tests pass. Open polish items: staged structured generation (PRD §7), finding auto-fix,
+image/PDF exports, and building a signed installer.
 
 ## Build & run
 
