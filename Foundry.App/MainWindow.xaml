@@ -1,0 +1,139 @@
+<Window x:Class="Foundry.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:Foundry.App.Controls"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Foundry — AI Hardware Design Studio"
+        Height="960" Width="1500" MinHeight="640" MinWidth="1040"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" Background="Black"
+        FontFamily="{StaticResource Font.Mono}" FontSize="13"
+        Foreground="{StaticResource Brush.Ink}"
+        TextOptions.TextFormattingMode="Ideal"
+        UseLayoutRounding="True">
+
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0"/>
+  </shell:WindowChrome.WindowChrome>
+
+  <!-- .win-wrap : gradient backdrop + padding -->
+  <Grid Background="{StaticResource Brush.WinWrap}">
+    <!-- centered .win -->
+    <Border MaxWidth="1640" Margin="18"
+            Background="{StaticResource Brush.Bg}"
+            BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
+      <Border.Effect>
+        <DropShadowEffect BlurRadius="60" ShadowDepth="20" Direction="270" Opacity="0.7" Color="Black"/>
+      </Border.Effect>
+
+      <Grid>
+        <!-- blueprint grid behind everything -->
+        <Rectangle Fill="{StaticResource Brush.BlueprintGrid}" IsHitTestVisible="False"/>
+
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="36"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="28"/>
+          </Grid.RowDefinitions>
+
+          <!-- ===================== TITLEBAR ===================== -->
+          <Border Grid.Row="0" x:Name="Titlebar"
+                  Background="{StaticResource Brush.Titlebar}"
+                  BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1"
+                  MouseLeftButtonDown="Titlebar_MouseLeftButtonDown">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+
+              <!-- brand -->
+              <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                <Border Width="14" Height="14" VerticalAlignment="Center">
+                  <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                      <GradientStop Color="{StaticResource Color.Accent}" Offset="0.5"/>
+                      <GradientStop Color="#FFFFB38A" Offset="0.5"/>
+                    </LinearGradientBrush>
+                  </Border.Background>
+                  <Border Margin="4" Background="#FF000000"/>
+                </Border>
+                <TextBlock Text="FOUNDRY" Margin="8,0,0,0" VerticalAlignment="Center"
+                           FontSize="11" Foreground="{StaticResource Brush.InkSoft}"/>
+              </StackPanel>
+
+              <!-- crumb -->
+              <ItemsControl Grid.Column="1" ItemsSource="{Binding Crumbs}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="/" Margin="8,0" Foreground="{StaticResource Brush.Hairline3}" FontSize="11"/>
+                      <TextBlock Text="{Binding}" FontSize="11" Foreground="{StaticResource Brush.InkMute}"/>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <!-- caption buttons -->
+              <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Width="46" Style="{StaticResource CaptionButton}" Click="Minimize_Click">
+                  <c:IconControl Glyph="minimize" IconSize="12" Stroke="{StaticResource Brush.InkMute}"/>
+                </Button>
+                <Button Width="46" Style="{StaticResource CaptionButton}" Click="Maximize_Click">
+                  <c:IconControl Glyph="maximize" IconSize="11" Stroke="{StaticResource Brush.InkMute}"/>
+                </Button>
+                <Button Width="46" Style="{StaticResource CaptionButtonClose}" Click="Close_Click">
+                  <c:IconControl Glyph="close" IconSize="11" Stroke="{StaticResource Brush.InkMute}"/>
+                </Button>
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <!-- ===================== SCREEN HOST ===================== -->
+          <ContentControl Grid.Row="1" Content="{Binding CurrentView}"/>
+
+          <!-- ===================== STATUS BAR ===================== -->
+          <Border Grid.Row="2" Background="{StaticResource Brush.Surface0}"
+                  BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,1,0,0">
+            <Grid Margin="14,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+
+              <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Margin="0,0,22,0">
+                  <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                  <TextBlock Text="CLAUDE · SONNET 4.6" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,22,0">
+                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Ok}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                  <TextBlock Text="SIDECAR build123d · 127.0.0.1:8731" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,22,0">
+                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Ok}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                  <TextBlock Text="NEXAR OK" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <Rectangle Width="6" Height="6" Fill="{StaticResource Brush.Warn}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                  <TextBlock Text="DIGIKEY RATE-LIMIT 40%" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="DESIGN AID · VERIFY BEFORE YOU BUILD" Style="{StaticResource Kicker}" Margin="0,0,24,0"/>
+                <TextBlock Text="v0.4.1" Style="{StaticResource Kicker}"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+        </Grid>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

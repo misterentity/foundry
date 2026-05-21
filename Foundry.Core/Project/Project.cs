@@ -1,0 +1,181 @@
+using System.Text.Json.Serialization;
+
+namespace Foundry.Core.Project;
+
+/// <summary>
+/// The canonical Project document (PRD §6) — the single source of truth every
+/// generator reads from and writes to. Shaped to also carry the presentation
+/// fields the prototype binds (Kpis, Subsystems, Bom, Findings) so the UI maps
+/// 1:1 without an extra view-model translation layer.
+///
+/// Invariant (PRD §6): <see cref="Connections"/> and component pins are
+/// authoritative; wiring, pin maps, validation, and enclosure cutouts are derived.
+/// </summary>
+public sealed class Project
+{
+    public string Id { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Prompt { get; set; } = "";
+
+    /// <summary>READY | DRAFT | GENERATING …</summary>
+    public string Status { get; set; } = "DRAFT";
+
+    /// <summary>pass | warn | fail (overall validation rollup).</summary>
+    public string Validation { get; set; } = "pass";
+
+    public string Updated { get; set; } = "";
+
+    public ProjectKpis Kpis { get; set; } = new();
+    public List<Subsystem> Subsystems { get; set; } = new();
+    public List<BomLine> Bom { get; set; } = new();
+    public List<Connection> Connections { get; set; } = new();
+    public Enclosure Enclosure { get; set; } = new();
+    public Firmware Firmware { get; set; } = new();
+    public List<Finding> Findings { get; set; } = new();
+    public List<AssemblyStep> Assembly { get; set; } = new();
+    public List<ChatMessage> Chat { get; set; } = new();
+}
+
+public sealed class ProjectKpis
+{
+    public int Parts { get; set; }
+    public double Cost { get; set; }
+    public int CurrentMa { get; set; }
+    public int BatteryDays { get; set; }
+    public int PrintGrams { get; set; }
+}
+
+public sealed class Subsystem
+{
+    public string Id { get; set; } = "";
+    public string Role { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Mpn { get; set; } = "";
+    /// <summary>label/value spec pairs shown in the Overview architecture grid.</summary>
+    public List<SpecPair> Specs { get; set; } = new();
+}
+
+public sealed class SpecPair
+{
+    public SpecPair() { }
+    public SpecPair(string key, string value) { Key = key; Value = value; }
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+}
+
+public sealed class BomLine
+{
+    public int Qty { get; set; }
+    public string Name { get; set; } = "";
+    public string Mpn { get; set; } = "";
+    public double Price { get; set; }
+    public int Stock { get; set; }
+    public string Lead { get; set; } = "";
+    public string Dist { get; set; } = "";
+    public string Note { get; set; } = "";
+
+    [JsonIgnore] public double Extended => Qty * Price;
+    [JsonIgnore] public bool LowStock => Stock < 100;
+}
+
+/// <summary>A net in the authoritative netlist (PRD §6 connections).</summary>
+public sealed class Connection
+{
+    public string From { get; set; } = "";
+    public string To { get; set; } = "";
+    /// <summary>power | ground | signal | i2c</summary>
+    public string Net { get; set; } = "signal";
+}
+
+public sealed class Enclosure
+{
+    /// <summary>inner [L, W, H] mm.</summary>
+    public double[] Inner { get; set; } = new double[] { 0, 0, 0 };
+    public double Wall { get; set; } = 2.0;
+    /// <summary>snap | screw</summary>
+    public string Lid { get; set; } = "snap";
+    public List<Cutout> Cutouts { get; set; } = new();
+    public int Standoffs { get; set; }
+    public int MassGrams { get; set; }
+    public string PrintTime { get; set; } = "";
+}
+
+public sealed class Cutout
+{
+    /// <summary>side | top | bottom | front …</summary>
+    public string Face { get; set; } = "side";
+    /// <summary>rect | circle</summary>
+    public string Shape { get; set; } = "rect";
+    /// <summary>[w, h] for rect.</summary>
+    public double[]? Size { get; set; }
+    /// <summary>diameter for circle.</summary>
+    public double? D { get; set; }
+    public double[] Pos { get; set; } = new double[] { 0, 0 };
+    public string Label { get; set; } = "";
+
+    /// <summary>Human dimension string for the readout, e.g. "9.5 × 6.5 mm" or "⌀ 12 mm".</summary>
+    [JsonIgnore]
+    public string DimsText => Shape == "circle"
+        ? $"⌀ {D} mm"
+        : Size is { Length: >= 2 } s ? $"{s[0]} × {s[1]} mm" : "";
+}
+
+public sealed class Firmware
+{
+    public string Platform { get; set; } = "Arduino C++";
+    public string Board { get; set; } = "";
+    public List<FirmwareFile> Files { get; set; } = new();
+    /// <summary>[name, version] library pairs.</summary>
+    public List<SpecPair> Libraries { get; set; } = new();
+}
+
+public sealed class FirmwareFile
+{
+    public string Name { get; set; } = "";
+    public string Path { get; set; } = "";
+    public bool Active { get; set; }
+    /// <summary>Generated source (Phase 3 fills this from the netlist).</summary>
+    public string Content { get; set; } = "";
+}
+
+/// <summary>A deterministic validation finding (PRD §8.8).</summary>
+public sealed class Finding
+{
+    /// <summary>info | warn | fail | pass</summary>
+    public string Severity { get; set; } = "info";
+    public string Code { get; set; } = "";
+    /// <summary>Short display token, e.g. "W·02" / "OK".</summary>
+    public string Num { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Description { get; set; } = "";
+    public List<string> Refs { get; set; } = new();
+    /// <summary>Suggested auto-fix label, or null when no action needed.</summary>
+    public string? Fix { get; set; }
+}
+
+public sealed class AssemblyStep
+{
+    public int N { get; set; }
+    public string Title { get; set; } = "";
+    public string Body { get; set; } = "";
+    public List<string> Chips { get; set; } = new();
+}
+
+public sealed class ChatMessage
+{
+    /// <summary>user | assistant</summary>
+    public string Role { get; set; } = "assistant";
+    public string Text { get; set; } = "";
+    public string Time { get; set; } = "";
+    /// <summary>Per-stage pipeline state shown under assistant turns.</summary>
+    public List<PipelineStage>? Pipeline { get; set; }
+}
+
+public sealed class PipelineStage
+{
+    public PipelineStage() { }
+    public PipelineStage(string stage, string state) { Stage = stage; State = state; }
+    public string Stage { get; set; } = "";
+    /// <summary>done | live | pending</summary>
+    public string State { get; set; } = "pending";
+}

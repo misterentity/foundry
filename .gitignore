@@ -1,0 +1,28 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+.vs/
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Python sidecar
+sidecar/__pycache__/
+sidecar/.venv/
+sidecar/dist/
+sidecar/build/
+*.pyc
+
+# Packaging
+build/AppPackages/
+*.msix
+
+# Local Claude settings
+.claude/settings.local.json

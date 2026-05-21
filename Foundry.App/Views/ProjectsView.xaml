@@ -1,0 +1,116 @@
+<UserControl x:Class="Foundry.App.Views.ProjectsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:Foundry.App.Controls">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource Brush.Bg}">
+    <StackPanel>
+
+      <!-- HERO -->
+      <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="44,44,44,28">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Kicker}" Text="Library · 24 projects · 1.4 GB"/>
+          <TextBlock Style="{StaticResource Serif}" FontSize="84" Margin="0,12,0,0" LineHeight="92">
+            <Run Text="Your "/><Run Text="foundry." Foreground="{DynamicResource Brush.Accent}" FontStyle="Italic"/>
+          </TextBlock>
+        </StackPanel>
+      </Border>
+
+      <!-- TOOLBAR -->
+      <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Border Grid.Column="0" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0">
+            <StackPanel Orientation="Horizontal" Margin="22,14">
+              <c:IconControl Glyph="search" IconSize="14" VerticalAlignment="Center" Margin="0,0,10,0"/>
+              <TextBox Width="360" VerticalAlignment="Center" Background="Transparent" BorderThickness="0"
+                       FontFamily="{StaticResource Font.Mono}" FontSize="12" Foreground="{StaticResource Brush.Ink}"
+                       Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"/>
+            </StackPanel>
+          </Border>
+          <Button Grid.Column="1" Style="{StaticResource Btn}" Background="Transparent" BorderThickness="1,0,0,0" Padding="14,0">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="All" Margin="0,0,8,0"/><c:IconControl Glyph="chevD" IconSize="10"/></StackPanel>
+          </Button>
+          <Button Grid.Column="2" Style="{StaticResource Btn}" Background="Transparent" BorderThickness="1,0,0,0" Padding="14,0">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Updated" Margin="0,0,8,0"/><c:IconControl Glyph="chevD" IconSize="10"/></StackPanel>
+          </Button>
+          <Button Grid.Column="3" Style="{StaticResource Btn}" Background="Transparent" BorderThickness="1,0,0,0" Padding="14,0"
+                  Foreground="{DynamicResource Brush.Accent}" Command="{Binding NewCommand}">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="plus" IconSize="12" Stroke="{DynamicResource Brush.Accent}" Margin="0,0,8,0"/><TextBlock Text="NEW"/></StackPanel>
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- FEATURED -->
+      <StackPanel Margin="44,32,44,0">
+        <TextBlock Style="{StaticResource Kicker}" Text="Continue"/>
+        <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Cursor="Hand"
+                Background="{StaticResource Brush.AccentWash}">
+          <Border.InputBindings>
+            <MouseBinding MouseAction="LeftClick" Command="{Binding OpenCommand}" CommandParameter="{Binding Featured}"/>
+          </Border.InputBindings>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Border Grid.Column="0" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0" Padding="32,28">
+              <StackPanel>
+                <Grid>
+                  <TextBlock Style="{StaticResource KickerAccent}" Text="{Binding Featured.Id, StringFormat='{}{0} · Active'}"/>
+                  <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Text="{Binding Featured.Updated}"/>
+                </Grid>
+                <TextBlock Style="{StaticResource Serif}" FontSize="44" Margin="0,10,0,0" LineHeight="52" TextWrapping="Wrap" Text="{Binding Featured.Title}"/>
+                <TextBlock Foreground="{StaticResource Brush.InkSoft}" FontFamily="{StaticResource Font.Mono}" FontSize="13" TextWrapping="Wrap" Margin="0,12,0,0" Text="{Binding Featured.Prompt}"/>
+                <WrapPanel Margin="0,20,0,0">
+                  <Border Style="{StaticResource Tag}" Background="{StaticResource Brush.TagWarnBg}" BorderBrush="{StaticResource Brush.TagWarnBorder}" Margin="0,0,8,0"><TextBlock Style="{StaticResource TagText}" Foreground="{StaticResource Brush.Warn}" Text="2 warnings"/></Border>
+                  <Border Style="{StaticResource Tag}" Margin="0,0,8,0"><TextBlock Style="{StaticResource TagText}" Text="8 parts"/></Border>
+                  <Border Style="{StaticResource Tag}" Margin="0,0,8,0"><TextBlock Style="{StaticResource TagText}" Text="$38.42"/></Border>
+                  <Border Style="{StaticResource Tag}" Background="{StaticResource Brush.TagAccentBg}" BorderBrush="{StaticResource Brush.TagAccentBorder}"><TextBlock Style="{StaticResource TagText}" Foreground="{DynamicResource Brush.Accent}" Text="Firmware ready"/></Border>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+            <c:MiniDiagram Grid.Column="1" Margin="24" ProjectId="{Binding Featured.Id}" Status="{Binding Featured.Status}"/>
+          </Grid>
+        </Border>
+      </StackPanel>
+
+      <!-- GRID -->
+      <StackPanel Margin="44,32,44,60">
+        <TextBlock Style="{StaticResource Kicker}" Text="All projects"/>
+        <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="1,1,0,0">
+          <ItemsControl ItemsSource="{Binding Rest}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="22" Cursor="Hand" MinHeight="220">
+                  <Border.InputBindings>
+                    <MouseBinding MouseAction="LeftClick"
+                                  Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                  CommandParameter="{Binding}"/>
+                  </Border.InputBindings>
+                  <DockPanel>
+                    <Grid DockPanel.Dock="Top">
+                      <TextBlock Style="{StaticResource Kicker}" Text="{Binding Id}"/>
+                      <Border Style="{StaticResource Tag}" HorizontalAlignment="Right"
+                              Background="{Binding Status, Converter={StaticResource SevTagBg}}"
+                              BorderBrush="{Binding Status, Converter={StaticResource SevTagBorder}}">
+                        <TextBlock Style="{StaticResource TagText}" FontSize="9" Foreground="{Binding Status, Converter={StaticResource SevBrush}}" Text="{Binding Status}"/>
+                      </Border>
+                    </Grid>
+                    <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                      <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkFaint}" Text="{Binding Parts, StringFormat='{}{0} parts'}"/>
+                      <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkFaint}" HorizontalAlignment="Right" Text="{Binding Updated}"/>
+                    </Grid>
+                    <StackPanel>
+                      <TextBlock Style="{StaticResource Serif}" FontSize="26" Margin="0,12,0,0" TextWrapping="Wrap" Text="{Binding Title}"/>
+                      <TextBlock Foreground="{StaticResource Brush.InkMute}" FontFamily="{StaticResource Font.Mono}" FontSize="11.5" TextWrapping="Wrap" Margin="0,8,0,0" Text="{Binding Prompt}"/>
+                      <c:MiniDiagram Height="80" Margin="0,12,0,0" ProjectId="{Binding Id}" Status="{Binding Status}"/>
+                    </StackPanel>
+                  </DockPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+      </StackPanel>
+
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
