@@ -196,20 +196,18 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!-- live pipeline while generating -->
-            <Border Background="{StaticResource Brush.Surface1}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="10,8"
+            <!-- working indicator while the AI revises / answers -->
+            <Border Background="{StaticResource Brush.Surface1}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="12,10"
                     Visibility="{Binding IsGenerating, Converter={StaticResource BoolVis}}">
-              <ItemsControl ItemsSource="{Binding LivePipeline}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,2">
-                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <TextBlock Grid.Column="0" Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" Text="{Binding Stage}"/>
-                      <TextBlock Grid.Column="1" Style="{StaticResource Mono}" FontSize="9.5" Foreground="{DynamicResource Brush.Accent}" Text="{Binding State}"/>
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.Ink}" Text="Foundry is working…"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource Mono}" FontSize="10" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,6,0,8"
+                           Text="answering or revising the design — a full design edit can take a minute"/>
+                <ProgressBar IsIndeterminate="True" Height="3" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"/>
+              </StackPanel>
             </Border>
           </StackPanel>
         </ScrollViewer>

@@ -113,7 +113,12 @@ Keep it realistic and minimal. Output ONLY the JSON object.
         }
 
         var json = ExtractJson(raw);
-        if (json is null) return new GenerationResult(false, null, "The model didn't return valid JSON. Try rephrasing.");
+        if (json is null)
+        {
+            // The model answered a question / gave advice rather than editing the design — show its prose.
+            Diagnostics.AppLog.Info("revise", "answered (no design change)");
+            return new GenerationResult(true, null, raw.Trim());
+        }
 
         Project.Project revised;
         try { revised = Map(json, current.Prompt); }
@@ -127,9 +132,14 @@ Keep it realistic and minimal. Output ONLY the JSON object.
     }
 
     private const string ReviseSystemPrompt = SystemPrompt +
-        "\n\nYou are REVISING an existing design supplied as JSON. Apply the user's requested change and " +
-        "return the FULL updated project as one JSON object in the same shape. Preserve everything the change " +
-        "doesn't affect; keep connection endpoints consistent with the components you define.";
+        "\n\n--- REVISION MODE (overrides the 'only JSON' rule above) ---\n" +
+        "You are assisting with an EXISTING design supplied as JSON. The user's message is either:\n" +
+        "(a) a QUESTION or request for advice — reply with 2–5 sentences of PLAIN PROSE and NO JSON; or\n" +
+        "(b) a concrete CHANGE to the design — return the FULL updated project as ONE JSON object in the schema " +
+        "above, preserving everything the change doesn't affect and keeping connection endpoints consistent with " +
+        "the components you define.\n" +
+        "Decide which it is from their message. Output ONLY prose (for a question) or ONLY the JSON object (for a change). " +
+        "Do not announce or restate which mode you chose — just answer directly, or just output the JSON.";
 
     private static string BuildGenJson(Project.Project p)
     {
