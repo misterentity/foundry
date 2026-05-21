@@ -154,6 +154,10 @@ public sealed class Finding
     public List<string> Refs { get; set; } = new();
     /// <summary>Suggested auto-fix label, or null when no action needed.</summary>
     public string? Fix { get; set; }
+
+    /// <summary>True when the rules engine can apply this fix deterministically (pin remap / rail connect).</summary>
+    [JsonIgnore]
+    public bool AutoFixable => Code is "PIN-04" or "PIN-IO" or "PIN-CONF" or "PWR-NC" or "GND-NC";
 }
 
 public sealed class AssemblyStep

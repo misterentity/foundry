@@ -46,6 +46,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     /// <summary>PRD §8.9: validate the key cheaply via GET /v1/models (no token spend).</summary>
     public async Task<ModelListResult> ListModelsAsync(CancellationToken ct = default)
     {
+        using var _activity = Diagnostics.AiActivity.Begin("Loading models…");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -81,6 +82,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, string modelId, CancellationToken ct = default)
     {
         var model = string.IsNullOrWhiteSpace(modelId) ? ModelCatalog.DefaultModelId : modelId;
+        using var _activity = Diagnostics.AiActivity.Begin("Working with Claude…");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {

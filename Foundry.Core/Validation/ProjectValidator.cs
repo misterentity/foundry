@@ -21,7 +21,7 @@ public static class ProjectValidator
     }
 
     /// <summary>True if this finding has a deterministic netlist fix this engine can apply.</summary>
-    public static bool CanAutoFix(Finding f) => f.Code is "PIN-04" or "PIN-IO" or "PIN-CONF" or "PWR-NC" or "GND-NC";
+    public static bool CanAutoFix(Finding f) => f.AutoFixable;
 
     /// <summary>Apply the fix to the netlist in place. Returns false if nothing could be changed.</summary>
     public static bool TryAutoFix(Project.Project p, Finding f)

@@ -119,6 +119,11 @@
                   <Rectangle Width="6" Height="6" Fill="{Binding KeyDotSeverity, Converter={StaticResource SevBrush}}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                   <TextBlock Text="{Binding KeyLabel}" Style="{StaticResource Kicker}" VerticalAlignment="Center"/>
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="22,0,0,0" Visibility="{Binding AiBusy, Converter={StaticResource BoolVis}}">
+                  <ProgressBar IsIndeterminate="True" Width="44" Height="3" Background="Transparent" BorderThickness="0"
+                               Foreground="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <TextBlock Text="{Binding AiActivityLabel}" Style="{StaticResource Kicker}" Foreground="{DynamicResource Brush.Accent}" VerticalAlignment="Center"/>
+                </StackPanel>
               </StackPanel>
 
               <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

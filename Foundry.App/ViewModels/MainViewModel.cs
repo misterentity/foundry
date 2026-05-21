@@ -29,6 +29,10 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _keyLabel = "";
     [ObservableProperty] private string _keyDotSeverity = "warn";
 
+    // global AI activity (any in-flight Claude call)
+    [ObservableProperty] private bool _aiBusy;
+    [ObservableProperty] private string _aiActivityLabel = "";
+
     public Project? Project { get; private set; }
     public string AppVersionLabel => $"v{Foundry.Core.AppInfo.Version}";
 
@@ -38,12 +42,25 @@ public sealed partial class MainViewModel : ObservableObject
     public MainViewModel(ICredentialStore credentials)
     {
         _credentials = credentials;
+        Foundry.Core.Diagnostics.AiActivity.Changed += OnAiActivityChanged;
         RefreshServices();
 
         if (_credentials.Exists(CredentialStore.AnthropicTarget))
             ShowProjects();
         else
             ShowOnboarding();
+    }
+
+    private void OnAiActivityChanged()
+    {
+        void Apply()
+        {
+            AiBusy = Foundry.Core.Diagnostics.AiActivity.Busy;
+            AiActivityLabel = Foundry.Core.Diagnostics.AiActivity.Label ?? "";
+        }
+        var disp = System.Windows.Application.Current?.Dispatcher;
+        if (disp is null || disp.CheckAccess()) Apply();
+        else disp.Invoke(Apply);
     }
 
     /// <summary>Rebuild AI/pipeline/sourcing from the currently stored keys.</summary>

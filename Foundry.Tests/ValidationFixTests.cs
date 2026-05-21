@@ -68,6 +68,29 @@ public class ValidationFixTests
     }
 
     [Fact]
+    public void Sample_StrappingFinding_IsAutoFixable_AndApplies()
+    {
+        var p = DemoData.CreateSoilMoistureProject();
+        var strap = p.Findings.FirstOrDefault(f => f.Code == "PIN-04");
+        Assert.NotNull(strap);
+        Assert.True(strap!.AutoFixable);
+        Assert.True(ProjectValidator.CanAutoFix(strap));
+
+        Assert.True(ProjectValidator.TryAutoFix(p, strap));
+        ProjectValidator.Revalidate(p);
+        Assert.DoesNotContain(p.Findings, f => f.Code == "PIN-04");
+    }
+
+    [Fact]
+    public void NonNetlistFix_IsNotAutoFixable()
+    {
+        // e.g. a battery-life or sourcing fix has a Fix label but no deterministic netlist edit
+        var f = new Finding { Code = "PWR-02", Fix = "Auto-tune duty" };
+        Assert.False(f.AutoFixable);
+        Assert.False(ProjectValidator.CanAutoFix(f));
+    }
+
+    [Fact]
     public void ConnectRail_AddsMissingGround()
     {
         var p = MakeProject();
