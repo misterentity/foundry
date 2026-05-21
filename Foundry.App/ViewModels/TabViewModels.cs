@@ -264,7 +264,12 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     /// <summary>Observable copy of the findings so Re-run / Apply refresh the list live.</summary>
     public ObservableCollection<Finding> Findings { get; } = new();
 
-    public ValidationViewModel(Project project) : base(project) => Refresh();
+    public ValidationViewModel(Project project) : base(project)
+    {
+        Refresh();
+        var (slices, total, peak, battery) = BuildPowerBudget();
+        PowerBudget = slices; PowerTotal = total; PeakText = peak; BatteryText = battery;
+    }
 
     public int FailCount => Project.Findings.Count(f => f.Severity == "fail");
     public int WarnCount => Project.Findings.Count(f => f.Severity == "warn");
@@ -312,15 +317,31 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         }
     }
 
-    public IReadOnlyList<PowerSlice> PowerBudget { get; } = new[]
+    // Power budget derived from the real component active currents.
+    public IReadOnlyList<PowerSlice> PowerBudget { get; }
+    public int PowerTotal { get; }
+    public string PeakText { get; }
+    public string BatteryText { get; }
+
+    private (List<PowerSlice> slices, int total, string peak, string battery) BuildPowerBudget()
     {
-        new PowerSlice { Label="Wi-Fi TX",    Ma=48, BrushKey="Brush.Accent" },
-        new PowerSlice { Label="MCU active",  Ma=18, BrushKey="Brush.Info" },
-        new PowerSlice { Label="Sensor read", Ma=12, BrushKey="Brush.Ok" },
-        new PowerSlice { Label="ADC + boost", Ma=4,  BrushKey="Brush.Warn" },
-        new PowerSlice { Label="Quiescent",   Ma=2,  BrushKey="Brush.InkMute" },
-    };
-    public int PowerTotal => 84;
+        var palette = new[] { "Brush.Accent", "Brush.Info", "Brush.Ok", "Brush.Warn", "Brush.InkMute" };
+        var draws = Project.Components.Where(c => c.CurrentMaActive > 0)
+            .OrderByDescending(c => c.CurrentMaActive).ToList();
+
+        var slices = new List<PowerSlice>();
+        int i = 0;
+        foreach (var c in draws.Take(5))
+            slices.Add(new PowerSlice { Label = c.Alias, Ma = c.CurrentMaActive, BrushKey = palette[i++ % palette.Length] });
+        var rest = draws.Skip(5).Sum(c => c.CurrentMaActive);
+        if (rest > 0) slices.Add(new PowerSlice { Label = "other", Ma = rest, BrushKey = "Brush.InkMute" });
+
+        var total = draws.Sum(c => c.CurrentMaActive);
+        var batt = Project.Components.FirstOrDefault(c => c.CapacityMah > 0);
+        return (slices, Math.Max(1, total),
+            $"PEAK · {total} mA @ active",
+            batt is not null ? $"{batt.CapacityMah} mAh · {batt.Name}" : "no battery defined");
+    }
 }
 
 // ---------------- Guide ----------------

@@ -26,6 +26,9 @@ public sealed partial class MainViewModel : ObservableObject
     public Project? Project { get; private set; }
     public string AppVersionLabel => $"v{Foundry.Core.AppInfo.Version}";
 
+    /// <summary>True when the active project is library-backed (persist edits); false for the ephemeral sample.</summary>
+    private bool _tracked;
+
     public MainViewModel(ICredentialStore credentials)
     {
         _credentials = credentials;
@@ -57,7 +60,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     public void ShowProjects()
     {
-        CurrentView = new ProjectsViewModel(onNew: ShowNewProject, onOpenSample: OpenSample);
+        PersistTracked();   // save any edits made in the workspace before leaving it
+        CurrentView = new ProjectsViewModel(onNew: ShowNewProject, onOpen: OpenSaved);
         Crumbs = new[] { "Foundry", "Library" };
     }
 
@@ -65,7 +69,13 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var model = ConfigStore.Load().ModelId;
         CurrentView = new NewProjectViewModel(_ai, model,
-            onGenerated: p => { Project = p; ShowWorkspace(); },
+            onGenerated: p =>
+            {
+                Project = p;
+                ProjectStore.SaveToLibrary(p);   // persist the generated project
+                _tracked = true;
+                ShowWorkspace();
+            },
             onCancel: ShowProjects);
         Crumbs = new[] { "Foundry", "New project" };
     }
@@ -73,14 +83,33 @@ public sealed partial class MainViewModel : ObservableObject
     public void OpenSample()
     {
         Project = DemoData.CreateSoilMoistureProject();
+        _tracked = false;   // the sample is ephemeral, never written to the library
         ShowWorkspace();
     }
 
-    /// <summary>Open an already-generated project in the workspace.</summary>
+    /// <summary>Open a saved project from the library.</summary>
+    public void OpenSaved(string id)
+    {
+        var p = ProjectStore.LoadById(id);
+        if (p is null) { ShowProjects(); return; }
+        Project = p;
+        _tracked = true;
+        ShowWorkspace();
+    }
+
+    /// <summary>Open an already-generated project in the workspace (dev hook).</summary>
     public void OpenGenerated(Project p)
     {
         Project = p;
+        ProjectStore.SaveToLibrary(p);
+        _tracked = true;
         ShowWorkspace();
+    }
+
+    private void PersistTracked()
+    {
+        if (_tracked && Project is not null)
+            try { ProjectStore.SaveToLibrary(Project); } catch { /* best effort */ }
     }
 
     public void ShowWorkspace()

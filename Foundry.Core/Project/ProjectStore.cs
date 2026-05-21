@@ -29,6 +29,60 @@ public static class ProjectStore
     public static Project Deserialize(string json) =>
         JsonSerializer.Deserialize<Project>(json, Options)
             ?? throw new InvalidDataException("Project JSON deserialized to null.");
+
+    // ---- local project library (%AppData%/Foundry/projects) ----
+
+    public static string LibraryDir => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Foundry", "projects");
+
+    private static string PathFor(string id) =>
+        System.IO.Path.Combine(LibraryDir, Sanitize(id) + ".json");
+
+    private static string Sanitize(string id)
+    {
+        foreach (var ch in System.IO.Path.GetInvalidFileNameChars()) id = id.Replace(ch, '_');
+        return string.IsNullOrWhiteSpace(id) ? "project" : id;
+    }
+
+    /// <summary>Persist a project to the library, stamping an id/timestamp if missing.</summary>
+    public static void SaveToLibrary(Project project)
+    {
+        if (string.IsNullOrWhiteSpace(project.Id)) project.Id = "p_" + Guid.NewGuid().ToString("N")[..8];
+        project.Updated = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+        Save(project, PathFor(project.Id));
+    }
+
+    public static Project? LoadById(string id)
+    {
+        var path = PathFor(id);
+        return File.Exists(path) ? Load(path) : null;
+    }
+
+    public static void DeleteById(string id)
+    {
+        try { var p = PathFor(id); if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
+    }
+
+    /// <summary>Library rows, newest first. Skips any unreadable files.</summary>
+    public static List<ProjectSummary> ListSummaries()
+    {
+        var list = new List<ProjectSummary>();
+        if (!Directory.Exists(LibraryDir)) return list;
+        foreach (var file in Directory.EnumerateFiles(LibraryDir, "*.json"))
+        {
+            try
+            {
+                var p = Load(file);
+                list.Add(new ProjectSummary
+                {
+                    Id = p.Id, Title = p.Title, Prompt = p.Prompt, Updated = p.Updated,
+                    Parts = p.Kpis.Parts, Status = p.Validation, Cost = p.Kpis.Cost,
+                });
+            }
+            catch { /* skip corrupt */ }
+        }
+        return list.OrderByDescending(s => s.Updated).ToList();
+    }
 }
 
 /// <summary>Lightweight row for the project-library screen (RECENT_PROJECTS).</summary>
@@ -43,4 +97,8 @@ public sealed class ProjectSummary
     public string Status { get; set; } = "ok";
     public double Cost { get; set; }
     public bool Current { get; set; }
+
+    public string CostText => $"${Cost:0.00}";
+    public string PartsText => $"{Parts} parts";
+    public string StatusText => Status?.ToUpperInvariant() switch { "FAIL" => "FAIL", "WARN" => "WARN", _ => "PASS" };
 }

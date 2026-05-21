@@ -36,14 +36,55 @@
         </Border>
       </StackPanel>
 
-      <!-- RECENT (empty for now) -->
+      <!-- RECENT -->
       <StackPanel Margin="44,40,44,60">
-        <TextBlock Style="{StaticResource Kicker}" Text="Recent"/>
-        <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="32" Background="{StaticResource Brush.Surface0}">
+        <Grid>
+          <TextBlock Style="{StaticResource Kicker}" Text="Recent"/>
+          <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Foreground="{StaticResource Brush.InkFaint}" Text="{Binding Recent.Count, StringFormat='{}{0} saved'}"/>
+        </Grid>
+
+        <!-- empty state -->
+        <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="32" Background="{StaticResource Brush.Surface0}"
+                Visibility="{Binding HasRecent, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
           <StackPanel HorizontalAlignment="Center">
             <TextBlock Style="{StaticResource Serif}" FontSize="22" Foreground="{StaticResource Brush.InkMute}" HorizontalAlignment="Center" Text="No saved projects yet."/>
-            <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkFaint}" HorizontalAlignment="Center" Margin="0,6,0,0" Text="Generated projects you save will appear here."/>
+            <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkFaint}" HorizontalAlignment="Center" Margin="0,6,0,0" Text="Projects you generate are saved here automatically."/>
           </StackPanel>
+        </Border>
+
+        <!-- saved projects -->
+        <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1,1,1,0"
+                Visibility="{Binding HasRecent, Converter={StaticResource BoolVis}}">
+          <ItemsControl ItemsSource="{Binding Recent}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Background="{StaticResource Brush.Surface0}" Cursor="Hand">
+                  <Border.InputBindings>
+                    <MouseBinding MouseAction="LeftClick"
+                                  Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                  CommandParameter="{Binding Id}"/>
+                  </Border.InputBindings>
+                  <Grid Margin="20,16">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                      <TextBlock Style="{StaticResource Serif}" FontSize="20" Text="{Binding Title}"/>
+                      <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" Text="{Binding Prompt}"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" VerticalAlignment="Center" Margin="0,0,18,0" Text="{Binding Updated}"/>
+                    <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkSoft}" VerticalAlignment="Center" Margin="0,0,18,0" Text="{Binding PartsText}"/>
+                    <TextBlock Grid.Column="3" Style="{StaticResource Mono}" FontSize="11" VerticalAlignment="Center" Margin="0,0,18,0"
+                               Foreground="{Binding Status, Converter={StaticResource SevBrush}}" Text="{Binding StatusText}"/>
+                    <Button Grid.Column="4" Style="{StaticResource BtnGhost}" Padding="8,4" FontSize="10" VerticalAlignment="Center" Content="✕"
+                            Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                            CommandParameter="{Binding Id}"/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
         </Border>
       </StackPanel>
     </StackPanel>

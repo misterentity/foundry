@@ -98,13 +98,12 @@
         <StackPanel>
           <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="0,0,0,8" Margin="0,0,0,12">
             <Grid>
-              <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Text="POWER BUDGET · ESTIMATED BATTERY LIFE"/>
-              <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Text="3000 mAh · single 18650"/>
+              <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Text="POWER BUDGET · ACTIVE DRAW BY PART"/>
+              <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Text="{Binding BatteryText}"/>
             </Grid>
           </Border>
           <Grid>
-            <TextBlock Style="{StaticResource Kicker}" Text="PEAK · 84 mA @ active"/>
-            <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Text="SLEEP · 12 µA"/>
+            <TextBlock Style="{StaticResource Kicker}" Text="{Binding PeakText}"/>
           </Grid>
           <Grid x:Name="PowerHost" Height="36" Margin="0,8,0,8"/>
         </StackPanel>
