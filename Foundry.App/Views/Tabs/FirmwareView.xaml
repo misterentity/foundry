@@ -17,8 +17,8 @@
                      Text="Starter sketch with a pin map generated from the netlist — there are no hand-typed pins. Open the exported folder in PlatformIO or Arduino IDE 2.x and flash."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="folder" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="OPEN FOLDER"/></StackPanel>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportCommand}">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="folder" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="EXPORT FOLDER"/></StackPanel>
           </Button>
           <Button Style="{StaticResource BtnPrimary}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="bolt" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="FLASH @ 460800"/></StackPanel>

@@ -1,3 +1,4 @@
+using Foundry.Core.Firmware;
 using Foundry.Core.Kb;
 using Foundry.Core.Validation;
 
@@ -67,23 +68,7 @@ public static class DemoData
             PrintTime = "2h 14m",
         },
 
-        Firmware = new Firmware
-        {
-            Platform = "Arduino C++",
-            Board = "esp32:esp32:esp32",
-            Files = new()
-            {
-                new FirmwareFile { Name="main.ino",       Path="/foundry/firmware/", Active=true },
-                new FirmwareFile { Name="pinmap.h",       Path="/foundry/firmware/" },
-                new FirmwareFile { Name="wifi.h",         Path="/foundry/firmware/" },
-                new FirmwareFile { Name="platformio.ini", Path="/foundry/firmware/" },
-            },
-            Libraries = new()
-            {
-                new("WiFi","built-in"), new("HTTPClient","built-in"), new("ArduinoJson","7.1.0"),
-                new("esp32-hal-adc","built-in"), new("ESP32 Deep Sleep","built-in"),
-            },
-        },
+        Firmware = FirmwareGenerator.Generate(SoilMoistureConnections(), ComponentKb.Demo()),
 
         Findings = BuildDemoFindings(),
 

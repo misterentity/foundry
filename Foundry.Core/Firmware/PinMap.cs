@@ -1,0 +1,108 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using Foundry.Core.Kb;
+using Foundry.Core.Project;
+
+namespace Foundry.Core.Firmware;
+
+/// <summary>One generated pin-map entry: a peripheral signal bound to a concrete MCU GPIO.</summary>
+public sealed record PinMapEntry(string Macro, int Gpio, string FromPin, string ToPin, string Net, bool Strapping);
+
+/// <summary>
+/// Derives the firmware pin map directly from the authoritative netlist (PRD §6 invariant, §8.6,
+/// F4) — there are no hand-typed pins. Every signal/I²C net that lands on an MCU GPIO becomes a
+/// <c>#define</c>. Because it is computed from <see cref="Connection"/>s, it regenerates whenever
+/// the wiring changes.
+/// </summary>
+public static class PinMap
+{
+    private static readonly Regex GpioNum = new(@"(\d+)\s*$", RegexOptions.Compiled);
+
+    /// <summary>The alias acting as MCU = the component whose KB spec exposes GPIO-named pins.</summary>
+    public static string? DetectMcuAlias(IReadOnlyList<Connection> connections, ComponentKb kb)
+    {
+        var aliases = connections
+            .SelectMany(c => new[] { Alias(c.From), Alias(c.To) })
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        return aliases.FirstOrDefault(a =>
+            kb.ByAlias(a)?.Pins.Any(p => p.Name.StartsWith("GPIO", StringComparison.OrdinalIgnoreCase)) == true);
+    }
+
+    public static IReadOnlyList<PinMapEntry> Build(IReadOnlyList<Connection> connections, ComponentKb kb)
+    {
+        var mcu = DetectMcuAlias(connections, kb);
+        if (mcu is null) return Array.Empty<PinMapEntry>();
+
+        var entries = new List<PinMapEntry>();
+        foreach (var c in connections.Where(c => c.Net is "signal" or "i2c"))
+        {
+            // identify which endpoint is the MCU GPIO and which is the peripheral
+            var (mcuEp, periphEp) = MatchMcu(c.From, c.To, mcu);
+            if (mcuEp is null || periphEp is null) continue;
+
+            var gpio = ExtractGpio(Pin(mcuEp));
+            if (gpio is null) continue;
+
+            var macro = "PIN_" + Sanitize(Alias(periphEp)) + "_" + Sanitize(Pin(periphEp));
+            var strapping = kb.ByAlias(mcu)?.Pin(Pin(mcuEp))?.Strapping ?? false;
+            entries.Add(new PinMapEntry(macro, gpio.Value, mcuEp, periphEp, c.Net, strapping));
+        }
+        // stable order by GPIO number for deterministic output
+        return entries.OrderBy(e => e.Gpio).ToList();
+    }
+
+    /// <summary>Renders the entries as a C header (the <c>pinmap.h</c> body).</summary>
+    public static string RenderHeader(IReadOnlyList<PinMapEntry> entries)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// GENERATED — derived from Project.connections");
+        sb.AppendLine("// Do not edit; re-runs on every wiring change.");
+        sb.AppendLine();
+        sb.AppendLine("#pragma once");
+        sb.AppendLine();
+        int pad = entries.Count == 0 ? 16 : Math.Max(16, entries.Max(e => e.Macro.Length) + 2);
+        foreach (var e in entries)
+        {
+            var note = $"// from net: {e.Net.ToUpperInvariant()} · {e.FromPin} ↔ {e.ToPin}" +
+                       (e.Strapping ? "    [strapping pin — see validation]" : "");
+            sb.AppendLine(note);
+            sb.AppendLine($"#define {e.Macro.PadRight(pad)}{e.Gpio}");
+            sb.AppendLine();
+        }
+        sb.AppendLine("// ADC reference (ESP32 default attenuation 11dB → ~3.3V)");
+        sb.AppendLine("#define ADC_REF_MV        3300");
+        return sb.ToString();
+    }
+
+    // ---- helpers ----
+    private static (string? mcuEp, string? periphEp) MatchMcu(string from, string to, string mcu)
+    {
+        if (Alias(from).Equals(mcu, StringComparison.OrdinalIgnoreCase)) return (from, to);
+        if (Alias(to).Equals(mcu, StringComparison.OrdinalIgnoreCase)) return (to, from);
+        return (null, null);
+    }
+
+    private static int? ExtractGpio(string pin)
+    {
+        var m = GpioNum.Match(pin);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : null;
+    }
+
+    private static string Alias(string endpoint)
+    {
+        var dot = endpoint.IndexOf('.');
+        return dot < 0 ? endpoint : endpoint[..dot];
+    }
+
+    private static string Pin(string endpoint)
+    {
+        var dot = endpoint.IndexOf('.');
+        return dot < 0 ? "" : endpoint[(dot + 1)..];
+    }
+
+    private static string Sanitize(string s)
+    {
+        var chars = s.ToUpperInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : '_');
+        return new string(chars.ToArray());
+    }
+}

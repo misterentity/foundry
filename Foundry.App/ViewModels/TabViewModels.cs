@@ -1,5 +1,10 @@
+using System.Diagnostics;
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Foundry.Core.Firmware;
 using Foundry.Core.Project;
+using Microsoft.Win32;
 
 namespace Foundry.App.ViewModels;
 
@@ -76,49 +81,24 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
 
     public FirmwareViewModel(Project project) : base(project)
     {
-        // populate code bodies for the demo (Phase 3 will generate these from the netlist)
-        for (int i = 0; i < project.Firmware.Files.Count && i < FileBodies.Length; i++)
-            project.Firmware.Files[i].Content = FileBodies[i];
-        _activeFile = project.Firmware.Files[0];
+        // Firmware (incl. the netlist-derived pinmap.h) is generated in the Project; just bind it.
+        _activeFile = project.Firmware.Files.FirstOrDefault() ?? new FirmwareFile();
     }
 
     public Firmware F => Project.Firmware;
 
-    private static readonly string[] FileBodies =
+    /// <summary>Export the generated firmware to a project folder and reveal it (PRD F7).</summary>
+    [RelayCommand]
+    private void Export()
     {
-        // main.ino
-        "// FOUNDRY · Cap. Soil Moisture Sentinel\n" +
-        "// Pin map is GENERATED from the netlist — do not edit by hand.\n" +
-        "// See pinmap.h\n\n" +
-        "#include <WiFi.h>\n#include <HTTPClient.h>\n#include <ArduinoJson.h>\n" +
-        "#include \"pinmap.h\"\n#include \"wifi.h\"\n\n" +
-        "constexpr uint64_t SLEEP_US = 6ULL * 60ULL * 60ULL * 1000000ULL;  // 6 h\n" +
-        "constexpr float DRY_THRESHOLD = 0.32f;\n\n" +
-        "void setup() {\n  Serial.begin(115200);\n  pinMode(PIN_SENSOR_AOUT, INPUT);\n" +
-        "  analogReadResolution(12);\n\n  float moisture = readMoisture();\n" +
-        "  if (moisture < DRY_THRESHOLD) {\n    alertTwilio(moisture);\n  }\n\n" +
-        "  esp_deep_sleep(SLEEP_US);\n}\n\n" +
-        "float readMoisture() {\n  int raw = analogRead(PIN_SENSOR_AOUT);\n" +
-        "  return 1.0f - ((float)raw / 4095.0f);  // dry→0, wet→1\n}\n",
-        // pinmap.h
-        "// GENERATED — derived from Project.connections\n" +
-        "// Do not edit; re-runs on every wiring change.\n\n#pragma once\n\n" +
-        "// from net: SIGNAL · MCU.GPIO34 ↔ SENSOR.AOUT\n#define PIN_SENSOR_AOUT  34\n\n" +
-        "// from net: SIGNAL · MCU.GPIO0 ↔ BTN1.A    [strapping pin — see W·04]\n#define PIN_BUTTON_RST   0\n\n" +
-        "// Power · Ground rails — informational\n#define RAIL_3V3_MV       3300\n#define RAIL_GND_MV       0\n\n" +
-        "// ADC reference (ESP32 default attenuation 11dB → ~3.3V)\n#define ADC_REF_MV        3300\n",
-        // wifi.h
-        "#pragma once\n\n" +
-        "// TODO: fill in your secrets — these are NEVER written to the Project file.\n" +
-        "#define WIFI_SSID          \"YOUR_SSID\"\n#define WIFI_PASS          \"YOUR_PASSWORD\"\n\n" +
-        "// Twilio HTTPS webhook\n#define TWILIO_SID         \"ACxxxxxxxxxxxxxxxxxx\"\n" +
-        "#define TWILIO_TOKEN       \"xxxxxxxxxxxxxxxxxxxx\"\n#define TWILIO_FROM        \"+15555550100\"\n" +
-        "#define ALERT_TO           \"+15555550199\"\n",
-        // platformio.ini
-        "[env:esp32dev]\nplatform   = espressif32@^6.5.0\nboard      = esp32dev\n" +
-        "framework  = arduino\nmonitor_speed = 115200\nupload_speed  = 460800\n" +
-        "lib_deps =\n  bblanchon/ArduinoJson@^7.1.0\nbuild_flags =\n  -D CONFIG_DEEP_SLEEP\n",
-    };
+        var dlg = new OpenFolderDialog { Title = "Choose where to export the firmware project" };
+        if (dlg.ShowDialog() != true) return;
+
+        var dir = Path.Combine(dlg.FolderName, "firmware");
+        FirmwareExporter.Export(F, dir);
+        try { Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true }); }
+        catch { /* reveal is best-effort */ }
+    }
 }
 
 // ---------------- Validation ----------------
