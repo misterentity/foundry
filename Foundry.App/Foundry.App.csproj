@@ -32,7 +32,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Themes\foundry.ico</ApplicationIcon>
     <AssemblyName>Foundry</AssemblyName>
-    <Version>0.4.11</Version>
+    <Version>0.4.12</Version>
   </PropertyGroup>
 
 </Project>

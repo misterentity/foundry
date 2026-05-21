@@ -331,8 +331,8 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         {
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "validation-report.md");
-            File.WriteAllText(path, Exporters.ValidationReport(Project));
+            var path = Path.Combine(dir, "validation-report.pdf");
+            File.WriteAllBytes(path, PdfExporter.ValidationPdf(Project));
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
             Status = $"Report exported to {path}";
         }
@@ -400,6 +400,21 @@ public sealed partial class GuideViewModel : TabViewModelBase
 {
     public GuideViewModel(Project project) : base(project) { }
 
+    /// <summary>Export a branded project-spec PDF to the configured folder (PRD F7).</summary>
+    [RelayCommand]
+    private void ExportPdf()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, $"{SafeName(Project.Title)}-spec.pdf");
+            File.WriteAllBytes(path, PdfExporter.ProjectPdf(Project));
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
+
     /// <summary>Export the assembly guide to Markdown in the configured folder (PRD F7).</summary>
     [RelayCommand]
     private void ExportMarkdown()
@@ -413,5 +428,11 @@ public sealed partial class GuideViewModel : TabViewModelBase
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
         catch { /* best effort */ }
+    }
+
+    private static string SafeName(string s)
+    {
+        foreach (var ch in Path.GetInvalidFileNameChars()) s = s.Replace(ch, '-');
+        return string.IsNullOrWhiteSpace(s) ? "foundry-project" : s;
     }
 }
