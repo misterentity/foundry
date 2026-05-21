@@ -35,6 +35,7 @@ public partial class App : Application
         {
             case "projects": main.ShowProjects(); break;
             case "workspace": main.ShowWorkspace(); break;
+            case "settings": main.ShowSettings(); break;
         }
 
         var window = new MainWindow { DataContext = main };

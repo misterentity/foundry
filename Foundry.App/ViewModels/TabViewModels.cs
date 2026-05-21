@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Foundry.Core.Config;
+using Foundry.Core.Export;
 using Foundry.Core.Firmware;
 using Foundry.Core.Project;
 using Foundry.Core.Sourcing;
@@ -199,6 +201,23 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             SidecarStatus = $"sidecar error — showing schematic preview ({ex.Message})";
         }
     }
+
+    /// <summary>Save the generated STL to the configured export folder (PRD F7).</summary>
+    [RelayCommand]
+    private void ExportStl()
+    {
+        if (StlBytes is null) { SidecarStatus = "no mesh to export — sidecar offline"; return; }
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "enclosure.stl");
+            File.WriteAllBytes(path, StlBytes);
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            SidecarStatus = $"STL exported to {path}";
+        }
+        catch (Exception ex) { SidecarStatus = $"export failed: {ex.Message}"; }
+    }
 }
 
 // ---------------- Firmware ----------------
@@ -258,7 +277,22 @@ public sealed class ValidationViewModel : TabViewModelBase
 }
 
 // ---------------- Guide ----------------
-public sealed class GuideViewModel : TabViewModelBase
+public sealed partial class GuideViewModel : TabViewModelBase
 {
     public GuideViewModel(Project project) : base(project) { }
+
+    /// <summary>Export the assembly guide to Markdown in the configured folder (PRD F7).</summary>
+    [RelayCommand]
+    private void ExportMarkdown()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "assembly-guide.md");
+            File.WriteAllText(path, Exporters.GuideMarkdown(Project));
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
 }

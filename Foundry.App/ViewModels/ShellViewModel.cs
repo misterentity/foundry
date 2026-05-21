@@ -32,6 +32,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly IPipeline _pipeline;
     private readonly Action _onBack;
     private readonly Action<string> _onTabChanged;
+    private readonly Action _onSettings;
 
     public Project Project { get; }
     public IReadOnlyList<TabDescriptor> Tabs { get; }
@@ -45,12 +46,13 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _chatInput = "";
     [ObservableProperty] private bool _isGenerating;
 
-    public ShellViewModel(Project project, IPipeline pipeline, Action onBack, Action<string> onTabChanged)
+    public ShellViewModel(Project project, IPipeline pipeline, Action onBack, Action<string> onTabChanged, Action onSettings)
     {
         Project = project;
         _pipeline = pipeline;
         _onBack = onBack;
         _onTabChanged = onTabChanged;
+        _onSettings = onSettings;
 
         Tabs = new List<TabDescriptor>
         {
@@ -82,6 +84,7 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     [RelayCommand] private void Back() => _onBack();
+    [RelayCommand] private void Settings() => _onSettings();
 
     [RelayCommand]
     private async Task SendAsync()

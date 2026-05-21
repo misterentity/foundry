@@ -164,6 +164,72 @@
     <Setter Property="Width" Value="1"/>
   </Style>
 
+  <!-- ===================== COMBOBOX (dark) ===================== -->
+  <Style x:Key="ComboItem" TargetType="ComboBoxItem">
+    <Setter Property="Foreground" Value="{StaticResource Brush.InkSoft}"/>
+    <Setter Property="FontFamily" Value="{StaticResource Font.Mono}"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="Padding" Value="12,8"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBoxItem">
+          <Border x:Name="bd" Background="Transparent" Padding="{TemplateBinding Padding}">
+            <ContentPresenter/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="bd" Property="Background" Value="{StaticResource Brush.Surface2}"/>
+              <Setter Property="Foreground" Value="{StaticResource Brush.Ink}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Combo" TargetType="ComboBox">
+    <Setter Property="FontFamily" Value="{StaticResource Font.Mono}"/>
+    <Setter Property="FontSize" Value="12.5"/>
+    <Setter Property="Foreground" Value="{StaticResource Brush.Ink}"/>
+    <Setter Property="Background" Value="{StaticResource Brush.Surface1}"/>
+    <Setter Property="BorderBrush" Value="{StaticResource Brush.Hairline2}"/>
+    <Setter Property="Padding" Value="12,9"/>
+    <Setter Property="ItemContainerStyle" Value="{StaticResource ComboItem}"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid>
+            <ToggleButton x:Name="tb" Focusable="False" ClickMode="Press"
+                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+              <ToggleButton.Template>
+                <ControlTemplate TargetType="ToggleButton">
+                  <Border Background="{StaticResource Brush.Surface1}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <ContentPresenter Grid.Column="0" Margin="12,9" VerticalAlignment="Center"
+                                        Content="{TemplateBinding Content}"/>
+                      <Path Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center" Data="M0,0 L8,0 L4,5 Z"
+                            Fill="{StaticResource Brush.InkMute}"/>
+                    </Grid>
+                  </Border>
+                </ControlTemplate>
+              </ToggleButton.Template>
+            </ToggleButton>
+            <ContentPresenter Margin="12,9,30,9" VerticalAlignment="Center" IsHitTestVisible="False"
+                              Content="{TemplateBinding SelectionBoxItem}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
+              <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline3}" BorderThickness="1"
+                      MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                <ScrollViewer MaxHeight="260"><ItemsPresenter/></ScrollViewer>
+              </Border>
+            </Popup>
+          </Grid>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <!-- ===================== WINDOW CAPTION BUTTONS ===================== -->
   <Style x:Key="CaptionButton" TargetType="Button">
     <Setter Property="Foreground" Value="{StaticResource Brush.InkMute}"/>

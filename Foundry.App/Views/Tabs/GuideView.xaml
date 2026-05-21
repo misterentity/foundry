@@ -17,9 +17,9 @@
                      Text="Each step references the components and nets it touches. Export to Markdown or PDF for the workshop bench."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="MARKDOWN"/>
-          <Button Style="{StaticResource BtnPrimary}">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="PDF · 6 pages"/></StackPanel>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportMarkdownCommand}" Content="MARKDOWN"/>
+          <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportMarkdownCommand}">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>

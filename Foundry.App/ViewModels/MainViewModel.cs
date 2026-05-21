@@ -48,9 +48,16 @@ public sealed partial class MainViewModel : ObservableObject
 
     public void ShowWorkspace()
     {
-        var shell = new ShellViewModel(Project, _pipeline, onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb);
+        var shell = new ShellViewModel(Project, _pipeline,
+            onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings);
         CurrentView = shell;
         UpdateWorkspaceCrumb(shell.SelectedTab?.Label ?? "Workspace");
+    }
+
+    public void ShowSettings()
+    {
+        CurrentView = new SettingsViewModel(_credentials, _ai, onBack: ShowWorkspace);
+        Crumbs = new[] { "Foundry", Project.Title, "SETTINGS" };
     }
 
     private void UpdateWorkspaceCrumb(string tabLabel) =>

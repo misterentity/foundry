@@ -21,8 +21,8 @@
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="STEP"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="3MF"/>
-          <Button Style="{StaticResource BtnPrimary}">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="STL · 1.42 MB"/></StackPanel>
+          <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportStlCommand}">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT STL"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>
@@ -134,8 +134,8 @@
               </Grid>
             </Border>
 
-            <Button Style="{StaticResource BtnPrimary}" HorizontalAlignment="Stretch">
-              <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT STL + 3MF + STEP"/></StackPanel>
+            <Button Style="{StaticResource BtnPrimary}" HorizontalAlignment="Stretch" Command="{Binding ExportStlCommand}">
+              <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT STL"/></StackPanel>
             </Button>
           </StackPanel>
         </Grid>
