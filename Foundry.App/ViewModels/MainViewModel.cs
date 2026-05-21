@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Foundry.Core.Ai;
 using Foundry.Core.Config;
+using Foundry.Core.Generation;
 using Foundry.Core.Project;
 using Foundry.Core.Security;
 using Foundry.Core.Sourcing;
@@ -137,8 +138,15 @@ public sealed partial class MainViewModel : ObservableObject
     public void ShowWorkspace()
     {
         if (Project is null) { ShowProjects(); return; }
-        var shell = new ShellViewModel(Project, _pipeline,
-            onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings);
+        var reviser = new ProjectGenerator(_ai, ConfigStore.Load().ModelId);
+        var shell = new ShellViewModel(Project, _pipeline, reviser,
+            onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings,
+            onProjectRevised: p =>
+            {
+                Project = p;
+                _tracked = true;
+                try { ProjectStore.SaveToLibrary(p); } catch { }
+            });
         CurrentView = shell;
         UpdateWorkspaceCrumb(shell.SelectedTab?.Label ?? "Workspace");
     }

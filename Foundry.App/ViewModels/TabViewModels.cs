@@ -293,6 +293,9 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     /// <summary>Observable copy of the findings so Re-run / Apply refresh the list live.</summary>
     public ObservableCollection<Finding> Findings { get; } = new();
 
+    /// <summary>Raised after the findings change (re-run / auto-fix) so the rail badge can update.</summary>
+    public event Action? FindingsChanged;
+
     public ValidationViewModel(Project project) : base(project)
     {
         Refresh();
@@ -317,6 +320,7 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         OnPropertyChanged(nameof(OverallStatus));
         OnPropertyChanged(nameof(PassText));
         OnPropertyChanged(nameof(ChecksLabel));
+        FindingsChanged?.Invoke();
     }
 
     /// <summary>Write the validation report to the configured export folder (PRD F7).</summary>

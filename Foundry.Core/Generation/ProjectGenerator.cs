@@ -93,6 +93,71 @@ Keep it realistic and minimal. Output ONLY the JSON object.
         return new GenerationResult(true, project, "Generated.");
     }
 
+    /// <summary>Apply a chat request to the current design and return a fully revised project.</summary>
+    public async Task<GenerationResult> ReviseAsync(Project.Project current, string request, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey) return new GenerationResult(false, null, "Add your Anthropic API key in Settings to edit the design by chat.");
+        if (string.IsNullOrWhiteSpace(request)) return new GenerationResult(false, null, "Tell me what to change.");
+
+        Diagnostics.AppLog.Info("revise", $"revise pass started · model {_model}", request);
+        string raw;
+        try
+        {
+            var user = $"Current design (Foundry JSON):\n{BuildGenJson(current)}\n\nRequested change:\n{request}";
+            raw = await _ai.CompleteAsync(ReviseSystemPrompt, user, _model, ct);
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Error("revise", $"revise pass failed: {ex.Message}");
+            return new GenerationResult(false, null, $"Revision failed: {ex.Message}");
+        }
+
+        var json = ExtractJson(raw);
+        if (json is null) return new GenerationResult(false, null, "The model didn't return valid JSON. Try rephrasing.");
+
+        Project.Project revised;
+        try { revised = Map(json, current.Prompt); }
+        catch (Exception ex) { return new GenerationResult(false, null, $"Couldn't parse the revision: {ex.Message}"); }
+
+        revised.Id = current.Id;          // keep library identity
+        revised.Prompt = current.Prompt;
+        await EnrichFirmwareAsync(revised, current.Prompt, ct);
+        Diagnostics.AppLog.Info("revise", $"revised · {revised.Bom.Count} BOM · {revised.Connections.Count} nets · {revised.Findings.Count} findings");
+        return new GenerationResult(true, revised, "Revised.");
+    }
+
+    private const string ReviseSystemPrompt = SystemPrompt +
+        "\n\nYou are REVISING an existing design supplied as JSON. Apply the user's requested change and " +
+        "return the FULL updated project as one JSON object in the same shape. Preserve everything the change " +
+        "doesn't affect; keep connection endpoints consistent with the components you define.";
+
+    private static string BuildGenJson(Project.Project p)
+    {
+        string Kind(Kb.PinKind k) => k switch
+        {
+            Kb.PinKind.Power => "power", Kb.PinKind.Ground => "ground", Kb.PinKind.Input => "input",
+            Kb.PinKind.Output => "output", Kb.PinKind.Analog => "analog", _ => "bidir",
+        };
+        var dto = new
+        {
+            title = p.Title,
+            summary = p.Prompt,
+            subsystems = p.Subsystems.Select(s => new { role = s.Role, name = s.Name, mpn = s.Mpn,
+                specs = s.Specs.Select(sp => new[] { sp.Key, sp.Value }) }),
+            components = p.Components.Select(c => new { alias = c.Alias, @ref = c.Ref, name = c.Name,
+                logicV = c.LogicV, inputV = c.InputVRange, outputV = c.OutputV, currentMa = c.CurrentMaActive,
+                capacityMah = c.CapacityMah,
+                pins = c.Pins.Select(pn => new { name = pn.Name, kind = Kind(pn.Kind), inputOnly = pn.InputOnly, strapping = pn.Strapping }) }),
+            bom = p.Bom.Select(b => new { qty = b.Qty, name = b.Name, mpn = b.Mpn, price = b.Price, stock = b.Stock, lead = b.Lead, dist = b.Dist, note = b.Note }),
+            connections = p.Connections.Select(c => new { from = c.From, to = c.To, net = c.Net }),
+            enclosure = new { inner = p.Enclosure.Inner, wall = p.Enclosure.Wall, lid = p.Enclosure.Lid, standoffs = p.Enclosure.Standoffs,
+                cutouts = p.Enclosure.Cutouts.Select(c => new { face = c.Face, shape = c.Shape, size = c.Size, d = c.D, pos = c.Pos, label = c.Label }) },
+            firmwarePlatform = p.Firmware.Platform,
+            assembly = p.Assembly.Select(a => new { title = a.Title, body = a.Body, chips = a.Chips }),
+        };
+        return JsonSerializer.Serialize(dto);
+    }
+
     /// <summary>Ask the model for complete, working firmware for this exact device; inject the derived pin map.</summary>
     private async Task EnrichFirmwareAsync(Project.Project project, string prompt, CancellationToken ct)
     {

@@ -2,22 +2,25 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Foundry.Core.Ai;
+using Foundry.Core.Generation;
 using Foundry.Core.Project;
 
 namespace Foundry.App.ViewModels;
 
-/// <summary>A left-rail / tabbar entry.</summary>
-public sealed class TabDescriptor
+/// <summary>A left-rail / tabbar entry. Badge is observable so it can update live (e.g. validation).</summary>
+public sealed partial class TabDescriptor : ObservableObject
 {
     public required string Id { get; init; }
     public required string Label { get; init; }
     public required string Icon { get; init; }
     public required int Index { get; init; }
-    public string? BadgeText { get; init; }
-    public string? BadgeKind { get; init; }
     public required Func<Project, ObservableObject> Factory { get; init; }
     public string Number => (Index + 1).ToString("00");
+
+    [ObservableProperty] private string? _badgeText;
+    [ObservableProperty] private string? _badgeKind = "warn";
     public bool HasBadge => !string.IsNullOrEmpty(BadgeText);
+    partial void OnBadgeTextChanged(string? value) => OnPropertyChanged(nameof(HasBadge));
 }
 
 /// <summary>A read-only rail "stage" row (Spec/Architecture/…).</summary>
@@ -30,11 +33,14 @@ public sealed record StageRow(int N, string Name, string State)
 public sealed partial class ShellViewModel : ObservableObject
 {
     private readonly IPipeline _pipeline;
+    private readonly ProjectGenerator _reviser;
     private readonly Action _onBack;
     private readonly Action<string> _onTabChanged;
     private readonly Action _onSettings;
+    private readonly Action<Project> _onProjectRevised;
+    private TabDescriptor? _validationTab;
 
-    public Project Project { get; }
+    public Project Project { get; private set; }
     public IReadOnlyList<TabDescriptor> Tabs { get; }
     public IReadOnlyList<StageRow> Stages { get; }
 
@@ -46,19 +52,16 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _chatInput = "";
     [ObservableProperty] private bool _isGenerating;
 
-    public ShellViewModel(Project project, IPipeline pipeline, Action onBack, Action<string> onTabChanged, Action onSettings)
+    public ShellViewModel(Project project, IPipeline pipeline, ProjectGenerator reviser,
+        Action onBack, Action<string> onTabChanged, Action onSettings, Action<Project> onProjectRevised)
     {
         Project = project;
         _pipeline = pipeline;
+        _reviser = reviser;
         _onBack = onBack;
         _onTabChanged = onTabChanged;
         _onSettings = onSettings;
-
-        // validation badge reflects the real findings (fails take priority over warnings; hidden when clean)
-        var fails = project.Findings.Count(f => f.Severity == "fail");
-        var warns = project.Findings.Count(f => f.Severity == "warn");
-        string? vBadge = fails > 0 ? $"{fails}F" : warns > 0 ? $"{warns}W" : null;
-        string vKind = fails > 0 ? "fail" : "warn";
+        _onProjectRevised = onProjectRevised;
 
         Tabs = new List<TabDescriptor>
         {
@@ -67,9 +70,11 @@ public sealed partial class ShellViewModel : ObservableObject
             new() { Id="wiring",    Label="Wiring",         Icon="wire",   Index=2, Factory=p => new WiringViewModel(p) },
             new() { Id="enclosure", Label="Enclosure",      Icon="cube",   Index=3, Factory=p => new EnclosureViewModel(p) },
             new() { Id="firmware",  Label="Firmware",       Icon="code",   Index=4, Factory=p => new FirmwareViewModel(p) },
-            new() { Id="validation",Label="Validation",     Icon="shield", Index=5, BadgeText=vBadge, BadgeKind=vKind, Factory=p => new ValidationViewModel(p) },
+            new() { Id="validation",Label="Validation",     Icon="shield", Index=5, Factory=p => new ValidationViewModel(p) },
             new() { Id="guide",     Label="Assembly guide", Icon="book",   Index=6, Factory=p => new GuideViewModel(p) },
         };
+        _validationTab = Tabs.First(t => t.Id == "validation");
+        UpdateValidationBadge();
 
         Stages = new List<StageRow>
         {
@@ -85,8 +90,20 @@ public sealed partial class ShellViewModel : ObservableObject
     partial void OnSelectedTabChanged(TabDescriptor value)
     {
         if (value is null) return;
-        CurrentTabView = value.Factory(Project);
+        var view = value.Factory(Project);
+        if (view is ValidationViewModel vvm) vvm.FindingsChanged += UpdateValidationBadge;
+        CurrentTabView = view;
         _onTabChanged(value.Label);
+    }
+
+    /// <summary>Recompute the validation rail badge from the current findings (fails over warns; hidden when clean).</summary>
+    private void UpdateValidationBadge()
+    {
+        if (_validationTab is null) return;
+        var fails = Project.Findings.Count(f => f.Severity == "fail");
+        var warns = Project.Findings.Count(f => f.Severity == "warn");
+        _validationTab.BadgeKind = fails > 0 ? "fail" : "warn";
+        _validationTab.BadgeText = fails > 0 ? $"{fails}F" : warns > 0 ? $"{warns}W" : null;
     }
 
     [RelayCommand] private void Back() => _onBack();
@@ -103,23 +120,41 @@ public sealed partial class ShellViewModel : ObservableObject
         var userMsg = new ChatMessage { Role = "user", Text = text, Time = DateTime.Now.ToString("HH:mm") };
         Chat.Add(userMsg);
 
-        LivePipeline.Clear();
-        var progress = new Progress<IReadOnlyList<PipelineStage>>(stages =>
-        {
-            LivePipeline.Clear();
-            foreach (var s in stages) LivePipeline.Add(s);
-        });
-
         try
         {
-            var reply = await _pipeline.RunTurnAsync(Project, text, progress);
-            // The stub already appended user+assistant to Project.Chat; mirror only the reply.
-            Chat.Add(reply);
+            // Chat edits the design: revise the project, then swap it in and re-run downstream stages.
+            var result = await _reviser.ReviseAsync(Project, text);
+            if (result.Ok && result.Project is not null)
+            {
+                ApplyRevision(result.Project, $"Done — applied “{text}”. BOM, wiring, firmware, enclosure and validation updated.");
+            }
+            else
+            {
+                Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
+            }
+        }
+        catch (Exception ex)
+        {
+            Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = $"Couldn't apply that: {ex.Message}" });
         }
         finally
         {
             IsGenerating = false;
-            LivePipeline.Clear();
         }
+    }
+
+    private void ApplyRevision(Project revised, string summary)
+    {
+        var assistant = new ChatMessage { Role = "assistant", Text = summary, Time = DateTime.Now.ToString("HH:mm") };
+        Chat.Add(assistant);
+        revised.Chat = Chat.ToList();           // persist the running conversation
+
+        Project = revised;
+        OnPropertyChanged(nameof(Project));
+        _onProjectRevised(revised);             // let the root update its ref + save to the library
+
+        UpdateValidationBadge();
+        CurrentTabView = SelectedTab.Factory(Project);   // rebuild the active tab against the new project
+        if (CurrentTabView is ValidationViewModel vvm) vvm.FindingsChanged += UpdateValidationBadge;
     }
 }
