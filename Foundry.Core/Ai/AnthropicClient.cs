@@ -31,7 +31,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     private readonly string _apiKey;
     private readonly int _maxTokens;
 
-    public AnthropicClient(string apiKey, int maxTokens = 8192, HttpClient? http = null)
+    public AnthropicClient(string apiKey, int maxTokens = 16384, HttpClient? http = null)
     {
         _apiKey = apiKey;
         _maxTokens = maxTokens;

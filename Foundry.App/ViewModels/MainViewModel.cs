@@ -71,8 +71,9 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var anthropicKey = _credentials.Read(CredentialStore.AnthropicTarget);
         bool hasKey = !string.IsNullOrWhiteSpace(anthropicKey);
-        _ai = hasKey ? new AnthropicClient(anthropicKey!) : new StubAnthropicClient();
-        var modelId = ConfigStore.Load().ModelId;
+        var cfg = ConfigStore.Load();
+        _ai = hasKey ? new AnthropicClient(anthropicKey!, cfg.MaxOutputTokens) : new StubAnthropicClient();
+        var modelId = cfg.ModelId;
         _pipeline = new ChatPipeline(_ai, modelId);
 
         var nexarKey = _credentials.Read(CredentialStore.NexarTarget);

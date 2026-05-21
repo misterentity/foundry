@@ -34,7 +34,7 @@ public class ConfigStoreTests
     {
         var cfg = ConfigStore.Load(Path.Combine(Path.GetTempPath(), $"nope_{Guid.NewGuid():N}.json"));
         Assert.Equal(ModelCatalog.DefaultModelId, cfg.ModelId);
-        Assert.Equal(8192, cfg.MaxOutputTokens);
+        Assert.Equal(16384, cfg.MaxOutputTokens);
     }
 }
 

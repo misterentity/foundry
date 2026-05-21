@@ -12,7 +12,7 @@ public sealed class AppConfig
     public string ModelId { get; set; } = ModelCatalog.DefaultModelId;
     /// <summary>Model used for chat iteration + validation fixes (kept fast/cheap vs. full generation).</summary>
     public string ChatModelId { get; set; } = "claude-sonnet-4-6";
-    public int MaxOutputTokens { get; set; } = 8192;
+    public int MaxOutputTokens { get; set; } = 16384;
     public double Temperature { get; set; } = 1.0;
     /// <summary>Arduino C++ | MicroPython</summary>
     public string FirmwarePlatform { get; set; } = "Arduino C++";

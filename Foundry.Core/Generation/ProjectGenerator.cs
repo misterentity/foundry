@@ -83,16 +83,24 @@ Output ONLY the JSON object.
 
         Diagnostics.AppLog.Info("generation", $"design pass started · model {_model}", prompt);
 
-        string raw;
-        try { raw = await _ai.CompleteAsync(SystemPrompt, prompt, _model, ct); }
-        catch (Exception ex)
+        // Two attempts: complex designs occasionally truncate or return stray prose; a retry (with a
+        // stricter nudge) recovers without bothering the user.
+        string? json = null;
+        for (int attempt = 1; attempt <= 2 && json is null; attempt++)
         {
-            Diagnostics.AppLog.Error("generation", $"design pass failed: {ex.Message}");
-            return new GenerationResult(false, null, $"Generation failed: {ex.Message}");
+            var user = attempt == 1 ? prompt
+                : prompt + "\n\n(Return the COMPLETE JSON object only — no prose, no markdown fences, and keep it compact enough to finish.)";
+            string raw;
+            try { raw = await _ai.CompleteAsync(SystemPrompt, user, _model, ct); }
+            catch (Exception ex)
+            {
+                Diagnostics.AppLog.Error("generation", $"design pass failed: {ex.Message}");
+                return new GenerationResult(false, null, $"Generation failed: {ex.Message}");
+            }
+            json = ExtractJson(raw);
+            if (json is null) Diagnostics.AppLog.Warn("generation", $"attempt {attempt}: invalid/truncated JSON ({raw.Length} chars)");
         }
-
-        var json = ExtractJson(raw);
-        if (json is null) return new GenerationResult(false, null, "The model did not return valid JSON. Try again.");
+        if (json is null) return new GenerationResult(false, null, "The model did not return valid JSON after a retry. Try simplifying the prompt.");
 
         Project.Project project;
         try { project = Map(json, prompt); }
