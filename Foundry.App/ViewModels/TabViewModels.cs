@@ -64,7 +64,8 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "project-spec.pdf");
-            File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project));
+            var wiring = Rendering.WiringImage.Render(Project);
+            File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
         catch { /* best effort */ }
@@ -201,10 +202,30 @@ public sealed partial class BomViewModel : TabViewModelBase
 }
 
 // ---------------- Wiring ----------------
-public sealed class WiringViewModel : TabViewModelBase
+public sealed partial class WiringViewModel : TabViewModelBase
 {
     public WiringViewModel(Project project) : base(project) { }
     public int NetCount => Project.Connections.Count;
+    [ObservableProperty] private string _status = "";
+
+    /// <summary>Render the wiring diagram to a PNG in the configured export folder.</summary>
+    [RelayCommand]
+    private void ExportPng()
+    {
+        try
+        {
+            var png = Rendering.WiringImage.Render(Project);
+            if (png is null) { Status = "Couldn't render the diagram."; return; }
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "wiring.png");
+            File.WriteAllBytes(path, png);
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"wiring PNG → {path}");
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            Status = $"Exported to {path}";
+        }
+        catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
+    }
 }
 
 // ---------------- Enclosure ----------------
@@ -455,7 +476,7 @@ public sealed partial class GuideViewModel : TabViewModelBase
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, $"{SafeName(Project.Title)}-spec.pdf");
-            File.WriteAllBytes(path, PdfExporter.ProjectPdf(Project));
+            File.WriteAllBytes(path, PdfExporter.ProjectPdf(Project, Rendering.WiringImage.Render(Project)));
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
         catch { /* best effort */ }

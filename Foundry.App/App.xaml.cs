@@ -40,12 +40,32 @@ public partial class App : Application
             case "settings": main.ShowSettings(); break;
             case "logs": main.ShowLogs(); break;
             case "gen": GenerateForDiag(main); break;
+            case "export": main.OpenSample(); break;
         }
 
         _window = new MainWindow { DataContext = main };
         _window.Show();
 
+        if (Environment.GetEnvironmentVariable("FOUNDRY_START") == "export")
+            Dispatcher.BeginInvoke(new Action(() => ExportForDiag(main)), System.Windows.Threading.DispatcherPriority.Background);
+
         SetupTray();
+    }
+
+    // Dev hook: FOUNDRY_START=export renders the wiring PNG + project PDF to FOUNDRY_EXPORT_DIR, then exits.
+    private static void ExportForDiag(MainViewModel main)
+    {
+        try
+        {
+            var p = main.Project!;
+            var dir = Environment.GetEnvironmentVariable("FOUNDRY_EXPORT_DIR") ?? System.IO.Path.GetTempPath();
+            var png = Foundry.App.Rendering.WiringImage.Render(p);
+            if (png is not null) System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, "_diag_wiring.png"), png);
+            System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, "_diag_spec.pdf"),
+                Foundry.Core.Export.PdfExporter.ProjectPdf(p, png));
+        }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"diag export failed: {ex.Message}"); }
+        finally { Current.Shutdown(); }
     }
 
     // Dev hook: FOUNDRY_GEN=<prompt> generates a real project then opens the workspace (for QA).

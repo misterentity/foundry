@@ -23,7 +23,8 @@ public static class PdfExporter
 
     static PdfExporter() => QuestPDF.Settings.License = LicenseType.Community;
 
-    public static byte[] ProjectPdf(Project.Project p) =>
+    /// <param name="wiringPng">Optional rendered wiring diagram (PNG) to embed; null omits the section.</param>
+    public static byte[] ProjectPdf(Project.Project p, byte[]? wiringPng = null) =>
         Document.Create(c => c.Page(page =>
         {
             Setup(page);
@@ -36,6 +37,7 @@ public static class PdfExporter
                 Kpis(col, p);
                 Architecture(col, p);
                 BomTable(col, p);
+                Wiring(col, wiringPng);
                 Netlist(col, p);
                 Findings(col, p);
                 Assembly(col, p);
@@ -166,6 +168,13 @@ public static class PdfExporter
             table.Cell().ColumnSpan(4).PaddingVertical(5).AlignRight().Text("Subtotal").FontFamily(Mono).FontSize(8.5f).FontColor(Mute);
             table.Cell().PaddingVertical(5).AlignRight().Text($"${p.Bom.Sum(b => b.Qty * b.Price):0.00}").FontFamily(Serif).FontSize(12).FontColor(Accent);
         });
+    }
+
+    private static void Wiring(ColumnDescriptor col, byte[]? wiringPng)
+    {
+        if (wiringPng is null || wiringPng.Length == 0) return;
+        SectionTitle(col, "Wiring diagram");
+        col.Item().Background("#0A0A0E").Padding(8).Image(wiringPng).FitWidth();
     }
 
     private static void Netlist(ColumnDescriptor col, Project.Project p)

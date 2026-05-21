@@ -161,7 +161,8 @@ public sealed partial class ShellViewModel : ObservableObject
             var dir = Foundry.Core.Config.ConfigStore.Load().OutputFolder;
             System.IO.Directory.CreateDirectory(dir);
             var path = System.IO.Path.Combine(dir, "project-spec.pdf");
-            System.IO.File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project));
+            var wiring = Rendering.WiringImage.Render(Project);
+            System.IO.File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
             Foundry.Core.Diagnostics.AppLog.Info("export", $"project PDF → {path}");
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
