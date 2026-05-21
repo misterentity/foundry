@@ -23,8 +23,8 @@ jobs:
       # Clean build first so the publish can't reuse a stale project-reference DLL
       # (a prior `dotnet test` build left MSBuild thinking Foundry.Core was up to date,
       #  which shipped a Core.dll without ProjectGenerator in v0.4.2–v0.4.4).
-      - name: Publish (self-contained win-x64, no incremental)
-        run: dotnet publish Foundry.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false --no-incremental -o build/publish
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish Foundry.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o build/publish
 
       - name: Verify build integrity
         shell: pwsh
