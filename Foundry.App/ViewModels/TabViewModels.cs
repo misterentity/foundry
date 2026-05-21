@@ -303,6 +303,9 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     /// <summary>Raised after the findings change (re-run / auto-fix) so the rail badge can update.</summary>
     public event Action? FindingsChanged;
 
+    /// <summary>Raised when a fix needs the AI to generate it (no deterministic netlist edit applies).</summary>
+    public event Action<Finding>? FixRequested;
+
     public ValidationViewModel(Project project) : base(project)
     {
         Refresh();
@@ -358,21 +361,17 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     private void ApplyFix(Finding? finding)
     {
         if (finding is null) return;
-        if (!ProjectValidator.CanAutoFix(finding))
-        {
-            Status = $"{finding.Code}: “{finding.Fix}” needs a manual change — no safe automatic edit.";
-            return;
-        }
-        if (ProjectValidator.TryAutoFix(Project, finding))
+        // Fast path: a deterministic netlist edit (remap to a free pin / connect a rail) when possible.
+        if (ProjectValidator.CanAutoFix(finding) && ProjectValidator.TryAutoFix(Project, finding))
         {
             ProjectValidator.Revalidate(Project);
             Refresh();
             Status = $"Applied “{finding.Fix}” · re-validated ({Project.Findings.Count} checks)";
+            return;
         }
-        else
-        {
-            Status = $"Couldn’t auto-fix {finding.Code} — no free pin/rail available.";
-        }
+        // Otherwise have the AI generate the fix (handled by the shell, which revises + re-validates).
+        Status = $"Generating a fix for {finding.Code}…";
+        FixRequested?.Invoke(finding);
     }
 
     // Power budget derived from the real component active currents.

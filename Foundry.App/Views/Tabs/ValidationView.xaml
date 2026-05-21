@@ -83,12 +83,8 @@
                       <TextBlock Style="{StaticResource KickerAccent}" Text="Suggested fix"/>
                       <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,4" TextWrapping="Wrap" Text="{Binding Fix}"/>
                       <Button Style="{StaticResource BtnPrimary}" Padding="10,6" FontSize="10" HorizontalAlignment="Left" Content="APPLY &amp; RE-RUN"
-                              Visibility="{Binding AutoFixable, Converter={StaticResource BoolVis}}"
                               Command="{Binding DataContext.ApplyFixCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                               CommandParameter="{Binding}"/>
-                      <TextBlock Style="{StaticResource Mono}" FontSize="10" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap"
-                                 Visibility="{Binding AutoFixable, Converter={StaticResource BoolVis}, ConverterParameter=invert}"
-                                 Text="Apply manually, then RE-RUN CHECKS."/>
                     </StackPanel>
                     <TextBlock Visibility="{Binding Fix, Converter={StaticResource NullVis}, ConverterParameter=invert}"
                                Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.Ok}" Text="✓ no action needed"/>

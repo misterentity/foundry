@@ -91,9 +91,42 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         if (value is null) return;
         var view = value.Factory(Project);
-        if (view is ValidationViewModel vvm) vvm.FindingsChanged += UpdateValidationBadge;
+        WireTab(view);
         CurrentTabView = view;
         _onTabChanged(value.Label);
+    }
+
+    private void WireTab(ObservableObject view)
+    {
+        if (view is ValidationViewModel vvm)
+        {
+            vvm.FindingsChanged += UpdateValidationBadge;
+            vvm.FixRequested += f => _ = ApplyAiFixAsync(f);
+        }
+    }
+
+    /// <summary>Have the AI generate a fix for a validation finding, apply it, and re-validate.</summary>
+    private async Task ApplyAiFixAsync(Finding finding)
+    {
+        if (IsGenerating) return;
+        IsGenerating = true;
+        Chat.Add(new ChatMessage { Role = "user", Time = DateTime.Now.ToString("HH:mm"), Text = $"Fix: {finding.Title}" });
+        try
+        {
+            var req = $"Resolve this electrical validation finding by editing the design, then return the full " +
+                      $"updated project: [{finding.Code}] {finding.Title}. {finding.Description} " +
+                      $"Suggested fix: {finding.Fix}. Make the minimal change that resolves it.";
+            var result = await _reviser.ReviseAsync(Project, req);
+            if (result.Ok && result.Project is not null)
+                ApplyRevision(result.Project, $"Applied a fix for {finding.Code}: {finding.Title}.");
+            else
+                Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
+        }
+        catch (Exception ex)
+        {
+            Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = $"Couldn't generate a fix: {ex.Message}" });
+        }
+        finally { IsGenerating = false; }
     }
 
     /// <summary>Recompute the validation rail badge from the current findings (fails over warns; hidden when clean).</summary>
@@ -154,7 +187,8 @@ public sealed partial class ShellViewModel : ObservableObject
         _onProjectRevised(revised);             // let the root update its ref + save to the library
 
         UpdateValidationBadge();
-        CurrentTabView = SelectedTab.Factory(Project);   // rebuild the active tab against the new project
-        if (CurrentTabView is ValidationViewModel vvm) vvm.FindingsChanged += UpdateValidationBadge;
+        var view = SelectedTab.Factory(Project);         // rebuild the active tab against the new project
+        WireTab(view);
+        CurrentTabView = view;
     }
 }
