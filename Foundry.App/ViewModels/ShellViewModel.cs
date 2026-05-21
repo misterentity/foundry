@@ -34,10 +34,11 @@ public sealed partial class ShellViewModel : ObservableObject
 {
     private readonly IPipeline _pipeline;
     private readonly ProjectGenerator _reviser;
+    private readonly ProjectGenerator _rebuilder;
     private readonly Action _onBack;
     private readonly Action<string> _onTabChanged;
     private readonly Action _onSettings;
-    private readonly Action<Project> _onProjectRevised;
+    private readonly Action<Project, string> _onProjectRevised;
     private TabDescriptor? _validationTab;
 
     public Project Project { get; private set; }
@@ -47,17 +48,22 @@ public sealed partial class ShellViewModel : ObservableObject
     public ObservableCollection<ChatMessage> Chat { get; }
     public ObservableCollection<PipelineStage> LivePipeline { get; } = new();
 
+    // revision history (iteration sidebar: CHAT | HISTORY)
+    public ObservableCollection<RevisionSummary> Revisions { get; } = new();
+    [ObservableProperty] private bool _showHistory;
+
     [ObservableProperty] private TabDescriptor _selectedTab = null!;
     [ObservableProperty] private ObservableObject _currentTabView = null!;
     [ObservableProperty] private string _chatInput = "";
     [ObservableProperty] private bool _isGenerating;
 
-    public ShellViewModel(Project project, IPipeline pipeline, ProjectGenerator reviser,
-        Action onBack, Action<string> onTabChanged, Action onSettings, Action<Project> onProjectRevised)
+    public ShellViewModel(Project project, IPipeline pipeline, ProjectGenerator reviser, ProjectGenerator rebuilder,
+        Action onBack, Action<string> onTabChanged, Action onSettings, Action<Project, string> onProjectRevised)
     {
         Project = project;
         _pipeline = pipeline;
         _reviser = reviser;
+        _rebuilder = rebuilder;
         _onBack = onBack;
         _onTabChanged = onTabChanged;
         _onSettings = onSettings;
@@ -103,6 +109,69 @@ public sealed partial class ShellViewModel : ObservableObject
             vvm.FindingsChanged += UpdateValidationBadge;
             vvm.FixRequested += f => _ = ApplyAiFixAsync(f);
         }
+        if (view is OverviewViewModel ovm)
+            ovm.RebuildRequested += () => _ = RebuildAsync();
+    }
+
+    /// <summary>Regenerate the entire project from its prompt (replaces the current design).</summary>
+    private async Task RebuildAsync()
+    {
+        if (IsGenerating) return;
+        if (System.Windows.MessageBox.Show(
+                "Rebuild regenerates the whole project from its original prompt and replaces the current design. " +
+                "The current version is kept in history so you can restore it.\n\nContinue?",
+                "Foundry — rebuild project", System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question) != System.Windows.MessageBoxResult.Yes)
+            return;
+
+        IsGenerating = true;
+        _cts = new CancellationTokenSource();
+        Chat.Add(new ChatMessage { Role = "user", Time = DateTime.Now.ToString("HH:mm"), Text = "Rebuild the whole project." });
+        try
+        {
+            var result = await _rebuilder.GenerateAsync(Project.Prompt, _cts.Token);
+            if (result.Ok && result.Project is not null)
+            {
+                result.Project.Id = Project.Id;          // keep library identity + history
+                result.Project.Prompt = Project.Prompt;
+                ApplyRevision(result.Project, "Rebuilt the whole project from the prompt.");
+            }
+            else
+                Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
+        }
+        catch (OperationCanceledException)
+        {
+            Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = "Cancelled." });
+        }
+        catch (Exception ex)
+        {
+            Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = $"Rebuild failed: {ex.Message}" });
+        }
+        finally { IsGenerating = false; }
+    }
+
+    [RelayCommand]
+    private void ToggleHistory()
+    {
+        ShowHistory = !ShowHistory;
+        if (ShowHistory) RefreshRevisions();
+    }
+
+    private void RefreshRevisions()
+    {
+        Revisions.Clear();
+        foreach (var r in RevisionStore.List(Project.Id)) Revisions.Add(r);
+    }
+
+    [RelayCommand]
+    private void Restore(RevisionSummary? rev)
+    {
+        if (rev is null) return;
+        var restored = RevisionStore.Load(Project.Id, rev.RevId);
+        if (restored is null) return;
+        restored.Id = Project.Id;
+        ApplyRevision(restored, $"Restored “{rev.Label}” ({rev.At}).");
+        ShowHistory = false;
     }
 
     /// <summary>Have the AI generate a fix for a validation finding, apply it, and re-validate.</summary>
@@ -216,11 +285,12 @@ public sealed partial class ShellViewModel : ObservableObject
 
         Project = revised;
         OnPropertyChanged(nameof(Project));
-        _onProjectRevised(revised);             // let the root update its ref + save to the library
+        _onProjectRevised(revised, summary);    // root updates its ref, saves to library + captures a revision
 
         UpdateValidationBadge();
         var view = SelectedTab.Factory(Project);         // rebuild the active tab against the new project
         WireTab(view);
         CurrentTabView = view;
+        if (ShowHistory) RefreshRevisions();
     }
 }

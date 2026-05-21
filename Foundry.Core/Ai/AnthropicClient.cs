@@ -22,6 +22,10 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     // AnthropicClient must never tear this down — see Dispose().
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(5) };
 
+    // Serialize every Anthropic call through one gate so requests never overlap (a simple FIFO queue).
+    // Callers mark themselves in-flight via AiActivity before waiting, so the status bar shows queue depth.
+    private static readonly System.Threading.SemaphoreSlim Gate = new(1, 1);
+
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly string _apiKey;
@@ -47,6 +51,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     public async Task<ModelListResult> ListModelsAsync(CancellationToken ct = default)
     {
         using var _activity = Diagnostics.AiActivity.Begin("Loading models…");
+        await Gate.WaitAsync(ct);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -77,12 +82,14 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
             Diagnostics.AppLog.Ai("models", "—", 0, 0, sw.ElapsedMilliseconds, false, ex.Message);
             return ModelListResult.Failure(ex.Message);
         }
+        finally { Gate.Release(); }
     }
 
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, string modelId, CancellationToken ct = default)
     {
         var model = string.IsNullOrWhiteSpace(modelId) ? ModelCatalog.DefaultModelId : modelId;
         using var _activity = Diagnostics.AiActivity.Begin("Working with Claude…");
+        await Gate.WaitAsync(ct);   // queue: one AI call at a time
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -122,6 +129,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
             Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, 0, sw.ElapsedMilliseconds, false, ex.Message);
             throw;
         }
+        finally { Gate.Release(); }
     }
 
     private static string ExtractError(string body)

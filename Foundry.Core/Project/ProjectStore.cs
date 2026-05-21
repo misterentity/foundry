@@ -45,6 +45,9 @@ public static class ProjectStore
         return string.IsNullOrWhiteSpace(id) ? "project" : id;
     }
 
+    /// <summary>Filesystem-safe form of a project id (for revision/sidecar folders).</summary>
+    public static string SafeId(string id) => Sanitize(id);
+
     /// <summary>Persist a project to the library, stamping an id/timestamp if missing.</summary>
     public static void SaveToLibrary(Project project)
     {

@@ -57,7 +57,9 @@ public sealed partial class MainViewModel : ObservableObject
         void Apply()
         {
             AiBusy = Foundry.Core.Diagnostics.AiActivity.Busy;
-            AiActivityLabel = Foundry.Core.Diagnostics.AiActivity.Label ?? "";
+            var label = Foundry.Core.Diagnostics.AiActivity.Label ?? "";
+            var queued = Foundry.Core.Diagnostics.AiActivity.InFlight - 1;   // others waiting behind the running call
+            AiActivityLabel = queued > 0 ? $"{label} · {queued} queued" : label;
         }
         var disp = System.Windows.Application.Current?.Dispatcher;
         if (disp is null || disp.CheckAccess()) Apply();
@@ -115,6 +117,7 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 Project = p;
                 ProjectStore.SaveToLibrary(p);   // persist the generated project
+                RevisionStore.Capture(p, "Generated from prompt");
                 _tracked = true;
                 ShowWorkspace();
             },
@@ -159,14 +162,16 @@ public sealed partial class MainViewModel : ObservableObject
     public void ShowWorkspace()
     {
         if (Project is null) { ShowProjects(); return; }
-        var reviser = new ProjectGenerator(_ai, ConfigStore.Load().ChatModelId);   // chat/edits use the fast model
-        var shell = new ShellViewModel(Project, _pipeline, reviser,
+        var cfg = ConfigStore.Load();
+        var reviser = new ProjectGenerator(_ai, cfg.ChatModelId);   // chat/edits + fixes use the fast model
+        var rebuilder = new ProjectGenerator(_ai, cfg.ModelId);     // full rebuild uses the main model
+        var shell = new ShellViewModel(Project, _pipeline, reviser, rebuilder,
             onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings,
-            onProjectRevised: p =>
+            onProjectRevised: (p, label) =>
             {
                 Project = p;
                 _tracked = true;
-                try { ProjectStore.SaveToLibrary(p); } catch { }
+                try { ProjectStore.SaveToLibrary(p); RevisionStore.Capture(p, label); } catch { }
             });
         CurrentView = shell;
         UpdateWorkspaceCrumb(shell.SelectedTab?.Label ?? "Workspace");

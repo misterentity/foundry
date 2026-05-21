@@ -15,6 +15,8 @@ public static class AiActivity
 
     public static bool Busy { get { lock (Gate) return _count > 0; } }
     public static string? Label { get { lock (Gate) return _label; } }
+    /// <summary>Total AI calls in flight (running + queued).</summary>
+    public static int InFlight { get { lock (Gate) return _count; } }
 
     /// <summary>Mark an AI call in-flight; dispose when it completes.</summary>
     public static IDisposable Begin(string label)

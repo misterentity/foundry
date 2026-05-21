@@ -49,6 +49,11 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             .OrderByDescending(s => s.Cost).ToList();
     }
 
+    /// <summary>Raised when the user asks to regenerate the whole project (handled by the shell).</summary>
+    public event Action? RebuildRequested;
+
+    [RelayCommand] private void Rebuild() => RebuildRequested?.Invoke();
+
     public IReadOnlyList<Finding> TopFindings { get; }
     public IReadOnlyList<SourcingRow> Sourcing { get; }
     public string CostText => $"${Project.Kpis.Cost:0.00}";
