@@ -55,9 +55,13 @@ public class FirmwareTests
         var fw = FirmwareGenerator.Generate(DemoData.SoilMoistureConnections(), Kb);
 
         Assert.Equal("Arduino C++", fw.Platform);
-        Assert.Contains(fw.Files, f => f.Name == "main.ino" && f.Content.Contains("#include \"pinmap.h\""));
+        // generic, netlist-driven scaffold: setup()/loop() reference the derived pin macros
+        var main = fw.Files.Single(f => f.Name == "main.ino").Content;
+        Assert.Contains("#include \"pinmap.h\"", main);
+        Assert.Contains("void setup()", main);
+        Assert.Contains("void loop()", main);
+        Assert.Contains("PIN_SENSOR_AOUT", main);   // the soil sensor's analog pin is read in loop()
         Assert.Contains(fw.Files, f => f.Name == "pinmap.h" && f.Content.Contains("PIN_SENSOR_AOUT"));
-        Assert.Contains(fw.Files, f => f.Name == "wifi.h" && f.Content.Contains("TODO"));
         Assert.Contains(fw.Files, f => f.Name == "platformio.ini");
         Assert.All(fw.Files, f => Assert.False(string.IsNullOrWhiteSpace(f.Content)));
     }

@@ -26,46 +26,42 @@ public static class FirmwareGenerator
     // ---------- Arduino C++ ----------
     private static Foundry.Core.Project.Firmware Arduino(IReadOnlyList<PinMapEntry> entries)
     {
-        var analog = entries.FirstOrDefault(e => e.Net == "signal");
-        var sketch = new StringBuilder();
-        sketch.AppendLine("// FOUNDRY · generated starter sketch");
-        sketch.AppendLine("// Pin map is GENERATED from the netlist — do not edit pins by hand. See pinmap.h");
-        sketch.AppendLine();
-        sketch.AppendLine("#include <WiFi.h>");
-        sketch.AppendLine("#include <HTTPClient.h>");
-        sketch.AppendLine("#include <ArduinoJson.h>");
-        sketch.AppendLine("#include \"pinmap.h\"");
-        sketch.AppendLine("#include \"wifi.h\"");
-        sketch.AppendLine();
-        sketch.AppendLine("constexpr uint64_t SLEEP_US = 6ULL * 60ULL * 60ULL * 1000000ULL;  // 6 h");
-        sketch.AppendLine("constexpr float DRY_THRESHOLD = 0.32f;");
-        sketch.AppendLine();
-        sketch.AppendLine("void setup() {");
-        sketch.AppendLine("  Serial.begin(115200);");
-        foreach (var e in entries)
-            sketch.AppendLine($"  pinMode({e.Macro}, {(e.Net == "signal" ? "INPUT" : "INPUT_PULLUP")});");
-        sketch.AppendLine("  analogReadResolution(12);");
-        sketch.AppendLine();
-        if (analog is not null)
+        bool hasAnalog = entries.Any(e => e.Dir == "analog");
+        bool hasI2c = entries.Any(e => e.Dir == "i2c");
+        var ios = entries.Where(e => e.Dir != "i2c").ToList();
+
+        var s = new StringBuilder();
+        s.AppendLine("// FOUNDRY · generated starter sketch");
+        s.AppendLine("// setup()/loop() are scaffolded from the netlist; pin map is in pinmap.h (do not hand-edit pins).");
+        s.AppendLine();
+        s.AppendLine("#include <Arduino.h>");
+        s.AppendLine("#include \"pinmap.h\"");
+        if (hasI2c) s.AppendLine("#include <Wire.h>");
+        s.AppendLine();
+        s.AppendLine("void setup() {");
+        s.AppendLine("  Serial.begin(115200);");
+        if (hasAnalog) s.AppendLine("  analogReadResolution(12);");
+        if (hasI2c) s.AppendLine("  Wire.begin();  // I2C bus");
+        foreach (var e in ios)
         {
-            sketch.AppendLine("  float reading = readAnalog();");
-            sketch.AppendLine("  if (reading < DRY_THRESHOLD) {");
-            sketch.AppendLine("    alertWebhook(reading);  // TODO: configure webhook in wifi.h");
-            sketch.AppendLine("  }");
-            sketch.AppendLine();
+            var mode = e.Dir == "output" ? "OUTPUT" : "INPUT";
+            s.AppendLine($"  pinMode({e.Macro}, {mode});  // {e.ToPin}");
         }
-        sketch.AppendLine("  esp_deep_sleep(SLEEP_US);");
-        sketch.AppendLine("}");
-        sketch.AppendLine();
-        sketch.AppendLine("void loop() {}");
-        if (analog is not null)
+        s.AppendLine("}");
+        s.AppendLine();
+        s.AppendLine("void loop() {");
+        foreach (var e in ios)
         {
-            sketch.AppendLine();
-            sketch.AppendLine("float readAnalog() {");
-            sketch.AppendLine($"  int raw = analogRead({analog.Macro});");
-            sketch.AppendLine("  return 1.0f - ((float)raw / 4095.0f);  // dry→0, wet→1");
-            sketch.AppendLine("}");
+            if (e.Dir == "analog")
+                s.AppendLine($"  int {VarName(e)} = analogRead({e.Macro});  Serial.printf(\"{VarName(e)}=%d\\n\", {VarName(e)});");
+            else if (e.Dir == "input")
+                s.AppendLine($"  int {VarName(e)} = digitalRead({e.Macro});  Serial.printf(\"{VarName(e)}=%d\\n\", {VarName(e)});");
+            else // output
+                s.AppendLine($"  digitalWrite({e.Macro}, HIGH);  // TODO: drive {e.ToPin} as needed");
         }
+        if (hasI2c) s.AppendLine("  // TODO: talk to your I2C device(s) over Wire");
+        s.AppendLine("  delay(1000);");
+        s.AppendLine("}");
 
         return new Foundry.Core.Project.Firmware
         {
@@ -73,29 +69,33 @@ public static class FirmwareGenerator
             Board = "esp32:esp32:esp32",
             Files = new()
             {
-                new FirmwareFile { Name = "main.ino", Path = "/foundry/firmware/", Active = true, Content = sketch.ToString() },
+                new FirmwareFile { Name = "main.ino", Path = "/foundry/firmware/", Active = true, Content = s.ToString() },
                 new FirmwareFile { Name = "pinmap.h", Path = "/foundry/firmware/", Content = PinMap.RenderHeader(entries) },
-                new FirmwareFile { Name = "wifi.h",   Path = "/foundry/firmware/", Content = WifiHeader() },
-                new FirmwareFile { Name = "platformio.ini", Path = "/foundry/firmware/", Content = PlatformIo() },
+                new FirmwareFile { Name = "platformio.ini", Path = "/foundry/firmware/", Content = PlatformIo(hasI2c) },
+                new FirmwareFile { Name = "README.md", Path = "/foundry/firmware/", Content = Readme(entries) },
             },
-            Libraries = new()
-            {
-                new("WiFi", "built-in"), new("HTTPClient", "built-in"), new("ArduinoJson", "7.1.0"),
-                new("esp32-hal-adc", "built-in"), new("ESP32 Deep Sleep", "built-in"),
-            },
+            Libraries = hasI2c
+                ? new() { new("Arduino core", "built-in"), new("Wire (I2C)", "built-in") }
+                : new() { new("Arduino core", "built-in") },
         };
     }
 
-    private static string WifiHeader() =>
-        "#pragma once\n\n" +
-        "// TODO: fill in your secrets — these are NEVER written to the Project file.\n" +
-        "#define WIFI_SSID          \"YOUR_SSID\"\n#define WIFI_PASS          \"YOUR_PASSWORD\"\n\n" +
-        "// HTTPS webhook (e.g. Twilio)\n#define WEBHOOK_URL        \"https://example.com/alert\"\n";
+    private static string VarName(PinMapEntry e)
+    {
+        var n = e.Macro.StartsWith("PIN_") ? e.Macro[4..] : e.Macro;
+        return n.ToLowerInvariant();
+    }
 
-    private static string PlatformIo() =>
+    private static string Readme(IReadOnlyList<PinMapEntry> entries) =>
+        "# Firmware (generated)\n\n" +
+        "Open this folder in the Arduino IDE 2.x or PlatformIO and flash to your board.\n\n" +
+        "- `pinmap.h` is generated from the netlist — change the wiring, not the header.\n" +
+        "- `main.ino` scaffolds setup()/loop() for every connected pin; fill in the TODOs.\n\n" +
+        $"Pins: {entries.Count} mapped from the netlist.\n";
+
+    private static string PlatformIo(bool hasI2c) =>
         "[env:esp32dev]\nplatform   = espressif32@^6.5.0\nboard      = esp32dev\n" +
-        "framework  = arduino\nmonitor_speed = 115200\nupload_speed  = 460800\n" +
-        "lib_deps =\n  bblanchon/ArduinoJson@^7.1.0\nbuild_flags =\n  -D CONFIG_DEEP_SLEEP\n";
+        "framework  = arduino\nmonitor_speed = 115200\nupload_speed  = 460800\n";
 
     // ---------- MicroPython ----------
     private static Foundry.Core.Project.Firmware Micropython(IReadOnlyList<PinMapEntry> entries)
@@ -105,27 +105,39 @@ public static class FirmwareGenerator
         foreach (var e in entries)
             pinmap.AppendLine($"{e.Macro} = {e.Gpio}  # {e.Net}: {e.FromPin} <-> {e.ToPin}" + (e.Strapping ? "  [strapping]" : ""));
 
+        bool hasAnalog = entries.Any(e => e.Dir == "analog");
+        bool hasI2c = entries.Any(e => e.Dir == "i2c");
+        var ios = entries.Where(e => e.Dir != "i2c").ToList();
+
         var main = new StringBuilder();
         main.AppendLine("# FOUNDRY · generated MicroPython starter");
+        main.AppendLine("# Scaffolded from the netlist; pin numbers live in pinmap.py.");
         main.AppendLine("import time, machine");
         main.AppendLine("from pinmap import *");
-        main.AppendLine("import config  # TODO: fill in secrets in config.py");
         main.AppendLine();
-        var analog = entries.FirstOrDefault(e => e.Net == "signal");
-        if (analog is not null)
+        foreach (var e in ios)
         {
-            main.AppendLine($"adc = machine.ADC(machine.Pin({analog.Macro}))");
-            main.AppendLine("adc.atten(machine.ADC.ATTN_11DB)");
-            main.AppendLine();
-            main.AppendLine("def read_analog():");
-            main.AppendLine("    return 1.0 - (adc.read() / 4095.0)  # dry->0, wet->1");
-            main.AppendLine();
-            main.AppendLine("reading = read_analog()");
-            main.AppendLine("if reading < 0.32:");
-            main.AppendLine("    pass  # TODO: send webhook alert (see config.py)");
-            main.AppendLine();
+            var v = VarName(e);
+            if (e.Dir == "analog")
+                main.AppendLine($"{v} = machine.ADC(machine.Pin({e.Macro})); {v}.atten(machine.ADC.ATTN_11DB)  # {e.ToPin}");
+            else if (e.Dir == "output")
+                main.AppendLine($"{v} = machine.Pin({e.Macro}, machine.Pin.OUT)  # {e.ToPin}");
+            else
+                main.AppendLine($"{v} = machine.Pin({e.Macro}, machine.Pin.IN)  # {e.ToPin}");
         }
-        main.AppendLine("machine.deepsleep(6 * 60 * 60 * 1000)  # 6 h");
+        if (hasI2c) main.AppendLine("i2c = machine.I2C(0)  # I2C bus");
+        main.AppendLine();
+        main.AppendLine("while True:");
+        if (ios.Count == 0 && !hasI2c) main.AppendLine("    pass  # no pins mapped from the netlist yet");
+        foreach (var e in ios)
+        {
+            var v = VarName(e);
+            if (e.Dir == "analog") main.AppendLine($"    print('{v}', {v}.read())");
+            else if (e.Dir == "input") main.AppendLine($"    print('{v}', {v}.value())");
+            else main.AppendLine($"    {v}.value(1)  # TODO: drive {e.ToPin} as needed");
+        }
+        if (hasI2c) main.AppendLine("    # TODO: i2c.readfrom(addr, n) / writeto(addr, buf)");
+        main.AppendLine("    time.sleep(1)");
 
         return new Foundry.Core.Project.Firmware
         {
@@ -135,10 +147,8 @@ public static class FirmwareGenerator
             {
                 new FirmwareFile { Name = "main.py", Path = "/foundry/firmware/", Active = true, Content = main.ToString() },
                 new FirmwareFile { Name = "pinmap.py", Path = "/foundry/firmware/", Content = pinmap.ToString() },
-                new FirmwareFile { Name = "config.py", Path = "/foundry/firmware/",
-                    Content = "# TODO: secrets — never written to the Project file.\nWIFI_SSID = \"YOUR_SSID\"\nWIFI_PASS = \"YOUR_PASSWORD\"\nWEBHOOK_URL = \"https://example.com/alert\"\n" },
             },
-            Libraries = new() { new("urequests", "built-in"), new("machine", "built-in"), new("network", "built-in") },
+            Libraries = new() { new("machine", "built-in"), new("time", "built-in") },
         };
     }
 }

@@ -6,7 +6,8 @@ using Foundry.Core.Project;
 namespace Foundry.Core.Firmware;
 
 /// <summary>One generated pin-map entry: a peripheral signal bound to a concrete MCU GPIO.</summary>
-public sealed record PinMapEntry(string Macro, int Gpio, string FromPin, string ToPin, string Net, bool Strapping);
+/// <param name="Dir">MCU-side direction: input | output | analog | i2c (drives setup/loop codegen).</param>
+public sealed record PinMapEntry(string Macro, int Gpio, string FromPin, string ToPin, string Net, bool Strapping, string Dir = "input");
 
 /// <summary>
 /// Derives the firmware pin map directly from the authoritative netlist (PRD §6 invariant, §8.6,
@@ -44,8 +45,15 @@ public static class PinMap
             if (gpio is null) continue;
 
             var macro = "PIN_" + Sanitize(Alias(periphEp)) + "_" + Sanitize(Pin(periphEp));
-            var strapping = kb.ByAlias(mcu)?.Pin(Pin(mcuEp))?.Strapping ?? false;
-            entries.Add(new PinMapEntry(macro, gpio.Value, mcuEp, periphEp, c.Net, strapping));
+            var mcuPin = kb.ByAlias(mcu)?.Pin(Pin(mcuEp));
+            var periphPin = kb.ByAlias(Alias(periphEp))?.Pin(Pin(periphEp));
+            var strapping = mcuPin?.Strapping ?? false;
+            // MCU-side direction: i2c bus, analog input (ADC pin), output if the peripheral end is an input, else digital input.
+            var dir = c.Net == "i2c" ? "i2c"
+                : mcuPin?.Kind == PinKind.Analog ? "analog"
+                : periphPin?.Kind == PinKind.Input ? "output"
+                : "input";
+            entries.Add(new PinMapEntry(macro, gpio.Value, mcuEp, periphEp, c.Net, strapping, dir));
         }
         // stable order by GPIO number for deterministic output
         return entries.OrderBy(e => e.Gpio).ToList();

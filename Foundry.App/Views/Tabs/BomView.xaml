@@ -11,7 +11,7 @@
           <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Style="{StaticResource Kicker}" Text="BILL OF MATERIALS · 8 LINES · LIVE PRICING via NEXAR"/>
+          <TextBlock Style="{StaticResource Kicker}" Text="{Binding LinesLabel}"/>
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
             <Run Text="What you'll "/><Run Text="buy." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
@@ -102,32 +102,32 @@
         </Grid>
       </Border>
 
-      <!-- SUBSTITUTIONS -->
+      <!-- SOURCING SUMMARY (by distributor) -->
       <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Border Grid.Column="0" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0" Padding="16">
-            <StackPanel>
-              <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.Warn}" Text="Substitute available"/>
-              <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,6,0,4" Text="M12-GLAND → PG7-GLD"/>
-              <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Text="+0.07 · in stock"/>
-            </StackPanel>
+        <StackPanel>
+          <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="16,14">
+            <Grid>
+              <TextBlock Style="{StaticResource Kicker}" Text="Sourcing summary · by distributor"/>
+              <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Foreground="{StaticResource Brush.Warn}"
+                         Text="{Binding LowStockCount, StringFormat='{}{0} low-stock'}"/>
+            </Grid>
           </Border>
-          <Border Grid.Column="1" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0" Padding="16">
-            <StackPanel>
-              <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.Info}" Text="Bulk discount"/>
-              <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,6,0,4" Text="TL3301AF260QG @ 25+"/>
-              <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Text="−18% from Mouser"/>
-            </StackPanel>
-          </Border>
-          <Border Grid.Column="2" Padding="16">
-            <StackPanel>
-              <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.Info}" Text="Newer revision"/>
-              <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,6,0,4" Text="TP4056 → IP5306 1A"/>
-              <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Text="USB-C + boost"/>
-            </StackPanel>
-          </Border>
-        </Grid>
+          <ItemsControl ItemsSource="{Binding ByDistributor}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
+                  <Grid Margin="16,12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="120"/><ColumnDefinition Width="90"/></Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.Info}" Text="{Binding Distributor}"/>
+                    <TextBlock Grid.Column="1" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,0,24,0" Text="{Binding LinesText}"/>
+                    <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="11" HorizontalAlignment="Right" Foreground="{Binding Status, Converter={StaticResource SevBrush}}" Text="{Binding StatusText}"/>
+                    <TextBlock Grid.Column="3" Style="{StaticResource Mono}" FontSize="12" HorizontalAlignment="Right" Foreground="{StaticResource Brush.Ink}" Text="{Binding CostText}"/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
       </Border>
 
     </StackPanel>

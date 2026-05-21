@@ -97,6 +97,18 @@ public sealed partial class BomViewModel : TabViewModelBase
     public string TotalText => $"${Total:0.00}";
     public int Units => Rows.Sum(r => r.Qty);
     public string SubtotalLabel => $"Subtotal · {Rows.Count} lines · {Units} units";
+    public string LinesLabel => $"BILL OF MATERIALS · {Rows.Count} LINES";
+    public int LowStockCount => Rows.Count(r => r.Stock < 100);
+
+    /// <summary>Real cost/line breakdown by distributor (replaces the old hardcoded substitutions).</summary>
+    public IReadOnlyList<SourcingRow> ByDistributor => Rows
+        .GroupBy(r => string.IsNullOrWhiteSpace(r.Dist) ? "—" : r.Dist)
+        .Select(g => new SourcingRow
+        {
+            Distributor = g.Key, Lines = g.Count(), Cost = g.Sum(r => r.Extended),
+            Status = g.Any(r => r.Stock < 100) ? "warn" : "ok",
+        })
+        .OrderByDescending(s => s.Cost).ToList();
 
     [RelayCommand]
     private async Task RefreshPrices()
@@ -117,6 +129,8 @@ public sealed partial class BomViewModel : TabViewModelBase
             }
             OnPropertyChanged(nameof(Total));
             OnPropertyChanged(nameof(TotalText));
+            OnPropertyChanged(nameof(ByDistributor));
+            OnPropertyChanged(nameof(LowStockCount));
             SourcingStatus = $"live pricing via {svc.ProviderName} · updated {DateTime.Now:HH:mm}";
         }
         finally { IsRefreshing = false; }
@@ -234,6 +248,14 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
     }
 
     public Firmware F => Project.Firmware;
+    public string HeaderText => $"{F.Platform} · {F.Board} · {F.Files.Count} files";
+
+    /// <summary>Copy the active file's source to the clipboard.</summary>
+    [RelayCommand]
+    private void CopyActive()
+    {
+        try { if (ActiveFile is not null) System.Windows.Clipboard.SetText(ActiveFile.Content); } catch { }
+    }
 
     /// <summary>Export the generated firmware to a project folder and reveal it (PRD F7).</summary>
     [RelayCommand]
@@ -276,6 +298,7 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     public int PassCount => Project.Findings.Count(f => f.Severity == "pass");
     public string OverallStatus => FailCount > 0 ? "FAIL" : WarnCount > 0 ? "WARN" : "PASS";
     public string PassText => $"{PassCount} / {Project.Findings.Count}";
+    public string ChecksLabel => $"DETERMINISTIC RULES ENGINE · {Project.Findings.Count} CHECKS";
 
     private void Refresh()
     {
@@ -286,6 +309,23 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         OnPropertyChanged(nameof(PassCount));
         OnPropertyChanged(nameof(OverallStatus));
         OnPropertyChanged(nameof(PassText));
+        OnPropertyChanged(nameof(ChecksLabel));
+    }
+
+    /// <summary>Write the validation report to the configured export folder (PRD F7).</summary>
+    [RelayCommand]
+    private void ExportReport()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "validation-report.md");
+            File.WriteAllText(path, Exporters.ValidationReport(Project));
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            Status = $"Report exported to {path}";
+        }
+        catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
     }
 
     [RelayCommand]

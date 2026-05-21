@@ -46,6 +46,30 @@ public static class Exporters
         return sb.ToString();
     }
 
+    /// <summary>Validation report as Markdown: rollup + every finding with its fix.</summary>
+    public static string ValidationReport(Project.Project project)
+    {
+        var f = project.Findings;
+        int fail = f.Count(x => x.Severity == "fail"), warn = f.Count(x => x.Severity == "warn"), pass = f.Count(x => x.Severity == "pass");
+        var sb = new StringBuilder();
+        sb.AppendLine($"# {project.Title} — Validation Report");
+        sb.AppendLine();
+        sb.AppendLine($"> **Design aid — verify before you build.** Deterministic checks over the netlist; not a substitute for review.");
+        sb.AppendLine();
+        sb.AppendLine($"**Overall: {(fail > 0 ? "FAIL" : warn > 0 ? "WARN" : "PASS")}** — {fail} failures · {warn} warnings · {pass} passing · {f.Count} checks.");
+        sb.AppendLine();
+        foreach (var x in f)
+        {
+            sb.AppendLine($"## [{x.Severity.ToUpperInvariant()}] {x.Code} — {x.Title}");
+            sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(x.Description)) { sb.AppendLine(x.Description); sb.AppendLine(); }
+            if (x.Refs.Count > 0) sb.AppendLine($"Refs: {string.Join(", ", x.Refs.Select(r => $"`{r}`"))}");
+            if (!string.IsNullOrWhiteSpace(x.Fix)) sb.AppendLine($"Suggested fix: **{x.Fix}**");
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
     private static string Csv(string field) =>
         field.Contains(',') || field.Contains('"') || field.Contains('\n')
             ? "\"" + field.Replace("\"", "\"\"") + "\""

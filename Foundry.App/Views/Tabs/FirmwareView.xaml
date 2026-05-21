@@ -9,7 +9,7 @@
       <Grid Margin="0,0,0,28">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Style="{StaticResource Kicker}" Text="{Binding F.Platform, StringFormat='{}{0} · esp32:esp32:esp32'}"/>
+          <TextBlock Style="{StaticResource Kicker}" Text="{Binding HeaderText}"/>
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
             <Run Text="Code "/><Run Text="ready." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
@@ -20,8 +20,8 @@
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="folder" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="EXPORT FOLDER"/></StackPanel>
           </Button>
-          <Button Style="{StaticResource BtnPrimary}">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="bolt" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="FLASH @ 460800"/></StackPanel>
+          <Button Style="{StaticResource BtnPrimary}" Command="{Binding CopyActiveCommand}">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="COPY FILE"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>
@@ -100,7 +100,6 @@
             <TextBlock Style="{StaticResource Serif}" FontSize="20"><Run Text="pinmap.h is a "/><Run Text="derived artifact" Foreground="{DynamicResource Brush.Accent}"/></TextBlock>
             <TextBlock Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.InkMute}" Margin="0,4,0,0" Text="It re-generates on every wiring change. Edit the netlist, not the header."/>
           </StackPanel>
-          <Button Grid.Column="2" Style="{StaticResource BtnGhost}" VerticalAlignment="Center" Content="VIEW NETLIST"/>
         </Grid>
       </Border>
 

@@ -9,7 +9,7 @@
       <Grid Margin="0,0,0,28">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Style="{StaticResource Kicker}" Text="DETERMINISTIC RULES ENGINE · 27 CHECKS · 0.4 s"/>
+          <TextBlock Style="{StaticResource Kicker}" Text="{Binding ChecksLabel}"/>
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
             <Run Text="Sanity "/><Run Text="check." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
@@ -18,6 +18,9 @@
         </StackPanel>
         <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Margin="0,0,0,4">
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportReportCommand}">
+              <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="EXPORT REPORT"/></StackPanel>
+            </Button>
             <Button Style="{StaticResource BtnPrimary}" Command="{Binding ReRunCommand}">
               <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="RE-RUN CHECKS"/></StackPanel>
             </Button>
