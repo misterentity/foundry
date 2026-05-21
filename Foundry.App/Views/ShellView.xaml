@@ -116,11 +116,9 @@
               </StackPanel>
             </Border>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <Button Style="{StaticResource Btn}" BorderThickness="1,0,0,0" Padding="14,0" Background="Transparent">
-                <StackPanel Orientation="Horizontal"><c:IconControl Glyph="eye" IconSize="11" Margin="0,0,8,0"/><TextBlock Text="PREVIEW"/></StackPanel>
-              </Button>
-              <Button Style="{StaticResource Btn}" BorderThickness="1,0,0,0" Padding="14,0" Background="Transparent">
-                <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="11" Margin="0,0,8,0"/><TextBlock Text="EXPORT"/></StackPanel>
+              <Button Style="{StaticResource Btn}" BorderThickness="1,0,0,0" Padding="14,0" Background="Transparent"
+                      Command="{Binding ExportCommand}" ToolTip="Export the project spec as a branded PDF">
+                <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="11" Margin="0,0,8,0"/><TextBlock Text="EXPORT PDF"/></StackPanel>
               </Button>
               <Button Style="{StaticResource Btn}" BorderThickness="1,0,0,0" Padding="14,0" Background="Transparent"
                       Command="{Binding SettingsCommand}" ToolTip="Settings">
@@ -139,7 +137,7 @@
         <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="16,12">
           <Grid>
             <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Text="ITERATION · CHAT"/>
-            <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Text="turn 3"/>
+            <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Foreground="{StaticResource Brush.InkFaint}" Text="edits the design"/>
           </Grid>
         </Border>
 

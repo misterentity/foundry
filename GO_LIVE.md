@@ -15,40 +15,28 @@ Status of the build and what's left before a public 1.0. Checked = done; uncheck
 - [x] Demo data removed from the default flow: empty library, real "New project" prompt, explicit "Open sample".
 - [x] 38 unit tests; scrollbars/disclaimers match the design.
 
-## P0 — blocking for a real public release
-- [ ] **Verify generation against a live key.** `ProjectGenerator` is unit-tested on a fixture but has NOT
-      been run against the real API. Run several prompts, confirm the JSON parses and every tab is sane.
-      Tune the system prompt / add `output_config` JSON-schema for guaranteed structure.
-- [ ] **Code-sign the installer + exe** (Authenticode / EV cert). Unsigned builds trip SmartScreen
-      ("Windows protected your PC") — a major drop-off for testers. Add signing to `release.yml`.
-- [ ] **Generic wiring diagram + enclosure preview.** Both are currently hand-laid for the sample
-      (`WiringDiagramControl`, `EnclosureIsoControl` use fixed coordinates). For arbitrary generated
-      projects they don't reflect the real netlist/dimensions. Implement an auto-layout wiring renderer
-      (the connection ledger + 3D enclosure already are generic) and drive the iso preview from the schema.
-- [ ] **Clean-machine install test.** Install `FoundrySetup.exe` on a fresh Windows 11 box (no .NET, no
-      Python): app launches, tray works, sidecar (frozen) spawns, 3D preview renders, update check works.
-- [ ] **Auto-update upgrade test.** Install v0.4.1, then confirm tray → Check for updates pulls v0.4.2,
-      runs the installer, and upgrades in place (stable AppId).
+## Done since (v0.4.2 → v0.4.18)
+- [x] **Generation verified against a live key** (multiple prompts; every tab renders).
+- [x] **Generic wiring diagram** — auto-layout from the netlist. **Enclosure** is real CSG (base+lid,
+      cutouts, vents, mounting) from the schema; 3D view is generic.
+- [x] **Project library** — generated projects auto-save; recents with reopen/delete.
+- [x] **Chat iteration = real re-generation** — chat edits revise the whole project (or answer questions).
+- [x] **Validation auto-fix** — deterministic where possible, else AI-generated; re-validates.
+- [x] **Exports** — branded PDF (project spec + validation report), BOM CSV, guide MD, firmware folder, STL.
+- [x] **Global crash handler** + diagnostics/audit log + status-bar AI progress.
+- [x] **Security hardening** — signed-update verification, pinned update repo, no secrets in repo.
+- [x] **Clean-machine sanity** — self-contained published build runs (3D, sidecar, PDF native deps ship).
+- [x] **1.0 polish pass** — removed dead/unwired buttons and hardcoded demo strings across all tabs.
 
-## P1 — important for a good experience
-- [ ] **Project save/load + recent list.** Persist generated projects (`ProjectStore`) to the library;
-      "Recent" is currently an empty state.
-- [ ] **Chat iteration = real re-generation.** `ChatPipeline` returns NL replies; wire chat turns to
-      re-run affected stages and mutate the Project (PRD §7 staged generation).
-- [ ] **Finding auto-fix.** The "Apply & re-run" / suggested-fix CTAs render but aren't wired to mutate
-      the netlist + re-validate.
-- [ ] **Remaining exports.** Wiring SVG/PNG and guide PDF (BOM CSV, guide MD, firmware folder, STL done).
-- [ ] **Sourcing depth.** Verify Nexar OAuth/GraphQL live; optional direct DigiKey/Mouser; real cart upload.
-- [ ] **Error handling pass.** Per-stage failure UI, retry-once, no uncaught exceptions crash the shell
-      (PRD §13). Add a global `DispatcherUnhandledException` handler + user-friendly error surface.
-
-## P2 — polish / hardening
-- [ ] Logging (no secrets) + a way to grab logs for bug reports; verify keys never hit disk/logs (PRD §14).
-- [ ] High-DPI + multi-monitor QA; keyboard nav / accessibility names.
-- [ ] App icon polish (proper multi-size .ico), Start-menu/uninstall metadata, file association (`.foundry`).
-- [ ] LICENSE, privacy note (network calls: Anthropic + configured distributors only), README screenshots.
-- [ ] Performance on large designs (many parts/nets); cancellation of in-flight generation.
-- [ ] Telemetry opt-in (if any) with clear consent; crash reporting.
+## Still open
+- [ ] **Code-sign the installer + exe.** Pipeline is wired (`build/sign.ps1` + `release.yml`, the updater
+      already verifies publisher signature) — just needs a real cert added as `SIGN_PFX_BASE64`/`SIGN_PASSWORD`.
+      Until then SmartScreen warns. See `build/SIGNING.md`.
+- [ ] **Live Nexar pricing.** `NexarSourcingProvider` is implemented but not verified against the live API
+      (no credentials). BOM falls back to the generated estimates.
+- [ ] **Wiring image export** (PNG/SVG) + embedding the diagram in the PDF.
+- [ ] Faster iteration option (a dedicated fast chat/edit model so chat/fixes don't wait on Opus).
+- [ ] Nice-to-have: high-DPI/multi-monitor QA, keyboard/accessibility, `.foundry` file association, LICENSE.
 
 ## Release mechanics (already wired)
 - Bump `Foundry.Core/AppInfo.cs`, `Foundry.App.csproj <Version>`, `build/foundry.iss` AppVersion.

@@ -142,6 +142,21 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand] private void Back() => _onBack();
     [RelayCommand] private void Settings() => _onSettings();
 
+    /// <summary>Export the branded project-spec PDF from any tab.</summary>
+    [RelayCommand]
+    private void Export()
+    {
+        try
+        {
+            var dir = Foundry.Core.Config.ConfigStore.Load().OutputFolder;
+            System.IO.Directory.CreateDirectory(dir);
+            var path = System.IO.Path.Combine(dir, "project-spec.pdf");
+            System.IO.File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project));
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
+
     [RelayCommand]
     private async Task SendAsync()
     {

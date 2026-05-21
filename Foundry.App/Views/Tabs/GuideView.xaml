@@ -9,7 +9,7 @@
       <Grid Margin="0,0,0,28">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Style="{StaticResource Kicker}" Text="ASSEMBLY GUIDE · 6 STEPS · ESTIMATED 45 MIN"/>
+          <TextBlock Style="{StaticResource Kicker}" Text="{Binding StepsLabel}"/>
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
             <Run Text="How to "/><Run Text="build." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>

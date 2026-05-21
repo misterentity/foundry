@@ -24,17 +24,12 @@
                      Text="{Binding Project.Title}"/>
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13"
                      TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0" HorizontalAlignment="Left"
-                     Text="Battery-powered, IP65 capacitive sensor that texts you when soil is dry. Compiled from a single prompt — every output below is derived from the same canonical Project document, so it stays mutually consistent as you iterate."/>
+                     Text="{Binding Project.Prompt}"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0">
+          <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPdfCommand}">
             <StackPanel Orientation="Horizontal">
-              <c:IconControl Glyph="download" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="EXPORT BUNDLE"/>
-            </StackPanel>
-          </Button>
-          <Button Style="{StaticResource BtnPrimary}">
-            <StackPanel Orientation="Horizontal">
-              <c:IconControl Glyph="play" IconSize="11" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="BUILD PLAN"/>
+              <c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PDF"/>
             </StackPanel>
           </Button>
         </StackPanel>
@@ -172,8 +167,8 @@
                           <TextBlock Foreground="{StaticResource Brush.Ink}" FontSize="13" TextWrapping="Wrap" Text="{Binding Title}"/>
                           <TextBlock Foreground="{StaticResource Brush.InkMute}" FontSize="11" Margin="0,2,0,0" Text="{Binding Code}"/>
                         </StackPanel>
-                        <Button Grid.Column="2" Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10"
-                                Visibility="{Binding Fix, Converter={StaticResource NullVis}}" Content="{Binding Fix}"/>
+                        <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="10" VerticalAlignment="Center" Foreground="{DynamicResource Brush.Accent}"
+                                   Visibility="{Binding Fix, Converter={StaticResource NullVis}}" Text="{Binding Fix}"/>
                       </Grid>
                     </Border>
                   </DataTemplate>
@@ -186,8 +181,8 @@
             <StackPanel>
               <Grid>
                 <TextBlock Style="{StaticResource Serif}" FontSize="24" Text="Sourcing"/>
-                <Border Style="{StaticResource Tag}" Background="{StaticResource Brush.TagOkBg}" BorderBrush="{StaticResource Brush.TagOkBorder}" HorizontalAlignment="Right">
-                  <TextBlock Style="{StaticResource TagText}" Foreground="{StaticResource Brush.Ok}" Text="All in stock"/>
+                <Border Style="{StaticResource Tag}" Background="{StaticResource Brush.Surface1}" HorizontalAlignment="Right">
+                  <TextBlock Style="{StaticResource TagText}" Text="{Binding StockText}"/>
                 </Border>
               </Grid>
               <ItemsControl ItemsSource="{Binding Sourcing}" Margin="0,16,0,0">
@@ -214,7 +209,7 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <Button Style="{StaticResource BtnPrimary}" Margin="0,18,0,0" HorizontalAlignment="Stretch">
+              <Button Style="{StaticResource BtnPrimary}" Margin="0,18,0,0" HorizontalAlignment="Stretch" Command="{Binding CartCommand}">
                 <StackPanel Orientation="Horizontal">
                   <c:IconControl Glyph="cart" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/>
                   <TextBlock Text="ADD ALL TO DIGIKEY CART"/>

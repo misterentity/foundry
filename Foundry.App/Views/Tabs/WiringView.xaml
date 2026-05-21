@@ -18,9 +18,7 @@
                      Text="The netlist is the source of truth — pin map, firmware, and enclosure cutouts all derive from these connections. Power runs red, ground gray, signal cyan."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="SVG"/>
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="PNG"/>
-          <Button Style="{StaticResource Btn}" Content="KICAD .NET"/>
+          <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkMute}" Text="{Binding NetCount, StringFormat='{}{0} NETS'}"/>
         </StackPanel>
       </Grid>
 

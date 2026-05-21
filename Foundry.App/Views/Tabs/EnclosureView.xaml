@@ -19,8 +19,6 @@
                      Text="A snap-lid enclosure sized from your component footprints. Cutouts and standoffs are derived directly from the components — ports always line up. Export as STL/3MF for slicing or STEP for manual editing."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="STEP"/>
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Content="3MF"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportStlCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT STL"/></StackPanel>
           </Button>
@@ -74,21 +72,9 @@
                 </StackPanel>
               </Border>
 
-              <!-- view buttons -->
-              <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
-                <StackPanel Orientation="Horizontal">
-                  <Button Style="{StaticResource Btn}" Padding="12,8" Content="ISO"/>
-                  <Button Style="{StaticResource BtnGhost}" Padding="12,8" Content="FRONT"/>
-                  <Button Style="{StaticResource BtnGhost}" Padding="12,8" Content="TOP"/>
-                  <Button Style="{StaticResource BtnGhost}" Padding="12,8" Content="EXPLODED"/>
-                </StackPanel>
-              </Border>
-
-              <StackPanel HorizontalAlignment="Right" VerticalAlignment="Bottom">
-                <Button Style="{StaticResource BtnGhost}" Padding="8,5" FontSize="10" Margin="0,0,0,4" Content="RESET CAM"/>
-                <Button Style="{StaticResource BtnGhost}" Padding="8,5" FontSize="10" Margin="0,0,0,4" Content="ORTHO"/>
-                <Button Style="{StaticResource BtnGhost}" Padding="8,5" FontSize="10" Content="MEASURE"/>
-              </StackPanel>
+              <!-- the 3D viewport is interactive: drag to orbit, scroll to zoom, view-cube to orient -->
+              <TextBlock HorizontalAlignment="Left" VerticalAlignment="Bottom" Style="{StaticResource Kicker}" FontSize="9"
+                         Foreground="{StaticResource Brush.InkMute}" Text="DRAG TO ORBIT · SCROLL TO ZOOM"/>
             </Grid>
           </Border>
 

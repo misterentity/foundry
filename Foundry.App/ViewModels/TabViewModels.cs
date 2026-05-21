@@ -32,22 +32,57 @@ public sealed class SourcingRow
     public string StatusText => Status == "ok" ? "ready" : "low stock";
 }
 
-public sealed class OverviewViewModel : TabViewModelBase
+public sealed partial class OverviewViewModel : TabViewModelBase
 {
     public OverviewViewModel(Project project) : base(project)
     {
-        TopFindings = project.Findings.Take(3).ToList();
+        var attention = project.Findings.Where(f => f.Severity is "fail" or "warn").Take(3).ToList();
+        TopFindings = attention.Count > 0 ? attention : project.Findings.Take(3).ToList();
+
+        Sourcing = project.Bom
+            .GroupBy(b => string.IsNullOrWhiteSpace(b.Dist) ? "—" : b.Dist)
+            .Select(g => new SourcingRow
+            {
+                Distributor = g.Key, Lines = g.Count(), Cost = g.Sum(x => x.Qty * x.Price),
+                Status = g.Any(x => x.Stock < 100) ? "warn" : "ok",
+            })
+            .OrderByDescending(s => s.Cost).ToList();
     }
 
     public IReadOnlyList<Finding> TopFindings { get; }
+    public IReadOnlyList<SourcingRow> Sourcing { get; }
     public string CostText => $"${Project.Kpis.Cost:0.00}";
+    public bool AllInStock => Project.Bom.Count > 0 && Project.Bom.All(b => b.Stock >= 100);
+    public string StockText => AllInStock ? "All in stock" : $"{Project.Bom.Count(b => b.Stock < 100)} low-stock";
 
-    public IReadOnlyList<SourcingRow> Sourcing { get; } = new[]
+    /// <summary>Export the branded project-spec PDF.</summary>
+    [RelayCommand]
+    private void ExportPdf()
     {
-        new SourcingRow { Distributor="DigiKey", Lines=4, Cost=18.13, Status="ok" },
-        new SourcingRow { Distributor="Mouser",  Lines=3, Cost=8.61,  Status="ok" },
-        new SourcingRow { Distributor="Amazon",  Lines=2, Cost=11.68, Status="warn" },
-    };
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "project-spec.pdf");
+            File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project));
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
+
+    /// <summary>Write the DigiKey BOM CSV and open the cart manager.</summary>
+    [RelayCommand]
+    private void Cart()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Foundry");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "digikey-bom.csv"), CartLinks.DigiKeyBomCsv(Project.Bom));
+            Process.Start(new ProcessStartInfo { FileName = CartLinks.DigiKeyBomManager, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
 }
 
 // ---------------- BOM ----------------
@@ -405,6 +440,8 @@ public sealed partial class ValidationViewModel : TabViewModelBase
 public sealed partial class GuideViewModel : TabViewModelBase
 {
     public GuideViewModel(Project project) : base(project) { }
+
+    public string StepsLabel => $"ASSEMBLY GUIDE · {Project.Assembly.Count} STEPS";
 
     /// <summary>Export a branded project-spec PDF to the configured folder (PRD F7).</summary>
     [RelayCommand]
