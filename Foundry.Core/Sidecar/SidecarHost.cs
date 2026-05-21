@@ -41,16 +41,10 @@ public sealed class SidecarHost : IDisposable
                 return _client;
             }
 
-            var sidecarDir = LocateSidecarDir();
-            if (sidecarDir is null)
+            var (fileName, args, workDir, kind) = ResolveLauncher();
+            if (fileName is null)
             {
-                StatusMessage = "sidecar files not found";
-                return null;
-            }
-            var python = LocatePython(sidecarDir);
-            if (python is null)
-            {
-                StatusMessage = "python interpreter not found";
+                StatusMessage = "sidecar not found (no frozen exe and no Python)";
                 return null;
             }
 
@@ -58,9 +52,9 @@ public sealed class SidecarHost : IDisposable
             {
                 _process = Process.Start(new ProcessStartInfo
                 {
-                    FileName = python,
-                    Arguments = $"server.py --host 127.0.0.1 --port {Port}",
-                    WorkingDirectory = sidecarDir,
+                    FileName = fileName,
+                    Arguments = args!,
+                    WorkingDirectory = workDir!,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardError = true,
@@ -84,7 +78,7 @@ public sealed class SidecarHost : IDisposable
                 if (await probe.HealthAsync(ct))
                 {
                     _client = probe;
-                    StatusMessage = $"build123d · {baseUrl}";
+                    StatusMessage = $"{kind} · {baseUrl}";
                     return _client;
                 }
                 await Task.Delay(250, ct);
@@ -93,6 +87,37 @@ public sealed class SidecarHost : IDisposable
             return null;
         }
         finally { Gate.Release(); }
+    }
+
+    /// <summary>Pick how to launch the sidecar: frozen exe (packaged) first, else Python + server.py (dev).</summary>
+    private static (string? fileName, string? args, string? workDir, string kind) ResolveLauncher()
+    {
+        var portArgs = $"--host 127.0.0.1 --port {Port}";
+
+        var frozen = LocateFrozenExe();
+        if (frozen is not null)
+            return (frozen, portArgs, Path.GetDirectoryName(frozen)!, "frozen sidecar");
+
+        var dir = LocateSidecarDir();
+        if (dir is null) return (null, null, null, "");
+        var python = LocatePython(dir);
+        if (python is null) return (null, null, null, "");
+        return (python, $"server.py {portArgs}", dir, "python sidecar");
+    }
+
+    /// <summary>Frozen PyInstaller bundle: next to the app (packaged) or in sidecar/dist (dev build).</summary>
+    private static string? LocateFrozenExe()
+    {
+        var packaged = Path.Combine(AppContext.BaseDirectory, "sidecar", "foundry-cad.exe");
+        if (File.Exists(packaged)) return packaged;
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "sidecar", "dist", "foundry-cad", "foundry-cad.exe");
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
     }
 
     private static string? LocateSidecarDir()
