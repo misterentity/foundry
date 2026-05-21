@@ -103,6 +103,10 @@ public sealed class GitHubUpdater
         return dest;
     }
 
+    /// <summary>True if <paramref name="candidateTag"/> is a newer version than <paramref name="currentVersion"/>.</summary>
+    public static bool IsNewer(string candidateTag, string currentVersion) =>
+        NormalizeVersion(candidateTag) > NormalizeVersion(currentVersion);
+
     private static Version NormalizeVersion(string raw)
     {
         var s = raw.Trim().TrimStart('v', 'V');
