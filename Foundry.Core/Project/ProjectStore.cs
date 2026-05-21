@@ -51,6 +51,7 @@ public static class ProjectStore
         if (string.IsNullOrWhiteSpace(project.Id)) project.Id = "p_" + Guid.NewGuid().ToString("N")[..8];
         project.Updated = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
         Save(project, PathFor(project.Id));
+        Diagnostics.AppLog.Info("project", $"saved “{project.Title}” to library ({project.Id})");
     }
 
     public static Project? LoadById(string id)
@@ -61,7 +62,8 @@ public static class ProjectStore
 
     public static void DeleteById(string id)
     {
-        try { var p = PathFor(id); if (File.Exists(p)) File.Delete(p); } catch { /* best effort */ }
+        try { var p = PathFor(id); if (File.Exists(p)) File.Delete(p); Diagnostics.AppLog.Info("project", $"deleted {id} from library"); }
+        catch { /* best effort */ }
     }
 
     /// <summary>Library rows, newest first. Skips any unreadable files.</summary>

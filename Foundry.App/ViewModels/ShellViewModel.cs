@@ -157,9 +157,10 @@ public sealed partial class ShellViewModel : ObservableObject
             System.IO.Directory.CreateDirectory(dir);
             var path = System.IO.Path.Combine(dir, "project-spec.pdf");
             System.IO.File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project));
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"project PDF → {path}");
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
-        catch { /* best effort */ }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}"); }
     }
 
     private CancellationTokenSource? _cts;

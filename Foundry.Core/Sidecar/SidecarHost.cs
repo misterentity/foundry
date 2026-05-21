@@ -45,8 +45,10 @@ public sealed class SidecarHost : IDisposable
             if (fileName is null)
             {
                 StatusMessage = "sidecar not found (no frozen exe and no Python)";
+                Diagnostics.AppLog.Warn("sidecar", "not found — no frozen exe and no Python; enclosure 3D unavailable");
                 return null;
             }
+            Diagnostics.AppLog.Info("sidecar", $"spawning {kind} on {baseUrl}");
 
             try
             {
@@ -79,11 +81,13 @@ public sealed class SidecarHost : IDisposable
                 {
                     _client = probe;
                     StatusMessage = $"{kind} · {baseUrl}";
+                    Diagnostics.AppLog.Info("sidecar", $"online · {kind} · {baseUrl}");
                     return _client;
                 }
                 await Task.Delay(250, ct);
             }
             StatusMessage = "sidecar health-check timed out";
+            Diagnostics.AppLog.Warn("sidecar", "health-check timed out");
             return null;
         }
         finally { Gate.Release(); }

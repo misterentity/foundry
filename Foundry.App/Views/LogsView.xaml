@@ -19,18 +19,30 @@
       </Border>
 
       <!-- toolbar -->
-      <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="32,14">
-        <Grid>
-          <StackPanel Orientation="Horizontal">
-            <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RefreshCommand}">
-              <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="11" Margin="0,0,8,0"/><TextBlock Text="REFRESH"/></StackPanel>
-            </Button>
-            <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding CopyCommand}" Content="COPY ALL"/>
-            <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding OpenFolderCommand}" Content="OPEN LOG FOLDER"/>
-            <Button Style="{StaticResource BtnGhost}" Command="{Binding ClearCommand}" Content="CLEAR"/>
-          </StackPanel>
-          <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center" FontFamily="{StaticResource Font.Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" Text="{Binding Status}"/>
-        </Grid>
+      <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="32,12">
+        <StackPanel>
+          <Grid>
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RefreshCommand}">
+                <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="11" Margin="0,0,8,0"/><TextBlock Text="REFRESH"/></StackPanel>
+              </Button>
+              <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding CopyCommand}" Content="COPY"/>
+              <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding OpenFolderCommand}" Content="OPEN FOLDER"/>
+              <Button Style="{StaticResource BtnGhost}" Command="{Binding ClearCommand}" Content="CLEAR"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding SetLevelCommand}" CommandParameter="ALL" Content="ALL"/>
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding SetLevelCommand}" CommandParameter="INFO" Content="INFO"/>
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding SetLevelCommand}" CommandParameter="WARN" Foreground="{StaticResource Brush.Warn}" Content="WARN"/>
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Command="{Binding SetLevelCommand}" CommandParameter="ERROR" Foreground="{StaticResource Brush.Fail}" Content="ERROR"/>
+            </StackPanel>
+          </Grid>
+          <Grid Margin="0,10,0,0">
+            <TextBox Style="{StaticResource FieldInput}" Background="{StaticResource Brush.Surface1}" Padding="8,5"
+                     Text="{Binding Search, UpdateSourceTrigger=PropertyChanged, Delay=200}" Tag="Filter by message, category, or detail…"/>
+          </Grid>
+          <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="10" Foreground="{StaticResource Brush.InkMute}" Margin="0,8,0,0" Text="{Binding Status}"/>
+        </StackPanel>
       </Border>
 
       <!-- log list -->

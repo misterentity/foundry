@@ -129,7 +129,11 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     private void Persist(string target, string value)
     {
-        if (!string.IsNullOrWhiteSpace(value)) _credentials.Save(target, value.Trim());
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            _credentials.Save(target, value.Trim());
+            Foundry.Core.Diagnostics.AppLog.Info("settings", $"saved credential: {target}");   // never logs the value
+        }
         RefreshSummaries();
     }
 
@@ -151,6 +155,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _config.OutputFolder = OutputFolder;
         _config.EnclosureFormat = EnclosureFormat;
         ConfigStore.Save(_config);
+        Foundry.Core.Diagnostics.AppLog.Info("settings", $"saved · model {SelectedModelId} · chat {ChatModelId} · platform {FirmwarePlatform}");
         SaveResult = $"Saved · {DateTime.Now:HH:mm}";
     }
 

@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Foundry.Core.Ai;
 using Foundry.Core.Config;
+using Foundry.Core.Diagnostics;
 using Foundry.Core.Generation;
 using Foundry.Core.Project;
 using Foundry.Core.Security;
@@ -76,6 +77,7 @@ public sealed partial class MainViewModel : ObservableObject
         SourcingService.Shared = new SourcingService(
             string.IsNullOrWhiteSpace(nexarKey) ? new NullSourcingProvider() : new NexarSourcingProvider(nexarKey));
 
+        AppLog.Info("services", $"rebuilt · model {modelId} · key {(hasKey ? "connected" : "none")} · sourcing {(string.IsNullOrWhiteSpace(nexarKey) ? "offline" : "Nexar")}");
         ModelLabel = FormatModel(modelId);
         KeyLabel = hasKey ? "KEY CONNECTED" : "NO KEY · OFFLINE";
         KeyDotSeverity = hasKey ? "ok" : "warn";
@@ -124,6 +126,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Project = DemoData.CreateSoilMoistureProject();
         _tracked = false;   // the sample is ephemeral, never written to the library
+        AppLog.Info("project", "opened the sample project");
         ShowWorkspace();
     }
 
@@ -131,9 +134,10 @@ public sealed partial class MainViewModel : ObservableObject
     public void OpenSaved(string id)
     {
         var p = ProjectStore.LoadById(id);
-        if (p is null) { ShowProjects(); return; }
+        if (p is null) { AppLog.Warn("project", $"open failed — {id} not found"); ShowProjects(); return; }
         Project = p;
         _tracked = true;
+        AppLog.Info("project", $"opened “{p.Title}” ({id})");
         ShowWorkspace();
     }
 

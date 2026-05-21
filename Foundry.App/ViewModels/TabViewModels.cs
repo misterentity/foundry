@@ -278,6 +278,7 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "enclosure.stl");
             File.WriteAllBytes(path, StlBytes);
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"enclosure STL → {path}");
             Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
             SidecarStatus = $"STL exported to {path}";
         }
@@ -315,6 +316,7 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
 
         var dir = Path.Combine(dlg.FolderName, "firmware");
         FirmwareExporter.Export(F, dir);
+        Foundry.Core.Diagnostics.AppLog.Info("export", $"firmware ({F.Files.Count} files) → {dir}");
         try { Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true }); }
         catch { /* reveal is best-effort */ }
     }
@@ -389,6 +391,7 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     {
         ProjectValidator.Revalidate(Project);
         Refresh();
+        Foundry.Core.Diagnostics.AppLog.Info("validation", $"re-ran · {FailCount} fail · {WarnCount} warn · {PassCount} pass");
         Status = $"Re-ran {Project.Findings.Count} checks · {DateTime.Now:HH:mm:ss}";
     }
 

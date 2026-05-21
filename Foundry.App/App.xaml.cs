@@ -26,6 +26,8 @@ public partial class App : Application
         DispatcherUnhandledException += (_, ex) => { LogCrash("UI", ex.Exception); ex.Handled = true; };
         AppDomain.CurrentDomain.UnhandledException += (_, ex) => LogCrash("Domain", ex.ExceptionObject as Exception);
 
+        Foundry.Core.Diagnostics.AppLog.Info("app", $"Foundry {AppInfo.Version} started · {Environment.OSVersion} · .NET {Environment.Version}");
+
         // App lives in the tray: closing the window hides it; Quit (tray) exits explicitly.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
