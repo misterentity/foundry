@@ -173,9 +173,10 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
 
     public Enclosure E => Project.Enclosure;
     public string WallText => E.Wall.ToString("0.0");
-    public string LengthText => E.Inner[0].ToString("0");
-    public string WidthText => E.Inner[1].ToString("0");
-    public string HeightText => E.Inner[2].ToString("0");
+    public string LengthText => Dim(0);
+    public string WidthText => Dim(1);
+    public string HeightText => Dim(2);
+    private string Dim(int i) => E.Inner is { } a && a.Length > i ? a[i].ToString("0") : "—";
 
     private async Task LoadMeshAsync()
     {

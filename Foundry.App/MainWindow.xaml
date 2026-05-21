@@ -82,6 +82,9 @@
 
               <!-- caption buttons -->
               <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Width="46" Style="{StaticResource CaptionButton}" Command="{Binding ShowSettingsCommand}" ToolTip="Settings">
+                  <c:IconControl Glyph="settings" IconSize="12" Stroke="{StaticResource Brush.InkMute}"/>
+                </Button>
                 <Button Width="46" Style="{StaticResource CaptionButton}" Click="Minimize_Click">
                   <c:IconControl Glyph="minimize" IconSize="12" Stroke="{StaticResource Brush.InkMute}"/>
                 </Button>
@@ -120,7 +123,7 @@
 
               <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="DESIGN AID · VERIFY BEFORE YOU BUILD" Style="{StaticResource Kicker}" Margin="0,0,24,0"/>
-                <TextBlock Text="v0.4.1" Style="{StaticResource Kicker}"/>
+                <TextBlock Text="{Binding AppVersionLabel}" Style="{StaticResource Kicker}"/>
               </StackPanel>
             </Grid>
           </Border>

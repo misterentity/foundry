@@ -189,8 +189,7 @@ Keep it realistic and minimal. Output ONLY the JSON object.
             return new Enclosure { Inner = new double[] { 60, 40, 25 }, Wall = 2.0, Lid = "snap" };
         return new Enclosure
         {
-            Inner = e.TryGetProperty("inner", out var inner) && inner.ValueKind == JsonValueKind.Array
-                ? inner.EnumerateArray().Select(x => x.GetDouble()).ToArray() : new double[] { 60, 40, 25 },
+            Inner = NormalizeInner(e),
             Wall = Dbl(e, "wall", 2.0),
             Lid = Str(e, "lid", "snap"),
             Standoffs = Int(e, "standoffs", 4),
@@ -205,6 +204,21 @@ Keep it realistic and minimal. Output ONLY the JSON object.
                 Pos = c.TryGetProperty("pos", out var p) && p.ValueKind == JsonValueKind.Array
                     ? p.EnumerateArray().Select(x => x.GetDouble()).ToArray() : new double[] { 0, 0 },
             }).ToList(),
+        };
+    }
+
+    /// <summary>Always return a 3-element [L,W,H] so downstream readouts can't index out of range.</summary>
+    private static double[] NormalizeInner(JsonElement enclosure)
+    {
+        var dims = enclosure.TryGetProperty("inner", out var inner) && inner.ValueKind == JsonValueKind.Array
+            ? inner.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Number).Select(x => x.GetDouble()).ToList()
+            : new List<double>();
+        var def = new[] { 60.0, 40.0, 25.0 };
+        return new[]
+        {
+            dims.Count > 0 ? dims[0] : def[0],
+            dims.Count > 1 ? dims[1] : def[1],
+            dims.Count > 2 ? dims[2] : def[2],
         };
     }
 

@@ -21,35 +21,42 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Global crash logging + user-facing surface (PRD §13 — no uncaught exception crashes silently).
+        DispatcherUnhandledException += (_, ex) => { LogCrash("UI", ex.Exception); ex.Handled = true; };
+        AppDomain.CurrentDomain.UnhandledException += (_, ex) => LogCrash("Domain", ex.ExceptionObject as Exception);
+
         // App lives in the tray: closing the window hides it; Quit (tray) exits explicitly.
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-        var credentials = new CredentialStore();
-        var anthropicKey = credentials.Read(CredentialStore.AnthropicTarget);
-        IAnthropicClient ai = string.IsNullOrWhiteSpace(anthropicKey)
-            ? new StubAnthropicClient()
-            : new AnthropicClient(anthropicKey);
-        IPipeline pipeline = new ChatPipeline(ai);
-
-        var nexarKey = credentials.Read(CredentialStore.NexarTarget);
-        Foundry.Core.Sourcing.SourcingService.Shared = new Foundry.Core.Sourcing.SourcingService(
-            string.IsNullOrWhiteSpace(nexarKey)
-                ? new Foundry.Core.Sourcing.NullSourcingProvider()
-                : new Foundry.Core.Sourcing.NexarSourcingProvider(nexarKey));
-
-        var main = new MainViewModel(credentials, ai, pipeline);
+        var main = new MainViewModel(new CredentialStore());
         switch (Environment.GetEnvironmentVariable("FOUNDRY_START"))
         {
             case "projects": main.ShowProjects(); break;
             case "newproject": main.ShowNewProject(); break;
             case "workspace": main.OpenSample(); break;
             case "settings": main.ShowSettings(); break;
+            case "gen": GenerateForDiag(main); break;
         }
 
         _window = new MainWindow { DataContext = main };
         _window.Show();
 
         SetupTray();
+    }
+
+    // Dev hook: FOUNDRY_GEN=<prompt> generates a real project then opens the workspace (for QA).
+    private static void GenerateForDiag(MainViewModel main)
+    {
+        var prompt = Environment.GetEnvironmentVariable("FOUNDRY_GEN");
+        if (string.IsNullOrWhiteSpace(prompt)) { main.OpenSample(); return; }
+        var key = new CredentialStore().Read(CredentialStore.AnthropicTarget);
+        if (string.IsNullOrWhiteSpace(key)) { main.OpenSample(); return; }
+        var gen = new Foundry.Core.Generation.ProjectGenerator(new AnthropicClient(key), ConfigStore.Load().ModelId);
+        // Off the UI thread to avoid a sync-over-async deadlock (diag hook only).
+        var r = System.Threading.Tasks.Task.Run(() => gen.GenerateAsync(prompt)).GetAwaiter().GetResult();
+        if (r.Ok && r.Project is not null) main.OpenGenerated(r.Project);
+        else main.OpenSample();
     }
 
     private void SetupTray()
@@ -164,6 +171,20 @@ public partial class App : Application
         _tray?.Dispose();
         _window?.ForceClose();
         Shutdown();
+    }
+
+    private static void LogCrash(string source, Exception? ex)
+    {
+        try
+        {
+            var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Foundry");
+            System.IO.Directory.CreateDirectory(dir);
+            var path = System.IO.Path.Combine(dir, "crash.log");
+            System.IO.File.AppendAllText(path, $"[{DateTime.Now:u}] {source}: {ex}\n\n");
+            if (Environment.GetEnvironmentVariable("FOUNDRY_NODIALOG") != "1")
+                MessageBox.Show($"Foundry hit an error and logged it to:\n{path}\n\n{ex?.Message}", "Foundry", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        catch { /* never throw from the crash handler */ }
     }
 
     protected override void OnExit(ExitEventArgs e)
