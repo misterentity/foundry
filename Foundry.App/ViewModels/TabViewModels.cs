@@ -66,12 +66,46 @@ public sealed class WiringViewModel : TabViewModelBase
 public sealed partial class EnclosureViewModel : TabViewModelBase
 {
     [ObservableProperty] private string _view = "ISO";
-    public EnclosureViewModel(Project project) : base(project) { }
+    [ObservableProperty] private bool _meshReady;
+    [ObservableProperty] private bool _sidecarOnline;
+    [ObservableProperty] private string _sidecarStatus = "connecting to CAD sidecar…";
+    [ObservableProperty] private byte[]? _stlBytes;
+
+    public EnclosureViewModel(Project project) : base(project)
+    {
+        _ = LoadMeshAsync();
+    }
+
     public Enclosure E => Project.Enclosure;
     public string WallText => E.Wall.ToString("0.0");
     public string LengthText => E.Inner[0].ToString("0");
     public string WidthText => E.Inner[1].ToString("0");
     public string HeightText => E.Inner[2].ToString("0");
+
+    private async Task LoadMeshAsync()
+    {
+        try
+        {
+            var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
+            if (client is null)
+            {
+                SidecarOnline = false;
+                SidecarStatus = $"sidecar offline — showing schematic preview ({Foundry.Core.Sidecar.SidecarHost.Shared.StatusMessage})";
+                return;
+            }
+            var schema = Foundry.Core.Sidecar.EnclosureSchema.ToJson(E);
+            var mesh = await client.BuildEnclosureAsync(schema);
+            StlBytes = mesh.Stl;
+            SidecarOnline = true;
+            MeshReady = true;
+            SidecarStatus = $"{mesh.Kernel} · {mesh.Triangles} tris · {client.BaseUrl}";
+        }
+        catch (Exception ex)
+        {
+            SidecarOnline = false;
+            SidecarStatus = $"sidecar error — showing schematic preview ({ex.Message})";
+        }
+    }
 }
 
 // ---------------- Firmware ----------------

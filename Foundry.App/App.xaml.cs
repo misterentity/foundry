@@ -33,4 +33,10 @@ public partial class App : Application
         var window = new MainWindow { DataContext = main };
         window.Show();
     }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        Foundry.Core.Sidecar.SidecarHost.Shared.Dispose(); // kill the spawned CAD sidecar
+        base.OnExit(e);
+    }
 }

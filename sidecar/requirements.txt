@@ -1,0 +1,7 @@
+# FOUNDRY CAD sidecar — runtime deps
+fastapi>=0.110
+uvicorn>=0.29
+
+# Optional fidelity upgrade (boolean cutouts, fillets, STEP export). The sidecar
+# falls back to the built-in mesh builder in enclosure.py when this is absent.
+# build123d>=0.7

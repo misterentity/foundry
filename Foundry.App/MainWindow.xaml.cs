@@ -18,9 +18,10 @@ public partial class MainWindow : Window
         var shot = Environment.GetEnvironmentVariable("FOUNDRY_SHOT");
         if (!string.IsNullOrEmpty(shot))
         {
+            var delayMs = int.TryParse(Environment.GetEnvironmentVariable("FOUNDRY_SHOT_DELAY_MS"), out var d) ? d : 1200;
             ContentRendered += (_, _) =>
             {
-                var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+                var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delayMs) };
                 t.Tick += (_, _) => { t.Stop(); RenderToFile(shot); Application.Current.Shutdown(); };
                 t.Start();
             };

@@ -2,7 +2,8 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Foundry.App.Controls"
-             xmlns:r="clr-namespace:Foundry.App.Rendering">
+             xmlns:r="clr-namespace:Foundry.App.Rendering"
+             xmlns:h="clr-namespace:HelixToolkit.Wpf;assembly=HelixToolkit.Wpf">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel MaxWidth="1280" HorizontalAlignment="Left" Margin="32,28,32,60">
 
@@ -39,7 +40,28 @@
               </RadialGradientBrush>
             </Border.Background>
             <Grid>
-              <Viewbox Stretch="Uniform"><r:EnclosureIsoControl Width="720" Height="460"/></Viewbox>
+              <!-- iso schematic preview (shown until/if the real mesh loads) -->
+              <Viewbox Stretch="Uniform" Visibility="{Binding MeshReady, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+                <r:EnclosureIsoControl Width="720" Height="460"/>
+              </Viewbox>
+
+              <!-- live 3D mesh from the CAD sidecar -->
+              <h:HelixViewport3D x:Name="Viewport" Background="Transparent"
+                                 ShowViewCube="True" ShowCoordinateSystem="True" ShowFrameRate="False"
+                                 ZoomExtentsWhenLoaded="True"
+                                 Visibility="{Binding MeshReady, Converter={StaticResource BoolVis}}">
+                <h:DefaultLights/>
+                <ModelVisual3D x:Name="MeshHost"/>
+              </h:HelixViewport3D>
+
+              <!-- sidecar status badge -->
+              <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="14"
+                      Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="8,4">
+                <StackPanel Orientation="Horizontal">
+                  <Rectangle Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,6,0" Fill="{DynamicResource Brush.Accent}"/>
+                  <TextBlock Style="{StaticResource Kicker}" FontSize="9.5" Text="{Binding SidecarStatus}"/>
+                </StackPanel>
+              </Border>
 
               <!-- view buttons -->
               <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
