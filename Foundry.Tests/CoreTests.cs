@@ -103,4 +103,17 @@ public class PipelineTests
         Assert.NotNull(reply.Pipeline);
         Assert.True(p.Chat.Count >= before + 2); // user + assistant
     }
+
+    [Fact]
+    public async Task ChatPipeline_Offline_FallsBackToCannedReply()
+    {
+        var p = DemoData.CreateSoilMoistureProject();
+        var pipeline = new ChatPipeline(new StubAnthropicClient(), stepDelayMs: 0);
+        var reply = await pipeline.RunTurnAsync(p, "make it solar powered");
+
+        Assert.Equal("assistant", reply.Role);
+        Assert.Contains("Offline preview", reply.Text);
+        Assert.NotNull(reply.Pipeline);
+        Assert.All(reply.Pipeline!, s => Assert.Equal("done", s.State));
+    }
 }

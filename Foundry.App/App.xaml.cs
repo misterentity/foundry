@@ -11,11 +11,14 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // Composition root (lightweight DI). Phase 1 uses the offline stubs so the whole
-        // app runs without an API key; the real Anthropic client/pipeline drop in here.
+        // Composition root (lightweight DI). The real Anthropic client is used when a key is
+        // stored in Credential Manager; otherwise the app runs fully offline (PRD F9).
         var credentials = new CredentialStore();
-        IAnthropicClient ai = new StubAnthropicClient();
-        IPipeline pipeline = new StubPipeline();
+        var anthropicKey = credentials.Read(CredentialStore.AnthropicTarget);
+        IAnthropicClient ai = string.IsNullOrWhiteSpace(anthropicKey)
+            ? new StubAnthropicClient()
+            : new AnthropicClient(anthropicKey);
+        IPipeline pipeline = new ChatPipeline(ai);
 
         var main = new MainViewModel(credentials, ai, pipeline);
 

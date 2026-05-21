@@ -1,0 +1,172 @@
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Foundry.Core.Ai;
+
+/// <summary>
+/// Real Anthropic Messages API client (PRD §7, §11). Uses a plain <see cref="HttpClient"/> per
+/// PRD §11 ("plain HttpClient, or the community Anthropic.SDK"). The per-stage system prompt is
+/// marked with <c>cache_control: ephemeral</c> for prompt caching, since the pipeline re-sends
+/// the same stable system prompt across turns.
+/// </summary>
+public sealed class AnthropicClient : IAnthropicClient, IDisposable
+{
+    private const string BaseUrl = "https://api.anthropic.com";
+    private const string ApiVersion = "2023-06-01";
+
+    private readonly HttpClient _http;
+    private readonly string _apiKey;
+    private readonly int _maxTokens;
+
+    public AnthropicClient(string apiKey, int maxTokens = 8192, HttpClient? http = null)
+    {
+        _apiKey = apiKey;
+        _maxTokens = maxTokens;
+        _http = http ?? new HttpClient();
+        _http.Timeout = TimeSpan.FromMinutes(5);
+    }
+
+    public bool HasKey => !string.IsNullOrWhiteSpace(_apiKey);
+
+    private void AddAuthHeaders(HttpRequestMessage req)
+    {
+        req.Headers.TryAddWithoutValidation("x-api-key", _apiKey);
+        req.Headers.TryAddWithoutValidation("anthropic-version", ApiVersion);
+    }
+
+    /// <summary>PRD §8.9: validate the key cheaply via GET /v1/models (no token spend).</summary>
+    public async Task<ModelListResult> ListModelsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/v1/models?limit=100");
+            AddAuthHeaders(req);
+            using var resp = await _http.SendAsync(req, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+                return ModelListResult.Failure($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {ExtractError(body)}");
+
+            var parsed = JsonSerializer.Deserialize<ModelsResponse>(body);
+            if (parsed?.Data is null || parsed.Data.Count == 0)
+                return ModelListResult.Failure("No models returned.");
+
+            var models = parsed.Data
+                .Select(m => new ClaudeModel(m.Id, m.DisplayName ?? m.Id, ""))
+                .ToList();
+            return new ModelListResult(true, models, null);
+        }
+        catch (Exception ex)
+        {
+            return ModelListResult.Failure(ex.Message);
+        }
+    }
+
+    public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, string modelId, CancellationToken ct = default)
+    {
+        var payload = new MessageRequest
+        {
+            Model = string.IsNullOrWhiteSpace(modelId) ? ModelCatalog.DefaultModelId : modelId,
+            MaxTokens = _maxTokens,
+            System = new[]
+            {
+                new SystemBlock { Text = systemPrompt, CacheControl = new CacheControl() },
+            },
+            Messages = new[]
+            {
+                new RequestMessage { Role = "user", Content = userPrompt },
+            },
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/v1/messages")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload, JsonOpts), Encoding.UTF8, "application/json"),
+        };
+        AddAuthHeaders(req);
+
+        using var resp = await _http.SendAsync(req, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new HttpRequestException($"Anthropic API error {(int)resp.StatusCode}: {ExtractError(body)}");
+
+        var message = JsonSerializer.Deserialize<MessageResponse>(body, JsonOpts);
+        var text = message?.Content?
+            .Where(b => b.Type == "text" && b.Text is not null)
+            .Select(b => b.Text)
+            .FirstOrDefault();
+        return text ?? "";
+    }
+
+    private static string ExtractError(string body)
+    {
+        try
+        {
+            var err = JsonSerializer.Deserialize<ErrorEnvelope>(body);
+            return err?.Error?.Message ?? body;
+        }
+        catch { return body; }
+    }
+
+    public void Dispose() => _http.Dispose();
+
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    // ---- wire types ----
+    private sealed class ModelsResponse
+    {
+        [JsonPropertyName("data")] public List<ModelEntry>? Data { get; set; }
+    }
+    private sealed class ModelEntry
+    {
+        [JsonPropertyName("id")] public string Id { get; set; } = "";
+        [JsonPropertyName("display_name")] public string? DisplayName { get; set; }
+    }
+
+    private sealed class MessageRequest
+    {
+        [JsonPropertyName("model")] public string Model { get; set; } = "";
+        [JsonPropertyName("max_tokens")] public int MaxTokens { get; set; }
+        [JsonPropertyName("system")] public SystemBlock[]? System { get; set; }
+        [JsonPropertyName("messages")] public RequestMessage[] Messages { get; set; } = Array.Empty<RequestMessage>();
+    }
+    private sealed class SystemBlock
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = "text";
+        [JsonPropertyName("text")] public string Text { get; set; } = "";
+        [JsonPropertyName("cache_control")] public CacheControl? CacheControl { get; set; }
+    }
+    private sealed class CacheControl
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = "ephemeral";
+    }
+    private sealed class RequestMessage
+    {
+        [JsonPropertyName("role")] public string Role { get; set; } = "user";
+        [JsonPropertyName("content")] public string Content { get; set; } = "";
+    }
+
+    private sealed class MessageResponse
+    {
+        [JsonPropertyName("content")] public List<ContentBlock>? Content { get; set; }
+    }
+    private sealed class ContentBlock
+    {
+        [JsonPropertyName("type")] public string Type { get; set; } = "";
+        [JsonPropertyName("text")] public string? Text { get; set; }
+    }
+
+    private sealed class ErrorEnvelope
+    {
+        [JsonPropertyName("error")] public ErrorBody? Error { get; set; }
+    }
+    private sealed class ErrorBody
+    {
+        [JsonPropertyName("message")] public string? Message { get; set; }
+    }
+}

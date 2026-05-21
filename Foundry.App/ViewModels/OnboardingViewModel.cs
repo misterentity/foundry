@@ -45,10 +45,15 @@ public sealed partial class OnboardingViewModel : ObservableObject
         TestResult = "Checking…";
         try
         {
-            var result = await _ai.ListModelsAsync();
+            // Validate the key the user just typed (not whatever is stored).
+            IAnthropicClient client = string.IsNullOrWhiteSpace(AnthropicKey)
+                ? _ai
+                : new AnthropicClient(AnthropicKey.Trim());
+            var result = await client.ListModelsAsync();
             TestResult = result.Ok
                 ? $"✓ valid · {result.Models.Count} models"
                 : $"✗ {result.Error}";
+            (client as IDisposable)?.Dispose();
         }
         catch (Exception ex)
         {
