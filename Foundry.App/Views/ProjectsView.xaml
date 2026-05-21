@@ -18,41 +18,21 @@
       <StackPanel Margin="44,40,44,0">
         <TextBlock Style="{StaticResource Kicker}" Text="Start"/>
         <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1,1,0,0">
-          <Grid>
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-
-            <!-- New project -->
-            <Border Grid.Column="0" Background="{StaticResource Brush.AccentWash}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="32,28" Cursor="Hand" MinHeight="220">
-              <Border.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding NewCommand}"/></Border.InputBindings>
-              <DockPanel>
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,20,0,0">
-                  <c:IconControl Glyph="plus" IconSize="12" Stroke="{DynamicResource Brush.Accent}" VerticalAlignment="Center"/>
-                  <TextBlock Style="{StaticResource KickerAccent}" Margin="8,0,0,0" Text="NEW PROJECT"/>
-                </StackPanel>
-                <StackPanel>
-                  <TextBlock Style="{StaticResource Serif}" FontSize="38" LineHeight="44" TextWrapping="Wrap" Text="Describe a device."/>
-                  <TextBlock Style="{StaticResource Mono}" FontSize="12.5" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" Margin="0,12,0,0" MaxWidth="420"
-                             Text="One prompt → architecture, BOM, wiring, firmware, a printable enclosure, and validation. Requires your Anthropic key."/>
-                </StackPanel>
-              </DockPanel>
-            </Border>
-
-            <!-- Open sample -->
-            <Border Grid.Column="1" Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="32,28" Cursor="Hand" MinHeight="220">
-              <Border.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding OpenSampleCommand}"/></Border.InputBindings>
-              <DockPanel>
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,20,0,0">
-                  <c:IconControl Glyph="play" IconSize="11" VerticalAlignment="Center"/>
-                  <TextBlock Style="{StaticResource Kicker}" Margin="8,0,0,0" Text="OPEN SAMPLE"/>
-                </StackPanel>
-                <StackPanel>
-                  <TextBlock Style="{StaticResource Serif}" FontSize="38" LineHeight="44" TextWrapping="Wrap" Text="Explore the demo."/>
-                  <TextBlock Style="{StaticResource Mono}" FontSize="12.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,12,0,0" MaxWidth="420"
-                             Text="Open the Cap. Soil Moisture Sentinel sample to tour every tab without an API key."/>
-                </StackPanel>
-              </DockPanel>
-            </Border>
-          </Grid>
+          <!-- New project -->
+          <Border Background="{StaticResource Brush.AccentWash}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="36,32" Cursor="Hand" MinHeight="200">
+            <Border.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding NewCommand}"/></Border.InputBindings>
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,20,0,0">
+                <c:IconControl Glyph="plus" IconSize="12" Stroke="{DynamicResource Brush.Accent}" VerticalAlignment="Center"/>
+                <TextBlock Style="{StaticResource KickerAccent}" Margin="8,0,0,0" Text="NEW PROJECT"/>
+              </StackPanel>
+              <StackPanel>
+                <TextBlock Style="{StaticResource Serif}" FontSize="44" LineHeight="50" TextWrapping="Wrap" Text="Describe a device."/>
+                <TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" Margin="0,14,0,0" MaxWidth="560"
+                           Text="One prompt → architecture, BOM, wiring, firmware, a printable enclosure, and validation. Requires your Anthropic key (add it in Settings)."/>
+              </StackPanel>
+            </DockPanel>
+          </Border>
         </Border>
       </StackPanel>
 

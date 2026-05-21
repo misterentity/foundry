@@ -29,6 +29,9 @@ public sealed class Project
     public List<Subsystem> Subsystems { get; set; } = new();
     public List<BomLine> Bom { get; set; } = new();
     public List<Connection> Connections { get; set; } = new();
+
+    /// <summary>Component specs (pins, logic levels) — the KB for validation/firmware/wiring (PRD §6).</summary>
+    public List<Kb.ComponentSpec> Components { get; set; } = new();
     public Enclosure Enclosure { get; set; } = new();
     public Firmware Firmware { get; set; } = new();
     public List<Finding> Findings { get; set; } = new();

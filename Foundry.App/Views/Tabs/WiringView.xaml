@@ -27,7 +27,7 @@
       <!-- WIRING STAGE -->
       <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="24" Margin="0,0,0,28">
         <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
-          <r:WiringDiagramControl Width="1100" Height="600"/>
+          <r:WiringDiagramControl Project="{Binding Project}"/>
         </Viewbox>
       </Border>
 

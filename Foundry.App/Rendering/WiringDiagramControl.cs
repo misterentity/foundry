@@ -1,18 +1,31 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using Foundry.Core.Kb;
+using FProject = Foundry.Core.Project.Project;
 
 namespace Foundry.App.Rendering;
 
 /// <summary>
-/// Blueprint-style netlist diagram — a faithful port of wiring-svg.jsx. Drawn entirely in
-/// code on a fixed 1100×600 canvas (wrap in a Viewbox to scale). Component blocks carry pin
-/// headers; nets are colored orthogonal paths (power=red, ground=gray, signal=cyan).
+/// Generic netlist diagram. Auto-lays out the project's components into three columns
+/// (power sources left · controller center · peripherals right), draws each as a pin-labelled
+/// block, and routes every connection as a colored orthogonal net. Nothing is hard-coded — the
+/// layout is derived from <see cref="FProject.Connections"/> and <see cref="FProject.Components"/>.
 /// </summary>
 public sealed class WiringDiagramControl : FrameworkElement
 {
-    private const double W = 1100, H = 600;
+    public static readonly DependencyProperty ProjectProperty =
+        DependencyProperty.Register(nameof(Project), typeof(FProject), typeof(WiringDiagramControl),
+            new FrameworkPropertyMetadata(null,
+                FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public FProject? Project
+    {
+        get => (FProject?)GetValue(ProjectProperty);
+        set => SetValue(ProjectProperty, value);
+    }
+
+    // palette
     private static readonly Color CPower  = Color.FromRgb(0xFF, 0x40, 0x40);
     private static readonly Color CGround = Color.FromRgb(0x88, 0x88, 0x88);
     private static readonly Color CSignal = Color.FromRgb(0x5D, 0xD2, 0xFF);
@@ -24,197 +37,282 @@ public sealed class WiringDiagramControl : FrameworkElement
     private static readonly Color CInk    = Color.FromRgb(0xED, 0xED, 0xEE);
     private static readonly Color CInkSoft= Color.FromRgb(0xB6, 0xB6, 0xBB);
     private static readonly Color CInkMute= Color.FromRgb(0x6A, 0x6A, 0x72);
+    private static readonly Color CBg     = Color.FromRgb(0x07, 0x07, 0x0A);
+
+    // layout constants (px)
+    private const double ColW = 196, Gap = 150, MarginX = 64, MarginY = 76;
+    private const double HeaderH = 26, FooterH = 18, PinPitch = 28, PinPad = 16, Stub = 16;
 
     private static FontFamily Mono =>
         (FontFamily)(Application.Current?.TryFindResource("Font.Mono") ?? new FontFamily("Consolas"));
     private static FontFamily Serif =>
         (FontFamily)(Application.Current?.TryFindResource("Font.Serif") ?? new FontFamily("Georgia"));
 
-    protected override Size MeasureOverride(Size availableSize) => new(W, H);
+    private sealed class LPin { public required string Comp, Pin, Net; public double X, Y; public bool Right; }
+    private sealed class LComp
+    {
+        public required string Alias, Title, Sub; public string Kind = "peripheral";
+        public double X, Y, W, H;
+        public readonly List<LPin> Left = new(); public readonly List<LPin> Right = new();
+    }
+
+    private FProject? _built;
+    private readonly List<LComp> _comps = new();
+    private readonly List<(string d, Color c)> _nets = new();
+    private readonly Dictionary<string, LPin> _anchors = new();
+    private double _w = 900, _h = 480;
+    private int _netCount, _compCount;
 
     private static Color NetColor(string net) => net switch
     {
         "power" => CPower, "ground" => CGround, "i2c" => CI2c, _ => CSignal
     };
 
-    private sealed record Pin(string Side, double At, string Label, string Net);
-    private sealed record Net(string D, Color Color, double? Lx = null, double? Ly = null, string? Lt = null);
+    private static string NetOfKind(PinKind k) => k switch
+    {
+        PinKind.Power => "power", PinKind.Ground => "ground", _ => "signal"
+    };
 
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        Build();
+        return new Size(_w, _h);
+    }
+
+    // ----- layout -----
+    private void Build()
+    {
+        if (ReferenceEquals(_built, Project) && _comps.Count > 0) return;
+        _built = Project;
+        _comps.Clear(); _nets.Clear(); _anchors.Clear();
+
+        var p = Project;
+        if (p is null) { _w = 900; _h = 480; return; }
+
+        // 1. collect components keyed by alias, with the set of pins actually used + their net.
+        var byAlias = new Dictionary<string, LComp>(StringComparer.OrdinalIgnoreCase);
+        var pinNet = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase); // alias -> pin -> net
+        var declared = new Dictionary<string, ComponentSpec>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var c in p.Components) declared[c.Alias] = c;
+
+        void Touch(string alias) { if (!pinNet.ContainsKey(alias)) pinNet[alias] = new(StringComparer.OrdinalIgnoreCase); }
+
+        // pins referenced by the netlist (authoritative)
+        foreach (var conn in p.Connections)
+        {
+            foreach (var (ep, _) in new[] { (conn.From, 0), (conn.To, 1) })
+            {
+                var (a, pin) = SplitEndpoint(ep);
+                if (a.Length == 0) continue;
+                Touch(a);
+                // a connection net wins; keep the strongest (power/ground over signal) if multiple
+                if (!pinNet[a].TryGetValue(pin, out var existing) || Rank(conn.Net) > Rank(existing))
+                    pinNet[a][pin] = conn.Net;
+            }
+        }
+        // components with no connections still get a block (show a few declared pins)
+        foreach (var c in p.Components)
+        {
+            Touch(c.Alias);
+            if (pinNet[c.Alias].Count == 0)
+                foreach (var pin in c.Pins.Take(6)) pinNet[c.Alias][pin.Name] = NetOfKind(pin.Kind);
+        }
+
+        foreach (var alias in pinNet.Keys)
+        {
+            declared.TryGetValue(alias, out var spec);
+            var title = spec?.Name is { Length: > 0 } n ? $"{alias} · {n}" : alias;
+            var comp = new LComp { Alias = alias, Title = title, Sub = spec?.Ref ?? "" };
+            byAlias[alias] = comp;
+        }
+
+        // 2. classify role
+        LComp? mcu = null; int bestSignal = -1;
+        foreach (var comp in byAlias.Values)
+        {
+            var pins = pinNet[comp.Alias];
+            bool allPower = pins.Count > 0 && pins.Values.All(v => v is "power" or "ground");
+            int sigCount = pins.Values.Count(v => v is "signal" or "i2c");
+            if (IsPowerName(comp.Alias) || (allPower && !IsMcuName(comp.Alias))) comp.Kind = "power";
+            else comp.Kind = "peripheral";
+            // best MCU candidate = explicit name, else most signal pins
+            int score = (IsMcuName(comp.Alias) ? 1000 : 0) + sigCount;
+            if (score > bestSignal) { bestSignal = score; mcu = comp; }
+        }
+        if (mcu is not null && !IsPowerName(mcu.Alias)) mcu.Kind = "mcu";
+
+        // 3. assign pins to sides
+        foreach (var comp in byAlias.Values)
+        {
+            foreach (var kv in pinNet[comp.Alias].OrderBy(k => SideOrder(comp.Kind, k.Value)).ThenBy(k => k.Key))
+            {
+                bool right = comp.Kind switch
+                {
+                    "power" => true,                                   // power: pins face center (right)
+                    "peripheral" => false,                             // peripheral: pins face center (left)
+                    _ => kv.Value is not ("power" or "ground"),        // mcu: power/ground left, signals right
+                };
+                var lp = new LPin { Comp = comp.Alias, Pin = kv.Key, Net = kv.Value, Right = right };
+                (right ? comp.Right : comp.Left).Add(lp);
+            }
+        }
+
+        // 4. size blocks
+        foreach (var comp in byAlias.Values)
+        {
+            comp.W = ColW;
+            int rows = Math.Max(comp.Left.Count, comp.Right.Count);
+            comp.H = HeaderH + PinPad * 2 + Math.Max(1, rows) * PinPitch + FooterH;
+        }
+
+        // 5. columns
+        var colLeft = byAlias.Values.Where(c => c.Kind == "power").ToList();
+        var colCenter = byAlias.Values.Where(c => c.Kind == "mcu").ToList();
+        var colRight = byAlias.Values.Where(c => c.Kind == "peripheral").ToList();
+        if (colCenter.Count == 0 && colRight.Count > 0) { colCenter.Add(colRight[0]); colRight.RemoveAt(0); } // ensure a center
+
+        var columns = new List<List<LComp>> { colLeft, colCenter, colRight };
+        double x = MarginX;
+        double maxColH = 0;
+        foreach (var col in columns)
+        {
+            if (col.Count == 0) continue;
+            double y = MarginY;
+            foreach (var comp in col)
+            {
+                comp.X = x; comp.Y = y;
+                LayoutPins(comp);
+                y += comp.H + 44;
+            }
+            maxColH = Math.Max(maxColH, y - 44);
+            x += ColW + Gap;
+        }
+        _w = Math.Max(900, x - Gap + MarginX);
+        _h = Math.Max(360, maxColH + MarginY + 96); // room for title block
+
+        _comps.AddRange(byAlias.Values);
+        foreach (var comp in _comps)
+            foreach (var lp in comp.Left.Concat(comp.Right))
+                _anchors[$"{comp.Alias}.{lp.Pin}"] = lp;
+
+        // 6. route nets
+        _compCount = _comps.Count;
+        _netCount = p.Connections.Count;
+        int idx = 0;
+        foreach (var conn in p.Connections)
+        {
+            var (fa, fp) = SplitEndpoint(conn.From);
+            var (ta, tp) = SplitEndpoint(conn.To);
+            if (!_anchors.TryGetValue($"{fa}.{fp}", out var a1) || !_anchors.TryGetValue($"{ta}.{tp}", out var a2)) { idx++; continue; }
+            _nets.Add((RoutePath(a1, a2, idx++), NetColor(conn.Net)));
+        }
+    }
+
+    private static void LayoutPins(LComp comp)
+    {
+        double top = comp.Y + HeaderH + PinPad + PinPitch / 2;
+        for (int i = 0; i < comp.Left.Count; i++) { comp.Left[i].X = comp.X; comp.Left[i].Y = top + i * PinPitch; }
+        for (int i = 0; i < comp.Right.Count; i++) { comp.Right[i].X = comp.X + comp.W; comp.Right[i].Y = top + i * PinPitch; }
+    }
+
+    private static string RoutePath(LPin a, LPin b, int idx)
+    {
+        double d1 = a.Right ? Stub : -Stub, d2 = b.Right ? Stub : -Stub;
+        double ex1 = a.X + d1, ex2 = b.X + d2;
+        double jitter = ((idx % 9) - 4) * 6.0;
+        double cx = (ex1 + ex2) / 2 + jitter;
+        return string.Format(CultureInfo.InvariantCulture,
+            "M {0} {1} L {2} {1} L {3} {1} L {3} {4} L {5} {4} L {6} {4}",
+            a.X, a.Y, ex1, cx, b.Y, ex2, b.X);
+    }
+
+    private static int Rank(string net) => net switch { "power" => 3, "ground" => 3, "i2c" => 2, _ => 1 };
+    private static int SideOrder(string kind, string net) => kind == "mcu" ? (net is "power" or "ground" ? 0 : 1) : 0;
+
+    private static (string alias, string pin) SplitEndpoint(string ep)
+    {
+        var dot = ep.IndexOf('.');
+        return dot < 0 ? (ep.Trim(), "") : (ep[..dot].Trim(), ep[(dot + 1)..].Trim());
+    }
+
+    private static readonly string[] PowerWords = { "bat", "batt", "cell", "reg", "regul", "ldo", "charg", "chg", "boost", "buck", "pmic", "solar", "power", "vreg", "psu", "supply" };
+    private static readonly string[] McuWords = { "mcu", "esp", "pico", "rp2040", "stm", "atmega", "avr", "nrf", "samd", "teensy", "controller", "soc", "cpu" };
+    private static bool IsPowerName(string a) => PowerWords.Any(w => a.ToLowerInvariant().Contains(w));
+    private static bool IsMcuName(string a) => McuWords.Any(w => a.ToLowerInvariant().Contains(w));
+
+    // ----- render -----
     protected override void OnRender(DrawingContext dc)
     {
-        dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x07, 0x07, 0x0A)), null, new Rect(0, 0, W, H));
+        Build();
+        dc.DrawRectangle(new SolidColorBrush(CBg), null, new Rect(0, 0, _w, _h));
 
-        // ---- grid ----
         var fine = new Pen(new SolidColorBrush(Color.FromArgb(0x06, 0xFF, 0xFF, 0xFF)), 1);
-        for (double x = 0; x <= W; x += 20) dc.DrawLine(fine, new Point(x, 0), new Point(x, H));
-        for (double y = 0; y <= H; y += 20) dc.DrawLine(fine, new Point(0, y), new Point(W, y));
-        var coarse = new Pen(new SolidColorBrush(Color.FromArgb(0x0D, 0xFF, 0xFF, 0xFF)), 1);
-        for (double x = 0; x <= W; x += 100) dc.DrawLine(coarse, new Point(x, 0), new Point(x, H));
-        for (double y = 0; y <= H; y += 100) dc.DrawLine(coarse, new Point(0, y), new Point(W, y));
+        for (double gx = 0; gx <= _w; gx += 20) dc.DrawLine(fine, new Point(gx, 0), new Point(gx, _h));
+        for (double gy = 0; gy <= _h; gy += 20) dc.DrawLine(fine, new Point(0, gy), new Point(_w, gy));
 
-        // ---- margin marks ----
-        var markPen = new Pen(new SolidColorBrush(CLine), 1);
-        foreach (var x in new[] { 0, 200, 400, 600, 800, 1000 })
+        if (Project is null || _comps.Count == 0)
         {
-            dc.DrawLine(markPen, new Point(x, 0), new Point(x, 8));
-            Text(dc, x.ToString(), x + 4, 14, 9, CLine, Mono);
-        }
-        foreach (var y in new[] { 0, 150, 300, 450, 600 })
-        {
-            dc.DrawLine(markPen, new Point(0, y), new Point(8, y));
-            Text(dc, y.ToString(), 12, y + 8, 9, CLine, Mono);
+            TextCenter(dc, "no netlist", _w / 2, _h / 2, 14, CInkMute, Mono);
+            return;
         }
 
-        // ---- title block ----
+        // nets first (under blocks)
+        foreach (var (d, c) in _nets)
+        {
+            var geo = Geometry.Parse(d);
+            dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(0x1F, c.R, c.G, c.B)), 6), geo);
+            dc.DrawGeometry(null, new Pen(new SolidColorBrush(c), 2) { LineJoin = PenLineJoin.Round }, geo);
+        }
+
+        foreach (var comp in _comps) DrawBlock(dc, comp);
         DrawTitleBlock(dc);
-
-        // ---- component blocks ----
-        DrawBlock(dc, 60, 420, 180, 120, "BAT · 18650 Li-ion", "3.7V · 3000mAh", "HLD-18650-1S", CAccent, new[]
-        {
-            new Pin("R", 40, "BAT+", "power"), new Pin("R", 80, "BAT−", "ground"),
-        });
-        DrawBlock(dc, 60, 250, 180, 120, "CHG · TP4056", "USB-C 1A", "TP4056-USB-C", CAccent, new[]
-        {
-            new Pin("T", 40, "VBUS", "power"), new Pin("B", 90, "BAT+", "power"), new Pin("B", 140, "GND", "ground"),
-        });
-        DrawBlock(dc, 310, 350, 170, 110, "REG · MCP1700", "LDO · 3.3V", "TO-92", CAccent, new[]
-        {
-            new Pin("L", 30, "VIN", "power"), new Pin("L", 60, "GND", "ground"),
-            new Pin("L", 90, "VOUT", "power"), new Pin("R", 55, "→3V3", "power"),
-        });
-        DrawBlock(dc, 540, 140, 310, 330, "MCU · ESP32 DevKit v1", "240MHz · WiFi+BLE", "ESP32-DEVKITC-32E · 30 pins", CAccent, new[]
-        {
-            new Pin("L", 50, "3V3", "power"), new Pin("L", 90, "GND", "ground"), new Pin("L", 130, "5V", "power"),
-            new Pin("L", 200, "GPIO34", "signal"), new Pin("L", 240, "GPIO0", "signal"), new Pin("L", 280, "GPIO13", "signal"),
-            new Pin("R", 70, "WIFI/ANT", "signal"), new Pin("R", 130, "TX0", "signal"), new Pin("R", 170, "RX0", "signal"),
-            new Pin("R", 230, "EN", "signal"), new Pin("R", 280, "USB", "power"),
-        });
-        DrawBlock(dc, 920, 260, 150, 130, "SEN · CAP v1.2", "0–3V analog", "SEN-CAP-01", CAccent, new[]
-        {
-            new Pin("L", 40, "VCC", "power"), new Pin("L", 70, "GND", "ground"), new Pin("L", 100, "AOUT", "signal"),
-        });
-        DrawBlock(dc, 310, 100, 150, 80, "BTN1 · TACT", "6×6mm", "TL3301AF260QG", CAccent, new[]
-        {
-            new Pin("R", 30, "A", "signal"), new Pin("R", 55, "B", "ground"),
-        });
-
-        // ---- nets ----
-        var nets = new[]
-        {
-            new Net("M 240 460 L 270 460 L 270 388 L 200 388 L 200 370", CPower, 260, 430, "BAT+"),
-            new Net("M 240 500 L 285 500 L 285 392 L 250 392 L 250 370", CGround),
-            new Net("M 200 370 L 200 405 L 310 405 L 310 380", CPower, 250, 396, "VBAT"),
-            new Net("M 250 370 L 250 410 L 310 410 L 310 410", CGround),
-            new Net("M 480 405 L 510 405 L 510 270 L 540 270", CPower, 510, 332, "3V3"),
-            new Net("M 540 190 L 510 190 L 510 60 L 900 60 L 900 300 L 920 300", CPower, 712, 56, "3V3"),
-            new Net("M 540 230 L 500 230 L 500 80 L 880 80 L 880 330 L 920 330", CGround),
-            new Net("M 540 340 L 870 340 L 870 360 L 920 360", CSignal, 720, 336, "SIG · GPIO34"),
-            new Net("M 540 380 L 480 380 L 480 130 L 460 130", CSignal, 490, 256, "GPIO0"),
-            new Net("M 460 155 L 475 155 L 475 90 L 700 90 L 700 140", CGround),
-            new Net("M 100 250 L 100 220 L 145 220", CPower, 70, 230, "USB-C IN"),
-        };
-        foreach (var n in nets) DrawNet(dc, n);
-
-        // ---- USB-C call-out box ----
-        dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(CLine), 1), new Rect(30, 200, 60, 40));
-        TextCenter(dc, "USB-C", 60, 215, 8, CInkMute, Mono);
-        TextCenter(dc, "⟳ 5V", 60, 232, 11, CInk, Mono);
-
-        // ---- antenna squiggle ----
-        var antPen = new Pen(new SolidColorBrush(CSignal), 1.6);
-        dc.DrawLine(new Pen(new SolidColorBrush(CSignal), 2), new Point(870, 200), new Point(890, 200));
-        var ant = Geometry.Parse("M 890 200 q 4 -8 8 0 q 4 -8 8 0 q 4 -8 8 0");
-        dc.DrawGeometry(null, antPen, ant);
-        Text(dc, "WIFI", 928, 203, 9, CSignal, Mono);
-
-        // ---- signal cluster annotation ----
-        Text(dc, "SIGNAL CLUSTER · A", W - 260, 30, 9, CAccent, Mono);
-        dc.DrawLine(new Pen(new SolidColorBrush(CAccent), 0.8), new Point(W - 260, 36), new Point(W - 20, 36));
-        Text(dc, "3 nets · soil → MCU", W - 260, 52, 8.5, CInkSoft, Mono);
-        Text(dc, "power · ground · signal", W - 260, 66, 8.5, CInkMute, Mono);
     }
 
-    private void DrawBlock(DrawingContext dc, double x, double y, double w, double h,
-        string label, string sub, string footprint, Color accent, Pin[] pins)
+    private void DrawBlock(DrawingContext dc, LComp comp)
     {
-        // shadow + body
+        double x = comp.X, y = comp.Y, w = comp.W, h = comp.H;
         dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0)), null, new Rect(x + 3, y + 3, w, h));
         dc.DrawRectangle(new SolidColorBrush(CBody), new Pen(new SolidColorBrush(CLine), 1), new Rect(x, y, w, h));
-        // corner cut
-        dc.DrawLine(new Pen(new SolidColorBrush(accent), 1.5), new Point(x, y + 8), new Point(x + 8, y));
-        // label band
-        dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(CLine), 1), new Rect(x, y, w, 22));
-        Text(dc, label, x + 10, y + 15, 10, CInk, Mono);
-        TextRight(dc, sub, x + w - 10, y + 15, 9, CInkMute, Mono);
-        Text(dc, footprint, x + 10, y + h - 8, 8.5, CInkMute, Mono);
+        dc.DrawLine(new Pen(new SolidColorBrush(CAccent), 1.5), new Point(x, y + 8), new Point(x + 8, y));
+        dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(CLine), 1), new Rect(x, y, w, HeaderH));
+        Text(dc, Truncate(comp.Title, 26), x + 10, y + 17, 10.5, CInk, Mono);
+        var kindLabel = comp.Kind == "mcu" ? "CONTROLLER" : comp.Kind == "power" ? "POWER" : "PERIPHERAL";
+        TextRight(dc, kindLabel, x + w - 10, y + h - 7, 8, CInkMute, Mono);
+        if (comp.Sub.Length > 0) Text(dc, Truncate(comp.Sub, 24), x + 10, y + h - 7, 8.5, CInkMute, Mono);
 
-        foreach (var p in pins)
+        foreach (var lp in comp.Left)
         {
-            double cx = 0, cy = 0, tx = 0, ty = 0; var anchor = "start";
-            switch (p.Side)
-            {
-                case "L": cx = x; cy = y + p.At; tx = x + 8; ty = y + p.At + 3; anchor = "start"; break;
-                case "R": cx = x + w; cy = y + p.At; tx = x + w - 8; ty = y + p.At + 3; anchor = "end"; break;
-                case "T": cx = x + p.At; cy = y; tx = x + p.At; ty = y + 14; anchor = "middle"; break;
-                case "B": cx = x + p.At; cy = y + h; tx = x + p.At; ty = y + h - 8; anchor = "middle"; break;
-            }
-            var c = NetColor(p.Net);
-            dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(c), 1), new Rect(cx - 5, cy - 3, 10, 6));
-            switch (anchor)
-            {
-                case "end": TextRight(dc, p.Label, tx, ty, 9, CInkSoft, Mono); break;
-                case "middle": TextCenter(dc, p.Label, tx, ty, 9, CInkSoft, Mono); break;
-                default: Text(dc, p.Label, tx, ty, 9, CInkSoft, Mono); break;
-            }
+            var c = NetColor(lp.Net);
+            dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(c), 1), new Rect(lp.X - 5, lp.Y - 3, 10, 6));
+            Text(dc, lp.Pin, lp.X + 10, lp.Y + 3, 9, CInkSoft, Mono);
         }
-    }
-
-    private void DrawNet(DrawingContext dc, Net n)
-    {
-        var geo = Geometry.Parse(n.D);
-        dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(0x1F, n.Color.R, n.Color.G, n.Color.B)), 6), geo);
-        dc.DrawGeometry(null, new Pen(new SolidColorBrush(n.Color), 2) { LineJoin = PenLineJoin.Miter }, geo);
-        if (n.Lt != null && n.Lx is double lx && n.Ly is double ly)
+        foreach (var lp in comp.Right)
         {
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x07, 0x07, 0x0A)), new Pen(new SolidColorBrush(n.Color), 0.8),
-                new Rect(lx - 32, ly - 8, 64, 16));
-            TextCenter(dc, n.Lt, lx, ly + 3, 8.5, n.Color, Mono);
+            var c = NetColor(lp.Net);
+            dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(c), 1), new Rect(lp.X - 5, lp.Y - 3, 10, 6));
+            TextRight(dc, lp.Pin, lp.X - 10, lp.Y + 3, 9, CInkSoft, Mono);
         }
     }
 
     private void DrawTitleBlock(DrawingContext dc)
     {
-        double tx = W - 260, ty = H - 90;
-        dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(CLine), 1), new Rect(tx, ty, 252, 82));
-        var p = new Pen(new SolidColorBrush(CLine), 1);
-        dc.DrawLine(p, new Point(tx, ty + 18), new Point(tx + 252, ty + 18));
-        dc.DrawLine(p, new Point(tx, ty + 48), new Point(tx + 252, ty + 48));
-        dc.DrawLine(p, new Point(tx + 170, ty + 18), new Point(tx + 170, ty + 82));
+        double tw = 268, th = 70, tx = _w - tw - 16, ty = _h - th - 16;
+        dc.DrawRectangle(new SolidColorBrush(CBand), new Pen(new SolidColorBrush(CLine), 1), new Rect(tx, ty, tw, th));
+        dc.DrawLine(new Pen(new SolidColorBrush(CLine), 1), new Point(tx, ty + 18), new Point(tx + tw, ty + 18));
         Text(dc, "FOUNDRY · NETLIST", tx + 8, ty + 13, 9, CInk, Mono);
-        Text(dc, "Cap. Soil Moisture Sentinel", tx + 8, ty + 32, 14, CInk, Serif);
-        Text(dc, "rev 03 · 9 nets · 8 components", tx + 8, ty + 44, 8, CInkMute, Mono);
-        Text(dc, "SHEET", tx + 8, ty + 63, 8, CInkMute, Mono);
-        Text(dc, "01 / 01", tx + 8, ty + 76, 11, CAccent, Mono);
-        Text(dc, "SCALE", tx + 178, ty + 63, 8, CInkMute, Mono);
-        Text(dc, "1:1", tx + 178, ty + 76, 11, CInk, Mono);
+        Text(dc, Truncate(Project?.Title ?? "Project", 30), tx + 8, ty + 38, 14, CInk, Serif);
+        Text(dc, $"{_netCount} nets · {_compCount} components · orthogonal", tx + 8, ty + 58, 8.5, CInkMute, Mono);
     }
 
-    // ---- text helpers (y is baseline, like SVG) ----
+    private static string Truncate(string s, int n) => s.Length <= n ? s : s[..(n - 1)] + "…";
+
     private static void Text(DrawingContext dc, string s, double x, double baseline, double size, Color color, FontFamily fam)
-    {
-        var ft = Format(s, size, color, fam);
-        dc.DrawText(ft, new Point(x, baseline - ft.Baseline));
-    }
+    { var ft = Format(s, size, color, fam); dc.DrawText(ft, new Point(x, baseline - ft.Baseline)); }
     private static void TextRight(DrawingContext dc, string s, double x, double baseline, double size, Color color, FontFamily fam)
-    {
-        var ft = Format(s, size, color, fam);
-        dc.DrawText(ft, new Point(x - ft.Width, baseline - ft.Baseline));
-    }
+    { var ft = Format(s, size, color, fam); dc.DrawText(ft, new Point(x - ft.Width, baseline - ft.Baseline)); }
     private static void TextCenter(DrawingContext dc, string s, double x, double baseline, double size, Color color, FontFamily fam)
-    {
-        var ft = Format(s, size, color, fam);
-        dc.DrawText(ft, new Point(x - ft.Width / 2, baseline - ft.Baseline));
-    }
+    { var ft = Format(s, size, color, fam); dc.DrawText(ft, new Point(x - ft.Width / 2, baseline - ft.Baseline)); }
     private static FormattedText Format(string s, double size, Color color, FontFamily fam) =>
         new(s, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
             new Typeface(fam, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),

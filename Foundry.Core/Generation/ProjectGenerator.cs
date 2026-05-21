@@ -109,9 +109,10 @@ Keep it realistic and minimal. Output ONLY the JSON object.
             Connections = MapConnections(root),
             Enclosure = MapEnclosure(root),
             Assembly = MapAssembly(root),
+            Components = MapComponents(root),
         };
 
-        var kb = new ComponentKb(MapComponents(root));
+        var kb = new ComponentKb(project.Components);
         var platform = Str(root, "firmwarePlatform", "Arduino C++").Contains("python", StringComparison.OrdinalIgnoreCase)
             ? FirmwarePlatform.MicroPython : FirmwarePlatform.ArduinoCpp;
 

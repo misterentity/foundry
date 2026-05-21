@@ -68,6 +68,8 @@ public static class DemoData
             PrintTime = "2h 14m",
         },
 
+        Components = ComponentKb.Demo().All.ToList(),
+
         Firmware = FirmwareGenerator.Generate(SoilMoistureConnections(), ComponentKb.Demo()),
 
         Findings = BuildDemoFindings(),
