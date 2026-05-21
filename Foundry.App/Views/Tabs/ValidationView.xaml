@@ -16,13 +16,13 @@
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
                      Text="Power budget, voltage/logic level mismatches, pin conflicts, I²C collisions — all evaluated deterministically against the assembled Project. AI never decides validation verdicts."/>
         </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="RE-RUN"/></StackPanel>
-          </Button>
-          <Button Style="{StaticResource Btn}">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="REPORT.PDF"/></StackPanel>
-          </Button>
+        <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Margin="0,0,0,4">
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Style="{StaticResource BtnPrimary}" Command="{Binding ReRunCommand}">
+              <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="RE-RUN CHECKS"/></StackPanel>
+            </Button>
+          </StackPanel>
+          <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" HorizontalAlignment="Right" Margin="0,8,0,0" TextWrapping="Wrap" MaxWidth="320" TextAlignment="Right" Text="{Binding Status}"/>
         </StackPanel>
       </Grid>
 
@@ -46,7 +46,7 @@
       </Border>
 
       <!-- FINDINGS -->
-      <ItemsControl ItemsSource="{Binding Project.Findings}" Margin="0,0,0,28">
+      <ItemsControl ItemsSource="{Binding Findings}" Margin="0,0,0,28">
         <ItemsControl.ItemTemplate>
           <DataTemplate>
             <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1,1,1,0" Background="{StaticResource Brush.Surface0}">
@@ -78,8 +78,10 @@
                   <StackPanel VerticalAlignment="Center">
                     <StackPanel Visibility="{Binding Fix, Converter={StaticResource NullVis}}">
                       <TextBlock Style="{StaticResource KickerAccent}" Text="Suggested fix"/>
-                      <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,4" Text="{Binding Fix}"/>
-                      <Button Style="{StaticResource BtnPrimary}" Padding="10,6" FontSize="10" HorizontalAlignment="Left" Content="APPLY &amp; RE-RUN"/>
+                      <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,4" TextWrapping="Wrap" Text="{Binding Fix}"/>
+                      <Button Style="{StaticResource BtnPrimary}" Padding="10,6" FontSize="10" HorizontalAlignment="Left" Content="APPLY &amp; RE-RUN"
+                              Command="{Binding DataContext.ApplyFixCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                              CommandParameter="{Binding}"/>
                     </StackPanel>
                     <TextBlock Visibility="{Binding Fix, Converter={StaticResource NullVis}, ConverterParameter=invert}"
                                Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.Ok}" Text="✓ no action needed"/>

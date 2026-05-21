@@ -8,6 +8,7 @@ using Foundry.Core.Export;
 using Foundry.Core.Firmware;
 using Foundry.Core.Project;
 using Foundry.Core.Sourcing;
+using Foundry.Core.Validation;
 using Microsoft.Win32;
 
 namespace Foundry.App.ViewModels;
@@ -256,15 +257,60 @@ public sealed class PowerSlice
     public required string BrushKey { get; init; }
 }
 
-public sealed class ValidationViewModel : TabViewModelBase
+public sealed partial class ValidationViewModel : TabViewModelBase
 {
-    public ValidationViewModel(Project project) : base(project) { }
+    [ObservableProperty] private string _status = "";
+
+    /// <summary>Observable copy of the findings so Re-run / Apply refresh the list live.</summary>
+    public ObservableCollection<Finding> Findings { get; } = new();
+
+    public ValidationViewModel(Project project) : base(project) => Refresh();
 
     public int FailCount => Project.Findings.Count(f => f.Severity == "fail");
     public int WarnCount => Project.Findings.Count(f => f.Severity == "warn");
     public int PassCount => Project.Findings.Count(f => f.Severity == "pass");
     public string OverallStatus => FailCount > 0 ? "FAIL" : WarnCount > 0 ? "WARN" : "PASS";
-    public string PassText => $"{PassCount} / 27";
+    public string PassText => $"{PassCount} / {Project.Findings.Count}";
+
+    private void Refresh()
+    {
+        Findings.Clear();
+        foreach (var f in Project.Findings) Findings.Add(f);
+        OnPropertyChanged(nameof(FailCount));
+        OnPropertyChanged(nameof(WarnCount));
+        OnPropertyChanged(nameof(PassCount));
+        OnPropertyChanged(nameof(OverallStatus));
+        OnPropertyChanged(nameof(PassText));
+    }
+
+    [RelayCommand]
+    private void ReRun()
+    {
+        ProjectValidator.Revalidate(Project);
+        Refresh();
+        Status = $"Re-ran {Project.Findings.Count} checks · {DateTime.Now:HH:mm:ss}";
+    }
+
+    [RelayCommand]
+    private void ApplyFix(Finding? finding)
+    {
+        if (finding is null) return;
+        if (!ProjectValidator.CanAutoFix(finding))
+        {
+            Status = $"{finding.Code}: “{finding.Fix}” needs a manual change — no safe automatic edit.";
+            return;
+        }
+        if (ProjectValidator.TryAutoFix(Project, finding))
+        {
+            ProjectValidator.Revalidate(Project);
+            Refresh();
+            Status = $"Applied “{finding.Fix}” · re-validated ({Project.Findings.Count} checks)";
+        }
+        else
+        {
+            Status = $"Couldn’t auto-fix {finding.Code} — no free pin/rail available.";
+        }
+    }
 
     public IReadOnlyList<PowerSlice> PowerBudget { get; } = new[]
     {
