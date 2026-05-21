@@ -43,7 +43,7 @@ def _rounded_box(trimesh, w, h, d, r):
     return box
 
 
-def _csg_build(inner, wall, cutouts, standoffs, lid):
+def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none"):
     import numpy as np  # noqa: F401  (trimesh pulls it in; kept explicit for PyInstaller)
     import trimesh
     from trimesh.transformations import rotation_matrix
@@ -61,7 +61,10 @@ def _csg_build(inner, wall, cutouts, standoffs, lid):
 
     through = max(4.0, t * 4)
     margin = 2.0
-    for c in cutouts or []:
+
+    # port/control cutouts + ventilation slots (expanded into many thin slot cutouts)
+    all_cuts = list(cutouts or []) + _vent_cutouts(vents or [], ox, oy, oz)
+    for c in all_cuts:
         try:
             solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin)
             if solid is not None:
@@ -74,6 +77,13 @@ def _csg_build(inner, wall, cutouts, standoffs, lid):
     for post in _standoff_posts(trimesh, boss_xy, t, H):
         try:
             base = base.union(post, engine="manifold")
+        except Exception:
+            continue
+
+    # external mounting tabs (wall-tabs / flange)
+    for tab in _mount_tabs(trimesh, mount, ox, oy, t):
+        try:
+            base = base.union(tab, engine="manifold")
         except Exception:
             continue
 
@@ -112,6 +122,40 @@ def _build_lid(trimesh, L, Wd, ox, oy, t, corner, boss_xy):
         except Exception:
             continue
     return lid
+
+
+def _vent_cutouts(vents, ox, oy, oz):
+    """Expand vent groups into thin horizontal slot cutouts on the named face."""
+    out = []
+    for v in vents or []:
+        face = str(v.get("face", "left")).lower()
+        count = max(1, min(int(v.get("count", 4) or 4), 12))
+        horiz = ox if face in ("front", "back", "top", "bottom") else oy
+        slot_w = max(6.0, horiz * 0.5)
+        spacing = 3.4
+        for i in range(count):
+            vpos = (i - (count - 1) / 2.0) * spacing
+            out.append({"face": face, "shape": "rect", "size": [slot_w, 1.6], "pos": [0.0, vpos], "label": "vent"})
+    return out
+
+
+def _mount_tabs(trimesh, mount, ox, oy, t):
+    """Flanged screw tabs on the left+right walls (wall-tabs / flange)."""
+    if str(mount).lower() not in ("wall-tabs", "flange"):
+        return []
+    tab_out, tab_w, thick = 12.0, 16.0, max(3.0, t)
+    tabs = []
+    for sx in (-1, 1):
+        tab = trimesh.creation.box(extents=[tab_out, tab_w, thick])
+        tab.apply_translation([sx * (ox / 2 + tab_out / 2 - 0.5), 0, thick / 2])
+        try:
+            hole = trimesh.creation.cylinder(radius=2.2, height=thick + 2, sections=24)
+            hole.apply_translation([sx * (ox / 2 + tab_out * 0.62), 0, thick / 2])
+            tab = tab.difference(hole, engine="manifold")
+        except Exception:
+            pass
+        tabs.append(tab)
+    return tabs
 
 
 def _boss_positions(n, L, Wd):
@@ -282,7 +326,9 @@ def build_stl(schema: dict) -> Tuple[bytes, dict]:
     cutouts = schema.get("cutouts", []) or []
     standoffs = schema.get("standoffs", 0)
     lid = schema.get("lid")
+    vents = schema.get("vents", []) or []
+    mount = schema.get("mount", "none")
     try:
-        return _csg_build(inner, wall, cutouts, standoffs, lid)
+        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount)
     except Exception:
         return _fallback_build(inner, wall)

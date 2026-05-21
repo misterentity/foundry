@@ -99,8 +99,19 @@ public sealed class Enclosure
     public string Lid { get; set; } = "snap";
     public List<Cutout> Cutouts { get; set; } = new();
     public int Standoffs { get; set; }
+    /// <summary>Ventilation slot groups.</summary>
+    public List<Vent> Vents { get; set; } = new();
+    /// <summary>none | wall-tabs | flange — external mounting style.</summary>
+    public string Mount { get; set; } = "none";
     public int MassGrams { get; set; }
     public string PrintTime { get; set; } = "";
+}
+
+public sealed class Vent
+{
+    /// <summary>front | back | left | right | top | bottom</summary>
+    public string Face { get; set; } = "left";
+    public int Count { get; set; } = 4;
 }
 
 public sealed class Cutout

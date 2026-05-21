@@ -26,6 +26,8 @@ public static class EnclosureSchema
             WallMm = enclosure.Wall,
             Lid = new LidDto { Style = enclosure.Lid },
             Standoffs = enclosure.Standoffs,
+            Mount = enclosure.Mount,
+            Vents = enclosure.Vents.Select(v => new VentDto { Face = v.Face, Count = v.Count }).ToList(),
             Cutouts = enclosure.Cutouts.Select(c => new CutoutDto
             {
                 Face = c.Face,
@@ -46,9 +48,12 @@ public static class EnclosureSchema
         public double WallMm { get; set; }
         public LidDto? Lid { get; set; }
         public int Standoffs { get; set; }
+        public string Mount { get; set; } = "none";
+        public List<VentDto> Vents { get; set; } = new();
         public List<CutoutDto> Cutouts { get; set; } = new();
     }
     private sealed class LidDto { public string Style { get; set; } = "snap"; }
+    private sealed class VentDto { public string Face { get; set; } = "left"; public int Count { get; set; } }
     private sealed class CutoutDto
     {
         public string Face { get; set; } = "side";

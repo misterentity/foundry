@@ -43,9 +43,11 @@ electronics project and return it as ONE JSON object — no prose, no markdown f
  "bom": [{"qty":1,"name":"ESP32 DevKit v1","mpn":"ESP32-DEVKITC-32E","price":8.5,"stock":1442,
           "lead":"Stock","dist":"DigiKey","note":"Wi-Fi MCU"}],
  "connections": [{"from":"MCU.GPIO34","to":"SENSOR.AOUT","net":"signal"}],
- "enclosure": {"inner":[62,48,26],"wall":2.0,"lid":"snap","standoffs":4,
-               "cutouts":[{"face":"side","shape":"rect","size":[9.5,6.5],"pos":[12,18],"label":"USB-C"},
-                          {"face":"top","shape":"circle","d":6,"pos":[40,10],"label":"Reset"}]},
+ "enclosure": {"inner":[62,48,26],"wall":2.0,"lid":"screw","standoffs":4,"mount":"wall-tabs",
+               "cutouts":[{"face":"front","shape":"rect","size":[9.5,3.5],"pos":[0,-6],"label":"USB-C"},
+                          {"face":"top","shape":"circle","d":6,"pos":[40,10],"label":"Reset button"},
+                          {"face":"right","shape":"rect","size":[14,8],"pos":[0,0],"label":"Soil-probe slot"}],
+               "vents":[{"face":"left","count":4},{"face":"right","count":4}]},
  "firmwarePlatform": "Arduino C++",
  "assembly": [{"title":"Prepare the enclosure","body":"...","chips":["enclosure.stl"]}]
 }
@@ -53,7 +55,17 @@ electronics project and return it as ONE JSON object — no prose, no markdown f
 Rules: connection endpoints are "ALIAS.PIN" using the component aliases and pin names you define in
 "components". Net is one of power|ground|signal|i2c. Every component needs power and ground nets where
 applicable. Pin kind is power|ground|input|output|bidir|analog. Mark input-only and strapping pins.
-Keep it realistic and minimal. Output ONLY the JSON object.
+
+Enclosure — design it for THIS device, not a generic box:
+- Size inner [L,W,H] (mm) to the actual parts plus ~3–5 mm clearance and the standoff height; don't guess round numbers.
+- Add a cutout for EVERY external interface: USB/DC-power, each connector/header, buttons, status LEDs (small
+  circle d≈3 as a light pipe), displays, sensor windows/probes, antenna. Put each on the face it naturally exits;
+  pos is [x,y] mm offset from that face's centre (x horizontal, y vertical). faces: front|back|left|right|top|bottom.
+- "vents":[{"face","count"}] — add ventilation slots when the design makes heat (regulators, motor/LED drivers,
+  >300 mA draw, or a sealed warm part); omit for cool/low-power designs.
+- "mount": "none" | "wall-tabs" (flanged screw tabs) | "flange" — pick for how it installs (a wall sensor → wall-tabs).
+- "lid": "snap" for easy indoor access, "screw" for outdoor/secure/vibration. "standoffs": PCB mount-hole count (0–4).
+Output ONLY the JSON object.
 """;
 
     public async Task<GenerationResult> GenerateAsync(string prompt, CancellationToken ct = default)
@@ -367,6 +379,12 @@ Include the main sketch and any helper/config files. Do NOT include the pin-map 
             Wall = Dbl(e, "wall", 2.0),
             Lid = Str(e, "lid", "snap"),
             Standoffs = Int(e, "standoffs", 4),
+            Mount = Str(e, "mount", "none"),
+            Vents = Arr(e, "vents").Select(v => new Vent
+            {
+                Face = Str(v, "face", "left"),
+                Count = Math.Clamp(Int(v, "count", 4), 1, 12),
+            }).ToList(),
             MassGrams = 0,
             PrintTime = "",
             Cutouts = Arr(e, "cutouts").Select(c => new Cutout

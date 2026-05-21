@@ -27,8 +27,8 @@ class EnclosureSchema(BaseModel):
     lid: dict | str | None = None
     cutouts: list[dict] = []
     standoffs: list[dict] | int | None = None
-    vents: dict | None = None
-    mounts: dict | None = None
+    vents: list[dict] = []
+    mount: str = "none"
 
 
 @app.get("/health")

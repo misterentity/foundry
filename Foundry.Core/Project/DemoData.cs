@@ -56,13 +56,17 @@ public static class DemoData
         {
             Inner = new double[] { 62, 48, 26 },
             Wall = 2.0,
-            Lid = "snap",
+            Lid = "screw",           // outdoor → screw-down lid
+            Mount = "wall-tabs",     // wall-mounted soil sensor
             Cutouts = new()
             {
-                new Cutout { Face="side", Shape="rect",   Size=new double[]{9.5,6.5}, Pos=new double[]{12,18}, Label="USB-C" },
-                new Cutout { Face="top",  Shape="circle", D=6,                        Pos=new double[]{40,10}, Label="Reset" },
-                new Cutout { Face="side", Shape="circle", D=12,                       Pos=new double[]{50,13}, Label="M12 gland" },
+                new Cutout { Face="front", Shape="rect",   Size=new double[]{9.5,3.5}, Pos=new double[]{0,-7},  Label="USB-C" },
+                new Cutout { Face="top",   Shape="circle", D=6,                        Pos=new double[]{18,8},  Label="Reset button" },
+                new Cutout { Face="top",   Shape="circle", D=3,                        Pos=new double[]{28,8},  Label="Status LED" },
+                new Cutout { Face="right", Shape="circle", D=12,                       Pos=new double[]{0,-4},  Label="M12 cable gland" },
+                new Cutout { Face="bottom",Shape="rect",   Size=new double[]{10,6},    Pos=new double[]{0,16},  Label="Soil-probe slot" },
             },
+            Vents = new() { new Vent { Face="left", Count=4 }, new Vent { Face="right", Count=4 } },
             Standoffs = 4,
             MassGrams = 38,
             PrintTime = "2h 14m",

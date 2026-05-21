@@ -195,6 +195,13 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
     public string HeightText => Dim(2);
     private string Dim(int i) => E.Inner is { } a && a.Length > i ? a[i].ToString("0") : "—";
 
+    // purpose-built feature readouts
+    public string LidText => E.Lid?.ToLowerInvariant() == "screw" ? "Screw-down" : "Snap-fit";
+    public string MountText => E.Mount?.ToLowerInvariant() switch { "wall-tabs" => "Wall tabs", "flange" => "Perimeter flange", _ => "None" };
+    public string StandoffText => E.Standoffs > 0 ? $"{E.Standoffs} bosses" : "None";
+    public int VentCount => E.Vents.Sum(v => v.Count);
+    public string VentText => VentCount > 0 ? $"{VentCount} slots ({string.Join("/", E.Vents.Select(v => v.Face))})" : "None";
+
     private async Task LoadMeshAsync()
     {
         try

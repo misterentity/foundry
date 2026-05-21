@@ -132,6 +132,26 @@
               </ItemsControl>
             </Border>
 
+            <TextBlock Style="{StaticResource Kicker}" Text="Build features"/>
+            <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,8,0,18">
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                <Border Grid.Row="0" Grid.Column="0" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="14,10">
+                  <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Lid"/><TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.Ink}" Margin="0,3,0,0" Text="{Binding LidText}"/></StackPanel>
+                </Border>
+                <Border Grid.Row="0" Grid.Column="1" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="14,10">
+                  <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Mounting"/><TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.Ink}" Margin="0,3,0,0" Text="{Binding MountText}"/></StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="0" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0" Padding="14,10">
+                  <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Standoffs"/><TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.Ink}" Margin="0,3,0,0" Text="{Binding StandoffText}"/></StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="1" Padding="14,10">
+                  <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Ventilation"/><TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.Ink}" Margin="0,3,0,0" Text="{Binding VentText}"/></StackPanel>
+                </Border>
+              </Grid>
+            </Border>
+
             <TextBlock Style="{StaticResource Kicker}" Text="Print estimate · 0.2 mm PETG"/>
             <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,8,0,18">
               <Grid>
