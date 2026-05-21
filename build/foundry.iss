@@ -4,7 +4,7 @@
 ; (sidecar\dist\foundry-cad, optional) is bundled if present.
 
 #define AppName "Foundry"
-#define AppVersion "0.4.5"
+#define AppVersion "0.4.6"
 #define AppPublisher "Foundry"
 
 [Setup]
@@ -28,9 +28,11 @@ RestartApplications=no
 
 [Files]
 ; WPF app (from: dotnet publish Foundry.App -c Release -r win-x64 -o build\publish)
-Source: "publish\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+; ignoreversion is REQUIRED: our DLLs are all assembly-version 1.0.0.0, so without it Inno
+; skips overwriting same-version files and the app DLLs (e.g. Foundry.Core.dll) go stale on upgrade.
+Source: "publish\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; Frozen Python CAD sidecar (optional — only if pyinstaller build\sidecar.spec was run)
-Source: "..\sidecar\dist\foundry-cad\*"; DestDir: "{app}\sidecar"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\sidecar\dist\foundry-cad\*"; DestDir: "{app}\sidecar"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\Foundry.exe"
