@@ -20,13 +20,15 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly ICredentialStore _credentials;
     private readonly IAnthropicClient _ai;
     private readonly Action _onBack;
+    private readonly Action _onViewLogs;
     private readonly AppConfig _config;
 
-    public SettingsViewModel(ICredentialStore credentials, IAnthropicClient ai, Action onBack)
+    public SettingsViewModel(ICredentialStore credentials, IAnthropicClient ai, Action onBack, Action onViewLogs)
     {
         _credentials = credentials;
         _ai = ai;
         _onBack = onBack;
+        _onViewLogs = onViewLogs;
         _config = ConfigStore.Load();
 
         _selectedModelId = _config.ModelId;
@@ -161,6 +163,9 @@ public sealed partial class SettingsViewModel : ObservableObject
         Save(); // persist owner/repo so the check uses the current values
         if (Application.Current is App app) await app.CheckForUpdatesAsync(interactive: true);
     }
+
+    [RelayCommand] private void ViewLogs() => _onViewLogs();
+    public string LogFolder => Foundry.Core.Diagnostics.AppLog.LogDir;
 
     [RelayCommand] private void Back() => _onBack();
 }

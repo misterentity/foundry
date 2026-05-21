@@ -11,7 +11,7 @@
       <Grid Margin="0,0,0,28">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Style="{StaticResource Kicker}" Text="PARAMETRIC CAD · build123d · OpenCASCADE 7.7.2"/>
+          <TextBlock Style="{StaticResource Kicker}" Text="PARAMETRIC CAD · trimesh + manifold3d · base + lid"/>
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
             <Run Text="What you'll "/><Run Text="print." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
@@ -40,10 +40,21 @@
               </RadialGradientBrush>
             </Border.Background>
             <Grid>
-              <!-- iso schematic preview (shown until/if the real mesh loads) -->
-              <Viewbox Stretch="Uniform" Visibility="{Binding MeshReady, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
-                <r:EnclosureIsoControl Width="720" Height="460"/>
-              </Viewbox>
+              <!-- loading state -->
+              <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                          Visibility="{Binding IsLoading, Converter={StaticResource BoolVis}}">
+                <TextBlock Style="{StaticResource Serif}" FontSize="26" HorizontalAlignment="Center" Foreground="{StaticResource Brush.InkSoft}" Text="Rendering model…"/>
+                <TextBlock Style="{StaticResource Mono}" FontSize="11" HorizontalAlignment="Center" Foreground="{StaticResource Brush.InkMute}" Margin="0,8,0,14" Text="building the 3D enclosure from your design"/>
+                <ProgressBar IsIndeterminate="True" Width="200" Height="3" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"/>
+              </StackPanel>
+
+              <!-- offline / error state -->
+              <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="360"
+                          Visibility="{Binding ShowOffline, Converter={StaticResource BoolVis}}">
+                <TextBlock Style="{StaticResource Serif}" FontSize="24" HorizontalAlignment="Center" Foreground="{StaticResource Brush.InkMute}" Text="3D preview unavailable"/>
+                <TextBlock Style="{StaticResource Mono}" FontSize="11" HorizontalAlignment="Center" TextAlignment="Center" Foreground="{StaticResource Brush.InkFaint}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="The CAD sidecar isn't running. Dimensions and cutouts (right) are still accurate, and EXPORT STL works once it's back."/>
+              </StackPanel>
 
               <!-- live 3D mesh from the CAD sidecar -->
               <h:HelixViewport3D x:Name="Viewport" Background="Transparent"

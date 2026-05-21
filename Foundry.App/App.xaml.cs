@@ -36,6 +36,7 @@ public partial class App : Application
             case "newproject": main.ShowNewProject(); break;
             case "workspace": main.OpenSample(); break;
             case "settings": main.ShowSettings(); break;
+            case "logs": main.ShowLogs(); break;
             case "gen": GenerateForDiag(main); break;
         }
 
@@ -181,6 +182,7 @@ public partial class App : Application
             System.IO.Directory.CreateDirectory(dir);
             var path = System.IO.Path.Combine(dir, "crash.log");
             System.IO.File.AppendAllText(path, $"[{DateTime.Now:u}] {source}: {ex}\n\n");
+            try { Foundry.Core.Diagnostics.AppLog.Error("crash", ex?.Message ?? source, ex?.ToString()); } catch { }
             if (Environment.GetEnvironmentVariable("FOUNDRY_NODIALOG") != "1")
                 MessageBox.Show($"Foundry hit an error and logged it to:\n{path}\n\n{ex?.Message}", "Foundry", MessageBoxButton.OK, MessageBoxImage.Error);
         }

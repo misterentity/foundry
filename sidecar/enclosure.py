@@ -20,6 +20,29 @@ Tri = Tuple[Vec, Vec, Vec]
 # ----------------------------------------------------------------------------
 # Preferred builder: trimesh + manifold3d (boolean CSG)
 # ----------------------------------------------------------------------------
+def _rounded_box(trimesh, w, h, d, r):
+    """A box of size w×h×d with rounded vertical corners (radius r), base at z=0, centered in x/y.
+    Falls back to a sharp box if shapely/extrude isn't available."""
+    import math
+    r = max(0.0, min(r, w / 2 - 0.01, h / 2 - 0.01))
+    if r > 0.2:
+        try:
+            from shapely.geometry import Polygon
+            seg = 6
+            pts = []
+            for (cx, cy, a0) in ((w/2-r, h/2-r, 0), (-w/2+r, h/2-r, 90), (-w/2+r, -h/2+r, 180), (w/2-r, -h/2+r, 270)):
+                for i in range(seg + 1):
+                    a = math.radians(a0 + i * 90.0 / seg)
+                    pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+            m = trimesh.creation.extrude_polygon(Polygon(pts), height=d)  # z in [0, d]
+            return m
+        except Exception:
+            pass
+    box = trimesh.creation.box(extents=[w, h, d])
+    box.apply_translation([0, 0, d / 2])
+    return box
+
+
 def _csg_build(inner, wall, cutouts, standoffs, lid):
     import numpy as np  # noqa: F401  (trimesh pulls it in; kept explicit for PyInstaller)
     import trimesh
@@ -27,45 +50,79 @@ def _csg_build(inner, wall, cutouts, standoffs, lid):
 
     L, Wd, H = float(inner[0]), float(inner[1]), float(inner[2])
     t = float(wall)
-    ox, oy, oz = L + 2 * t, Wd + 2 * t, H + t  # outer; closed floor, open top
+    ox, oy, oz = L + 2 * t, Wd + 2 * t, H + t  # outer base; closed floor, open top
+    corner = min(4.0, L / 6, Wd / 6)           # design touch: rounded vertical corners
 
-    # solid outer box, base at z=0, centered in x/y
-    outer = trimesh.creation.box(extents=[ox, oy, oz])
-    outer.apply_translation([0, 0, oz / 2])
-
-    # cavity: open the top by overshooting upward
-    cav = trimesh.creation.box(extents=[L, Wd, H + t + 2])
-    cav.apply_translation([0, 0, t + (H + t + 2) / 2])
-    shell = outer.difference(cav, engine="manifold")
+    # ----- BASE: rounded outer shell, open top -----
+    base = _rounded_box(trimesh, ox, oy, oz, corner)
+    cav = _rounded_box(trimesh, L, Wd, H + t + 2, max(0.0, corner - t))
+    cav.apply_translation([0, 0, t])  # floor stays; open above
+    base = base.difference(cav, engine="manifold")
 
     through = max(4.0, t * 4)
     margin = 2.0
-
     for c in cutouts or []:
         try:
             solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin)
             if solid is not None:
-                shell = shell.difference(solid, engine="manifold")
+                base = base.difference(solid, engine="manifold")
         except Exception:
             continue  # a bad cutout never breaks the whole build
 
     n = standoffs if isinstance(standoffs, int) else (len(standoffs) if standoffs else 0)
-    for post in _standoff_posts(trimesh, n, L, Wd, t, H):
+    boss_xy = _boss_positions(n, L, Wd)
+    for post in _standoff_posts(trimesh, boss_xy, t, H):
         try:
-            shell = shell.union(post, engine="manifold")
+            base = base.union(post, engine="manifold")
         except Exception:
             continue
 
-    stl = shell.export(file_type="stl")
+    # ----- LID: rounded cap + locating lip + screw clearance, shown exploded above the base -----
+    lid = _build_lid(trimesh, L, Wd, ox, oy, t, corner, boss_xy)
+    gap = 10.0
+    lid.apply_translation([0, 0, oz + gap])
+
+    model = trimesh.util.concatenate([base, lid])
+    stl = model.export(file_type="stl")
     if isinstance(stl, str):
         stl = stl.encode("utf-8")
     stats = {
         "kernel": "manifold",
-        "triangles": int(len(shell.faces)),
+        "triangles": int(len(model.faces)),
         "outer_mm": [round(ox, 2), round(oy, 2), round(oz, 2)],
         "bytes": len(stl),
     }
     return bytes(stl), stats
+
+
+def _build_lid(trimesh, L, Wd, ox, oy, t, corner, boss_xy):
+    """Cap that overlaps the wall tops, with a downward locating lip and screw clearance holes."""
+    capT = max(2.0, t)
+    lipH = max(2.0, t + 1.0)
+    cap = _rounded_box(trimesh, ox, oy, capT, corner)          # z [0, capT]
+    lip = _rounded_box(trimesh, L - 0.5, Wd - 0.5, lipH, max(0.0, corner - t))
+    lip.apply_translation([0, 0, -lipH])                       # hangs below the cap
+    lid = cap.union(lip, engine="manifold")
+    # screw clearance holes (Ø3.4) above each standoff
+    for (px, py) in boss_xy:
+        try:
+            hole = trimesh.creation.cylinder(radius=1.7, height=capT + lipH + 2, sections=24)
+            hole.apply_translation([px, py, (capT - lipH) / 2])
+            lid = lid.difference(hole, engine="manifold")
+        except Exception:
+            continue
+    return lid
+
+
+def _boss_positions(n, L, Wd):
+    if n <= 0:
+        return []
+    inset = 6.0
+    corners = [
+        (L / 2 - inset, Wd / 2 - inset), (-(L / 2 - inset), Wd / 2 - inset),
+        (L / 2 - inset, -(Wd / 2 - inset)), (-(L / 2 - inset), -(Wd / 2 - inset)),
+    ]
+    return corners[: min(n, 4)]
 
 
 def _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin):
@@ -133,20 +190,11 @@ def _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin):
     return solid
 
 
-def _standoff_posts(trimesh, n, L, Wd, t, H):
-    """Up to 4 corner screw bosses (outer Ø6.4, M2 pilot Ø2.2), rising from the floor."""
-    if n <= 0:
-        return []
+def _standoff_posts(trimesh, boss_xy, t, H):
+    """Corner screw bosses (outer Ø6.4, M2 pilot Ø2.2) rising from the floor to just under the lid."""
     height = max(4.0, H - 2.0)
-    inset = 6.0
-    corners = [
-        (L / 2 - inset, Wd / 2 - inset),
-        (-(L / 2 - inset), Wd / 2 - inset),
-        (L / 2 - inset, -(Wd / 2 - inset)),
-        (-(L / 2 - inset), -(Wd / 2 - inset)),
-    ]
     posts = []
-    for (px, py) in corners[: min(n, 4)]:
+    for (px, py) in boss_xy:
         boss = trimesh.creation.cylinder(radius=3.2, height=height, sections=32)
         pilot = trimesh.creation.cylinder(radius=1.1, height=height + 2, sections=24)
         boss.apply_translation([px, py, t + height / 2])

@@ -168,6 +168,20 @@
             </StackPanel>
           </Border>
 
+          <!-- DIAGNOSTICS -->
+          <Border Style="{StaticResource Card}" Margin="0,18,0,0">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                <TextBlock Style="{StaticResource Serif}" FontSize="24" Text="Diagnostics"/>
+                <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="An audit trail of AI calls (model · sizes · duration · status), generation phases, and errors — for debugging. Also written to a daily log file."/>
+                <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkFaint}" TextWrapping="Wrap" Margin="0,8,0,0" Text="{Binding LogFolder}"/>
+              </StackPanel>
+              <Button Grid.Column="1" Style="{StaticResource Btn}" VerticalAlignment="Center" Command="{Binding ViewLogsCommand}" Content="VIEW LOGS"/>
+            </Grid>
+          </Border>
+
           <!-- SAVE -->
           <StackPanel Orientation="Horizontal" Margin="0,22,0,0">
             <Button Style="{StaticResource BtnPrimary}" Command="{Binding SaveCommand}" Content="SAVE SETTINGS"/>

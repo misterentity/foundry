@@ -177,6 +177,8 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
 {
     [ObservableProperty] private string _view = "ISO";
     [ObservableProperty] private bool _meshReady;
+    [ObservableProperty] private bool _isLoading = true;
+    [ObservableProperty] private bool _showOffline;
     [ObservableProperty] private bool _sidecarOnline;
     [ObservableProperty] private string _sidecarStatus = "connecting to CAD sidecar…";
     [ObservableProperty] private byte[]? _stlBytes;
@@ -201,20 +203,25 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             if (client is null)
             {
                 SidecarOnline = false;
-                SidecarStatus = $"sidecar offline — showing schematic preview ({Foundry.Core.Sidecar.SidecarHost.Shared.StatusMessage})";
+                IsLoading = false;
+                ShowOffline = true;
+                SidecarStatus = $"CAD sidecar offline ({Foundry.Core.Sidecar.SidecarHost.Shared.StatusMessage})";
                 return;
             }
             var schema = Foundry.Core.Sidecar.EnclosureSchema.ToJson(E);
             var mesh = await client.BuildEnclosureAsync(schema);
             StlBytes = mesh.Stl;
             SidecarOnline = true;
+            IsLoading = false;
             MeshReady = true;
             SidecarStatus = $"{mesh.Kernel} · {mesh.Triangles} tris · {client.BaseUrl}";
         }
         catch (Exception ex)
         {
             SidecarOnline = false;
-            SidecarStatus = $"sidecar error — showing schematic preview ({ex.Message})";
+            IsLoading = false;
+            ShowOffline = true;
+            SidecarStatus = $"CAD sidecar error: {ex.Message}";
         }
     }
 

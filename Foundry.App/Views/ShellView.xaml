@@ -77,8 +77,8 @@
                       <c:IconControl Glyph="{Binding Icon}" IconSize="13" Stroke="{StaticResource Brush.InkSoft}" Margin="0,0,10,0"/>
                       <TextBlock Style="{StaticResource Mono}" FontSize="12" Text="{Binding Label}"/>
                     </StackPanel>
-                    <Border Grid.Column="2" Background="{StaticResource Brush.TagWarnBg}" Padding="5,1" Visibility="{Binding HasBadge, Converter={StaticResource BoolVis}}">
-                      <TextBlock Style="{StaticResource Mono}" FontSize="9" Foreground="{StaticResource Brush.Warn}" Text="{Binding BadgeText}"/>
+                    <Border Grid.Column="2" Background="{Binding BadgeKind, Converter={StaticResource SevTagBg}}" Padding="5,1" Visibility="{Binding HasBadge, Converter={StaticResource BoolVis}}">
+                      <TextBlock Style="{StaticResource Mono}" FontSize="9" Foreground="{Binding BadgeKind, Converter={StaticResource SevBrush}}" Text="{Binding BadgeText}"/>
                     </Border>
                   </Grid>
                 </DataTemplate>

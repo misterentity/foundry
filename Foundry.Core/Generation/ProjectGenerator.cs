@@ -63,16 +63,28 @@ Keep it realistic and minimal. Output ONLY the JSON object.
         if (string.IsNullOrWhiteSpace(prompt))
             return new GenerationResult(false, null, "Describe what you want to build.");
 
+        Diagnostics.AppLog.Info("generation", $"design pass started · model {_model}", prompt);
+
         string raw;
         try { raw = await _ai.CompleteAsync(SystemPrompt, prompt, _model, ct); }
-        catch (Exception ex) { return new GenerationResult(false, null, $"Generation failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Error("generation", $"design pass failed: {ex.Message}");
+            return new GenerationResult(false, null, $"Generation failed: {ex.Message}");
+        }
 
         var json = ExtractJson(raw);
         if (json is null) return new GenerationResult(false, null, "The model did not return valid JSON. Try again.");
 
         Project.Project project;
         try { project = Map(json, prompt); }
-        catch (Exception ex) { return new GenerationResult(false, null, $"Could not parse the design: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Error("generation", $"design parse failed: {ex.Message}");
+            return new GenerationResult(false, null, $"Could not parse the design: {ex.Message}");
+        }
+        Diagnostics.AppLog.Info("generation",
+            $"design parsed · {project.Subsystems.Count} subsystems · {project.Bom.Count} BOM · {project.Connections.Count} nets · {project.Findings.Count} findings");
 
         // Second pass: have the AI write the full, project-specific firmware (the deterministic
         // build from Map() stays as the fallback if this call fails). Pins remain netlist-derived.
@@ -107,7 +119,12 @@ Keep it realistic and minimal. Output ONLY the JSON object.
             if (json is null) return; // keep deterministic fallback
 
             var fw = MapFirmware(json, project.Firmware.Platform);
-            if (fw.Files.Count == 0) return; // AI returned nothing usable — keep the deterministic fallback
+            if (fw.Files.Count == 0)
+            {
+                Diagnostics.AppLog.Warn("generation", "firmware pass returned no files — using deterministic fallback");
+                return; // keep the deterministic fallback
+            }
+            Diagnostics.AppLog.Info("generation", $"firmware pass · {fw.Files.Count} files · {fw.Platform}");
 
             // guarantee the netlist-derived pin map is present + authoritative
             fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
@@ -116,7 +133,10 @@ Keep it realistic and minimal. Output ONLY the JSON object.
             (fw.Files.FirstOrDefault(f => f.Name.StartsWith("main", StringComparison.OrdinalIgnoreCase)) ?? fw.Files[0]).Active = true;
             project.Firmware = fw;
         }
-        catch { /* keep the deterministic firmware from Map() */ }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Warn("generation", $"firmware pass failed: {ex.Message} — using deterministic fallback");
+        }
     }
 
     private const string FirmwareSystemPrompt = """

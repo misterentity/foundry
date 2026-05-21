@@ -23,6 +23,11 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private ObservableObject _currentView = null!;
     [ObservableProperty] private IReadOnlyList<string> _crumbs = new[] { "Foundry", "Setup" };
 
+    // status-bar state (reflects the active model + whether a key is connected)
+    [ObservableProperty] private string _modelLabel = "";
+    [ObservableProperty] private string _keyLabel = "";
+    [ObservableProperty] private string _keyDotSeverity = "warn";
+
     public Project? Project { get; private set; }
     public string AppVersionLabel => $"v{Foundry.Core.AppInfo.Version}";
 
@@ -44,12 +49,29 @@ public sealed partial class MainViewModel : ObservableObject
     private void RefreshServices()
     {
         var anthropicKey = _credentials.Read(CredentialStore.AnthropicTarget);
-        _ai = string.IsNullOrWhiteSpace(anthropicKey) ? new StubAnthropicClient() : new AnthropicClient(anthropicKey);
-        _pipeline = new ChatPipeline(_ai, ConfigStore.Load().ModelId);
+        bool hasKey = !string.IsNullOrWhiteSpace(anthropicKey);
+        _ai = hasKey ? new AnthropicClient(anthropicKey!) : new StubAnthropicClient();
+        var modelId = ConfigStore.Load().ModelId;
+        _pipeline = new ChatPipeline(_ai, modelId);
 
         var nexarKey = _credentials.Read(CredentialStore.NexarTarget);
         SourcingService.Shared = new SourcingService(
             string.IsNullOrWhiteSpace(nexarKey) ? new NullSourcingProvider() : new NexarSourcingProvider(nexarKey));
+
+        ModelLabel = FormatModel(modelId);
+        KeyLabel = hasKey ? "KEY CONNECTED" : "NO KEY · OFFLINE";
+        KeyDotSeverity = hasKey ? "ok" : "warn";
+    }
+
+    /// <summary>"claude-opus-4-7" → "CLAUDE · OPUS 4.7" (prefers the catalog display name).</summary>
+    private static string FormatModel(string id)
+    {
+        var dn = ModelCatalog.Fallback.FirstOrDefault(m => m.Id == id)?.DisplayName;
+        if (dn is not null) return "CLAUDE · " + dn.Replace("Claude ", "").ToUpperInvariant();
+        var parts = id.Replace("claude-", "").Split('-');
+        return parts.Length >= 2
+            ? $"CLAUDE · {parts[0].ToUpperInvariant()} {string.Join(".", parts.Skip(1))}"
+            : "CLAUDE · " + id.ToUpperInvariant();
     }
 
     public void ShowOnboarding()
@@ -125,8 +147,15 @@ public sealed partial class MainViewModel : ObservableObject
     public void ShowSettings()
     {
         CurrentView = new SettingsViewModel(_credentials, _ai,
-            onBack: () => { RefreshServices(); if (Project is null) ShowProjects(); else ShowWorkspace(); });
+            onBack: () => { RefreshServices(); if (Project is null) ShowProjects(); else ShowWorkspace(); },
+            onViewLogs: ShowLogs);
         Crumbs = new[] { "Foundry", Project?.Title ?? "Foundry", "SETTINGS" };
+    }
+
+    public void ShowLogs()
+    {
+        CurrentView = new LogsViewModel(onBack: ShowSettings);
+        Crumbs = new[] { "Foundry", Project?.Title ?? "Foundry", "DIAGNOSTICS" };
     }
 
     private void UpdateWorkspaceCrumb(string tabLabel) =>

@@ -7,3 +7,4 @@ uvicorn>=0.29
 trimesh>=4.4
 manifold3d>=2.5
 numpy>=1.26
+shapely>=2.0

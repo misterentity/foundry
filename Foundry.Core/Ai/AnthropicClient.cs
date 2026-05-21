@@ -46,6 +46,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     /// <summary>PRD §8.9: validate the key cheaply via GET /v1/models (no token spend).</summary>
     public async Task<ModelListResult> ListModelsAsync(CancellationToken ct = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/v1/models?limit=100");
@@ -54,7 +55,11 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
             var body = await resp.Content.ReadAsStringAsync(ct);
 
             if (!resp.IsSuccessStatusCode)
-                return ModelListResult.Failure($"{(int)resp.StatusCode} {resp.ReasonPhrase}: {ExtractError(body)}");
+            {
+                var msg = $"{(int)resp.StatusCode} {resp.ReasonPhrase}: {ExtractError(body)}";
+                Diagnostics.AppLog.Ai("models", "—", 0, body.Length, sw.ElapsedMilliseconds, false, msg);
+                return ModelListResult.Failure(msg);
+            }
 
             var parsed = JsonSerializer.Deserialize<ModelsResponse>(body);
             if (parsed?.Data is null || parsed.Data.Count == 0)
@@ -63,47 +68,58 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
             var models = parsed.Data
                 .Select(m => new ClaudeModel(m.Id, m.DisplayName ?? m.Id, ""))
                 .ToList();
+            Diagnostics.AppLog.Ai("models", "—", 0, body.Length, sw.ElapsedMilliseconds, true, $"{models.Count} models");
             return new ModelListResult(true, models, null);
         }
         catch (Exception ex)
         {
+            Diagnostics.AppLog.Ai("models", "—", 0, 0, sw.ElapsedMilliseconds, false, ex.Message);
             return ModelListResult.Failure(ex.Message);
         }
     }
 
     public async Task<string> CompleteAsync(string systemPrompt, string userPrompt, string modelId, CancellationToken ct = default)
     {
-        var payload = new MessageRequest
+        var model = string.IsNullOrWhiteSpace(modelId) ? ModelCatalog.DefaultModelId : modelId;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
         {
-            Model = string.IsNullOrWhiteSpace(modelId) ? ModelCatalog.DefaultModelId : modelId,
-            MaxTokens = _maxTokens,
-            System = new[]
+            var payload = new MessageRequest
             {
-                new SystemBlock { Text = systemPrompt, CacheControl = new CacheControl() },
-            },
-            Messages = new[]
-            {
-                new RequestMessage { Role = "user", Content = userPrompt },
-            },
-        };
+                Model = model,
+                MaxTokens = _maxTokens,
+                System = new[] { new SystemBlock { Text = systemPrompt, CacheControl = new CacheControl() } },
+                Messages = new[] { new RequestMessage { Role = "user", Content = userPrompt } },
+            };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/v1/messages")
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/v1/messages")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload, JsonOpts), Encoding.UTF8, "application/json"),
+            };
+            AddAuthHeaders(req);
+
+            using var resp = await _http.SendAsync(req, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = ExtractError(body);
+                Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, 0, sw.ElapsedMilliseconds, false, $"{(int)resp.StatusCode} {err}");
+                throw new HttpRequestException($"Anthropic API error {(int)resp.StatusCode}: {err}");
+            }
+
+            var message = JsonSerializer.Deserialize<MessageResponse>(body, JsonOpts);
+            var text = message?.Content?
+                .Where(b => b.Type == "text" && b.Text is not null)
+                .Select(b => b.Text)
+                .FirstOrDefault() ?? "";
+            Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, text.Length, sw.ElapsedMilliseconds, true);
+            return text;
+        }
+        catch (Exception ex) when (ex is not HttpRequestException)
         {
-            Content = new StringContent(JsonSerializer.Serialize(payload, JsonOpts), Encoding.UTF8, "application/json"),
-        };
-        AddAuthHeaders(req);
-
-        using var resp = await _http.SendAsync(req, ct);
-        var body = await resp.Content.ReadAsStringAsync(ct);
-        if (!resp.IsSuccessStatusCode)
-            throw new HttpRequestException($"Anthropic API error {(int)resp.StatusCode}: {ExtractError(body)}");
-
-        var message = JsonSerializer.Deserialize<MessageResponse>(body, JsonOpts);
-        var text = message?.Content?
-            .Where(b => b.Type == "text" && b.Text is not null)
-            .Select(b => b.Text)
-            .FirstOrDefault();
-        return text ?? "";
+            Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, 0, sw.ElapsedMilliseconds, false, ex.Message);
+            throw;
+        }
     }
 
     private static string ExtractError(string body)
