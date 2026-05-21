@@ -110,17 +110,22 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         if (IsGenerating) return;
         IsGenerating = true;
+        _cts = new CancellationTokenSource();
         Chat.Add(new ChatMessage { Role = "user", Time = DateTime.Now.ToString("HH:mm"), Text = $"Fix: {finding.Title}" });
         try
         {
             var req = $"Resolve this electrical validation finding by editing the design, then return the full " +
                       $"updated project: [{finding.Code}] {finding.Title}. {finding.Description} " +
                       $"Suggested fix: {finding.Fix}. Make the minimal change that resolves it.";
-            var result = await _reviser.ReviseAsync(Project, req);
+            var result = await _reviser.ReviseAsync(Project, req, _cts.Token);
             if (result.Ok && result.Project is not null)
                 ApplyRevision(result.Project, $"Applied a fix for {finding.Code}: {finding.Title}.");
             else
                 Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
+        }
+        catch (OperationCanceledException)
+        {
+            Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = "Cancelled." });
         }
         catch (Exception ex)
         {
@@ -157,6 +162,10 @@ public sealed partial class ShellViewModel : ObservableObject
         catch { /* best effort */ }
     }
 
+    private CancellationTokenSource? _cts;
+
+    [RelayCommand] private void Cancel() => _cts?.Cancel();
+
     [RelayCommand]
     private async Task SendAsync()
     {
@@ -164,6 +173,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (string.IsNullOrEmpty(text) || IsGenerating) return;
         ChatInput = "";
         IsGenerating = true;
+        _cts = new CancellationTokenSource();
 
         var userMsg = new ChatMessage { Role = "user", Text = text, Time = DateTime.Now.ToString("HH:mm") };
         Chat.Add(userMsg);
@@ -171,15 +181,15 @@ public sealed partial class ShellViewModel : ObservableObject
         try
         {
             // Chat edits the design: revise the project, then swap it in and re-run downstream stages.
-            var result = await _reviser.ReviseAsync(Project, text);
+            var result = await _reviser.ReviseAsync(Project, text, _cts.Token);
             if (result.Ok && result.Project is not null)
-            {
                 ApplyRevision(result.Project, $"Done — applied “{text}”. BOM, wiring, firmware, enclosure and validation updated.");
-            }
             else
-            {
                 Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = "Cancelled." });
         }
         catch (Exception ex)
         {

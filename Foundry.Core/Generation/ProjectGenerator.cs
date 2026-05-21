@@ -138,9 +138,30 @@ Output ONLY the JSON object.
 
         revised.Id = current.Id;          // keep library identity
         revised.Prompt = current.Prompt;
-        await EnrichFirmwareAsync(revised, current.Prompt, ct);
+
+        // Firmware only depends on the netlist + platform. If the edit didn't change the netlist,
+        // keep the existing (AI-written) firmware and skip the second AI call — a big speedup.
+        bool netlistChanged = !SameNetlist(current.Connections, revised.Connections)
+            || !string.Equals(current.Firmware.Platform, revised.Firmware.Platform, StringComparison.OrdinalIgnoreCase);
+        if (netlistChanged)
+            await EnrichFirmwareAsync(revised, current.Prompt, ct);
+        else
+        {
+            revised.Firmware = current.Firmware;
+            Diagnostics.AppLog.Info("revise", "netlist unchanged — kept existing firmware (skipped firmware pass)");
+        }
+
         Diagnostics.AppLog.Info("revise", $"revised · {revised.Bom.Count} BOM · {revised.Connections.Count} nets · {revised.Findings.Count} findings");
         return new GenerationResult(true, revised, "Revised.");
+    }
+
+    private static bool SameNetlist(List<Connection> a, List<Connection> b)
+    {
+        if (a.Count != b.Count) return false;
+        static string Key(Connection c) => $"{c.From}|{c.To}|{c.Net}".ToLowerInvariant();
+        var sa = a.Select(Key).OrderBy(x => x);
+        var sb = b.Select(Key).OrderBy(x => x);
+        return sa.SequenceEqual(sb);
     }
 
     private const string ReviseSystemPrompt = SystemPrompt +

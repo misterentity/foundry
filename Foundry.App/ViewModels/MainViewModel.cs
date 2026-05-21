@@ -155,7 +155,7 @@ public sealed partial class MainViewModel : ObservableObject
     public void ShowWorkspace()
     {
         if (Project is null) { ShowProjects(); return; }
-        var reviser = new ProjectGenerator(_ai, ConfigStore.Load().ModelId);
+        var reviser = new ProjectGenerator(_ai, ConfigStore.Load().ChatModelId);   // chat/edits use the fast model
         var shell = new ShellViewModel(Project, _pipeline, reviser,
             onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings,
             onProjectRevised: p =>

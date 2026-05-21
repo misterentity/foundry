@@ -33,23 +33,28 @@ public sealed partial class NewProjectViewModel : ObservableObject
         if (!_hasKey) _status = "Add your Anthropic API key in Settings to generate. You can still open the sample project.";
     }
 
+    private System.Threading.CancellationTokenSource? _cts;
+
     [RelayCommand] private void UseExample(string example) => Prompt = example;
     [RelayCommand] private void Cancel() => _onCancel();
+    [RelayCommand] private void CancelGenerate() => _cts?.Cancel();
 
     [RelayCommand]
     private async Task Generate()
     {
         if (IsGenerating) return;
         IsGenerating = true;
+        _cts = new System.Threading.CancellationTokenSource();
         Status = "Designing your project, then writing full firmware — this can take a minute…";
         try
         {
-            var result = await _generator.GenerateAsync(Prompt);
+            var result = await _generator.GenerateAsync(Prompt, _cts.Token);
             if (result.Ok && result.Project is not null)
                 _onGenerated(result.Project);
             else
                 Status = result.Message;
         }
+        catch (OperationCanceledException) { Status = "Cancelled."; }
         catch (Exception ex) { Status = $"Generation failed: {ex.Message}"; }
         finally { IsGenerating = false; }
     }

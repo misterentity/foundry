@@ -32,6 +32,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _config = ConfigStore.Load();
 
         _selectedModelId = _config.ModelId;
+        _chatModelId = _config.ChatModelId;
         _maxOutputTokens = _config.MaxOutputTokens;
         _temperature = _config.Temperature;
         _firmwarePlatform = _config.FirmwarePlatform;
@@ -46,6 +47,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     // ---- model dropdown ----
     public ObservableCollection<ClaudeModel> Models { get; } = new();
     [ObservableProperty] private string _selectedModelId;
+    [ObservableProperty] private string _chatModelId;
     [ObservableProperty] private string _modelSource = "curated fallback";
 
     // ---- generation / export ----
@@ -142,6 +144,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     private void Save()
     {
         _config.ModelId = SelectedModelId;
+        _config.ChatModelId = ChatModelId;
         _config.MaxOutputTokens = MaxOutputTokens;
         _config.Temperature = Temperature;
         _config.FirmwarePlatform = FirmwarePlatform;

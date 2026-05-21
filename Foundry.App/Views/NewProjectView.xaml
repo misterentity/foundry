@@ -42,12 +42,15 @@
           </WrapPanel>
 
           <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
-            <Button Style="{StaticResource BtnPrimary}" Command="{Binding GenerateCommand}">
+            <Button Style="{StaticResource BtnPrimary}" Command="{Binding GenerateCommand}"
+                    Visibility="{Binding IsGenerating, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
               <StackPanel Orientation="Horizontal">
                 <c:IconControl Glyph="spark" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/>
                 <TextBlock Text="GENERATE"/>
               </StackPanel>
             </Button>
+            <Button Style="{StaticResource BtnGhost}" Command="{Binding CancelGenerateCommand}" Content="CANCEL"
+                    Visibility="{Binding IsGenerating, Converter={StaticResource BoolVis}}"/>
             <TextBlock VerticalAlignment="Center" Margin="14,0,0,0" FontFamily="{StaticResource Font.Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" MaxWidth="460" Text="{Binding Status}"/>
           </StackPanel>
         </StackPanel>
