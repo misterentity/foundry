@@ -20,9 +20,8 @@ public sealed class AppConfig
     public string EnclosureFormat { get; set; } = "STL";
     public string Units { get; set; } = "mm";
 
-    // ---- updates (GitHub releases) ----
-    public string UpdateOwner { get; set; } = AppInfo.DefaultUpdateOwner;
-    public string UpdateRepo { get; set; } = AppInfo.DefaultUpdateRepo;
+    // Note: the update repo is intentionally NOT configurable — it is pinned to
+    // AppInfo.DefaultUpdateOwner/Repo so a writable config can't repoint the updater (security).
 }
 
 public static class ConfigStore

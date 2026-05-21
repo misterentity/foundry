@@ -41,6 +41,7 @@ public static class ProjectStore
     private static string Sanitize(string id)
     {
         foreach (var ch in System.IO.Path.GetInvalidFileNameChars()) id = id.Replace(ch, '_');
+        id = id.Replace("..", "_");                    // defense-in-depth: no path traversal
         return string.IsNullOrWhiteSpace(id) ? "project" : id;
     }
 

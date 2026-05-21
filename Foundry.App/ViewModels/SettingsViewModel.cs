@@ -37,8 +37,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         _firmwarePlatform = _config.FirmwarePlatform;
         _outputFolder = _config.OutputFolder;
         _enclosureFormat = _config.EnclosureFormat;
-        _updateOwner = _config.UpdateOwner;
-        _updateRepo = _config.UpdateRepo;
 
         foreach (var m in ModelCatalog.Fallback) Models.Add(m);
         RefreshSummaries();
@@ -74,8 +72,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _saveResult = "";
 
     // ---- updates ----
-    [ObservableProperty] private string _updateOwner;
-    [ObservableProperty] private string _updateRepo;
     public string CurrentVersion => $"v{AppInfo.Version}";
 
     private void RefreshSummaries()
@@ -151,8 +147,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         _config.FirmwarePlatform = FirmwarePlatform;
         _config.OutputFolder = OutputFolder;
         _config.EnclosureFormat = EnclosureFormat;
-        _config.UpdateOwner = UpdateOwner;
-        _config.UpdateRepo = UpdateRepo;
         ConfigStore.Save(_config);
         SaveResult = $"Saved · {DateTime.Now:HH:mm}";
     }

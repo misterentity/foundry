@@ -119,9 +119,10 @@ public partial class App : Application
         _updateInProgress = true;
         try
         {
-            var cfg = ConfigStore.Load();
+            // Repo is pinned to the build-time constants (NOT read from config) so a writable
+            // config.json can't repoint the updater at an attacker-controlled repo.
             var updater = new GitHubUpdater();
-            var result = await updater.CheckAsync(cfg.UpdateOwner, cfg.UpdateRepo, AppInfo.Version);
+            var result = await updater.CheckAsync(AppInfo.DefaultUpdateOwner, AppInfo.DefaultUpdateRepo, AppInfo.Version);
 
             if (!result.Ok)
             {
@@ -149,6 +150,12 @@ public partial class App : Application
                 return;
 
             var path = await updater.DownloadAsync(info.InstallerUrl, info.InstallerName!);
+            if (!InstallerTrusted(path))
+            {
+                MessageBox.Show("The downloaded update could not be verified as signed by Foundry's publisher, so it was not run. Download it manually from the releases page if you trust it.",
+                    "Foundry — update blocked", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
             Quit();
         }
@@ -161,8 +168,46 @@ public partial class App : Application
 
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
+    /// <summary>
+    /// Only run a downloaded installer if it's Authenticode-signed by the SAME publisher as the
+    /// running app (thumbprint pin). If the running app is itself unsigned (no cert to pin to),
+    /// we can't verify the publisher — allow it but log, since the repo is already pinned.
+    /// </summary>
+    private static bool InstallerTrusted(string path)
+    {
+        var appCert = SignerCert(Process.GetCurrentProcess().MainModule?.FileName);
+        if (appCert is null)
+        {
+            Foundry.Core.Diagnostics.AppLog.Warn("update", "running app is unsigned — cannot pin publisher; running update unverified");
+            return true;
+        }
+        var fileCert = SignerCert(path);
+        if (fileCert is null)
+        {
+            Foundry.Core.Diagnostics.AppLog.Error("update", "downloaded installer is not signed — refusing to run");
+            return false;
+        }
+        var match = string.Equals(fileCert.Thumbprint, appCert.Thumbprint, StringComparison.OrdinalIgnoreCase);
+        if (!match)
+            Foundry.Core.Diagnostics.AppLog.Error("update", $"installer signer {fileCert.Thumbprint} ≠ app signer {appCert.Thumbprint} — refusing to run");
+        return match;
+    }
+
+    private static System.Security.Cryptography.X509Certificates.X509Certificate2? SignerCert(string? path)
+    {
+        try
+        {
+            return path is null ? null
+                : new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                    System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path));
+        }
+        catch { return null; } // unsigned / unreadable
+    }
+
     private static void OpenUrl(string url)
     {
+        // only launch http(s) — never hand an arbitrary scheme to the shell
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)) return;
         try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); } catch { }
     }
 
