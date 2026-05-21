@@ -4,7 +4,7 @@
 ; (sidecar\dist\foundry-cad, optional) is bundled if present.
 
 #define AppName "Foundry"
-#define AppVersion "0.4.3"
+#define AppVersion "0.4.4"
 #define AppPublisher "Foundry"
 
 [Setup]
@@ -41,3 +41,16 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\Foundry.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+{ Foundry lives in the system tray, so an upgrade run over a running instance can leave }
+{ files locked and produce a partial (mismatched-DLL) install. Force-kill it (and the }
+{ spawned CAD sidecar) before copying files so every upgrade is clean. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Code: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM Foundry.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM foundry-cad.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Result := '';
+end;

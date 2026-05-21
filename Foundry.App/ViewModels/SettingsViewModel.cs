@@ -101,17 +101,21 @@ public sealed partial class SettingsViewModel : ObservableObject
     private async Task TestConnectionAsync()
     {
         IsTesting = true; TestResult = "Checking…";
+        // Only dispose a throwaway client built from the typed key — never the shared _ai
+        // (disposing _ai kills its HttpClient and breaks every later call).
+        var typed = !string.IsNullOrWhiteSpace(AnthropicKeyInput);
+        var client = typed ? new AnthropicClient(AnthropicKeyInput.Trim()) : _ai;
         try
         {
-            IAnthropicClient client = string.IsNullOrWhiteSpace(AnthropicKeyInput)
-                ? _ai
-                : new AnthropicClient(AnthropicKeyInput.Trim());
             var result = await client.ListModelsAsync();
             TestResult = result.Ok ? $"✓ valid · {result.Models.Count} models" : $"✗ {result.Error}";
-            (client as IDisposable)?.Dispose();
         }
         catch (Exception ex) { TestResult = $"✗ {ex.Message}"; }
-        finally { IsTesting = false; }
+        finally
+        {
+            if (typed) (client as IDisposable)?.Dispose();
+            IsTesting = false;
+        }
     }
 
     [RelayCommand] private void SaveAnthropicKey() { Persist(CredentialStore.AnthropicTarget, AnthropicKeyInput); AnthropicKeyInput = ""; }

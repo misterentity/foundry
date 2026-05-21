@@ -17,7 +17,13 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     private const string BaseUrl = "https://api.anthropic.com";
     private const string ApiVersion = "2023-06-01";
 
+    // Shared, long-lived HttpClient (the idiomatic pattern). The API key is set per-request,
+    // not on the client, so one instance safely serves every AnthropicClient. Disposing an
+    // AnthropicClient must never tear this down — see Dispose().
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(5) };
+
     private readonly HttpClient _http;
+    private readonly bool _ownsHttp;
     private readonly string _apiKey;
     private readonly int _maxTokens;
 
@@ -25,8 +31,8 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     {
         _apiKey = apiKey;
         _maxTokens = maxTokens;
-        _http = http ?? new HttpClient();
-        _http.Timeout = TimeSpan.FromMinutes(5);
+        _http = http ?? SharedHttp;     // default to the shared client
+        _ownsHttp = http is not null;   // only dispose a caller-injected client
     }
 
     public bool HasKey => !string.IsNullOrWhiteSpace(_apiKey);
@@ -110,7 +116,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
         catch { return body; }
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose() { if (_ownsHttp) _http.Dispose(); }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

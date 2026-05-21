@@ -43,23 +43,26 @@ public sealed partial class OnboardingViewModel : ObservableObject
     {
         IsTesting = true;
         TestResult = "Checking…";
+        // Validate the key the user just typed (not whatever is stored). Only dispose a
+        // throwaway client — never the shared _ai (disposing it kills its HttpClient).
+        var typed = !string.IsNullOrWhiteSpace(AnthropicKey);
+        var client = typed ? new AnthropicClient(AnthropicKey.Trim()) : _ai;
         try
         {
-            // Validate the key the user just typed (not whatever is stored).
-            IAnthropicClient client = string.IsNullOrWhiteSpace(AnthropicKey)
-                ? _ai
-                : new AnthropicClient(AnthropicKey.Trim());
             var result = await client.ListModelsAsync();
             TestResult = result.Ok
                 ? $"✓ valid · {result.Models.Count} models"
                 : $"✗ {result.Error}";
-            (client as IDisposable)?.Dispose();
         }
         catch (Exception ex)
         {
             TestResult = $"✗ {ex.Message}";
         }
-        finally { IsTesting = false; }
+        finally
+        {
+            if (typed) (client as IDisposable)?.Dispose();
+            IsTesting = false;
+        }
     }
 
     [RelayCommand]
