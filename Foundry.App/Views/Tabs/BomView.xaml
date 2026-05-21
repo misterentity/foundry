@@ -19,14 +19,17 @@
                      Text="Real-time pricing and availability per MPN, with one-click cart links to DigiKey, Mouser, or Amazon. Substitute parts with chat ('swap the OLED for e-paper') and downstream stages re-run."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0">
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RefreshPricesCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="REFRESH PRICES"/></StackPanel>
           </Button>
-          <Button Style="{StaticResource BtnPrimary}">
+          <Button Style="{StaticResource BtnPrimary}" Command="{Binding CartCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="cart" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="{Binding TotalText, StringFormat='CART · {0}'}"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>
+
+      <!-- sourcing status -->
+      <TextBlock Style="{StaticResource Kicker}" Margin="0,0,0,10" Foreground="{StaticResource Brush.InkMute}" Text="{Binding SourcingStatus}"/>
 
       <!-- BOM TABLE -->
       <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,0,0,28">
@@ -53,7 +56,7 @@
           </Border>
 
           <!-- rows -->
-          <ItemsControl Grid.Row="1" ItemsSource="{Binding Project.Bom}">
+          <ItemsControl Grid.Row="1" ItemsSource="{Binding Rows}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
@@ -77,7 +80,10 @@
                     </StackPanel>
                     <TextBlock Grid.Column="6" Style="{StaticResource Mono}" Foreground="{StaticResource Brush.Info}" Margin="14,12" Text="{Binding Dist}"/>
                     <TextBlock Grid.Column="7" Style="{StaticResource Mono}" Margin="14,12" Text="{Binding Lead}"/>
-                    <Button Grid.Column="8" Style="{StaticResource BtnGhost}" Padding="8,4" Margin="4,8" BorderBrush="{StaticResource Brush.Hairline2}">
+                    <Button Grid.Column="8" Style="{StaticResource BtnGhost}" Padding="8,4" Margin="4,8" BorderBrush="{StaticResource Brush.Hairline2}"
+                            ToolTip="Open distributor search"
+                            Command="{Binding DataContext.BuyCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                            CommandParameter="{Binding}">
                       <c:IconControl Glyph="chev" IconSize="10"/>
                     </Button>
                   </Grid>

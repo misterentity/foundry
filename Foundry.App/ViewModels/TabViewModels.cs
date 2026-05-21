@@ -1,9 +1,11 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Foundry.Core.Firmware;
 using Foundry.Core.Project;
+using Foundry.Core.Sourcing;
 using Microsoft.Win32;
 
 namespace Foundry.App.ViewModels;
@@ -46,13 +48,104 @@ public sealed class OverviewViewModel : TabViewModelBase
 }
 
 // ---------------- BOM ----------------
-public sealed class BomViewModel : TabViewModelBase
+/// <summary>Observable wrapper over a BOM line so live sourcing updates reflect in the table.</summary>
+public sealed partial class BomRow : ObservableObject
 {
-    public BomViewModel(Project project) : base(project) { }
-    public double Total => Project.Bom.Sum(l => l.Extended);
+    private readonly BomLine _line;
+    public BomRow(BomLine line)
+    {
+        _line = line;
+        _price = line.Price; _stock = line.Stock; _lead = line.Lead; _dist = line.Dist;
+    }
+
+    public int Qty => _line.Qty;
+    public string Name => _line.Name;
+    public string Note => _line.Note;
+    public string Mpn => _line.Mpn;
+
+    [ObservableProperty] private double _price;
+    [ObservableProperty] private int _stock;
+    [ObservableProperty] private string _lead;
+    [ObservableProperty] private string _dist;
+
+    public double Extended => Qty * Price;
+    partial void OnPriceChanged(double value) => OnPropertyChanged(nameof(Extended));
+
+    public void Apply(SourcingQuote q) { Dist = q.Distributor; Price = q.UnitPrice; Stock = q.Stock; Lead = q.Lead; }
+}
+
+public sealed partial class BomViewModel : TabViewModelBase
+{
+    [ObservableProperty] private string _sourcingStatus;
+    [ObservableProperty] private bool _isRefreshing;
+
+    public ObservableCollection<BomRow> Rows { get; }
+
+    public BomViewModel(Project project) : base(project)
+    {
+        Rows = new ObservableCollection<BomRow>(project.Bom.Select(l => new BomRow(l)));
+        var svc = SourcingService.Shared;
+        _sourcingStatus = svc.IsLive
+            ? $"live pricing via {svc.ProviderName}"
+            : "offline — cached estimates · add a sourcing key in Settings for live pricing";
+    }
+
+    public double Total => Rows.Sum(r => r.Extended);
     public string TotalText => $"${Total:0.00}";
-    public int Units => Project.Bom.Sum(l => l.Qty);
-    public string SubtotalLabel => $"Subtotal · {Project.Bom.Count} lines · {Units} units";
+    public int Units => Rows.Sum(r => r.Qty);
+    public string SubtotalLabel => $"Subtotal · {Rows.Count} lines · {Units} units";
+
+    [RelayCommand]
+    private async Task RefreshPrices()
+    {
+        var svc = SourcingService.Shared;
+        if (!svc.IsLive)
+        {
+            SourcingStatus = "offline — add a Nexar/Octopart key in Settings for live pricing";
+            return;
+        }
+        IsRefreshing = true;
+        try
+        {
+            foreach (var row in Rows)
+            {
+                var q = await svc.GetQuoteAsync(row.Mpn);
+                if (q is not null) row.Apply(q);
+            }
+            OnPropertyChanged(nameof(Total));
+            OnPropertyChanged(nameof(TotalText));
+            SourcingStatus = $"live pricing via {svc.ProviderName} · updated {DateTime.Now:HH:mm}";
+        }
+        finally { IsRefreshing = false; }
+    }
+
+    /// <summary>Write a DigiKey-format BOM CSV and open the BOM manager for one-click upload (PRD §8.7).</summary>
+    [RelayCommand]
+    private void Cart()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Foundry");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "digikey-bom.csv");
+            File.WriteAllText(path, CartLinks.DigiKeyBomCsv(Project.Bom));
+            OpenUrl(CartLinks.DigiKeyBomManager);
+            SourcingStatus = $"DigiKey BOM CSV written to {path} — upload it in the BOM manager";
+        }
+        catch (Exception ex) { SourcingStatus = $"cart export failed: {ex.Message}"; }
+    }
+
+    [RelayCommand]
+    private void Buy(BomRow? row)
+    {
+        if (row is not null) OpenUrl(CartLinks.Search(row.Dist, row.Mpn));
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+        catch { /* best effort */ }
+    }
 }
 
 // ---------------- Wiring ----------------

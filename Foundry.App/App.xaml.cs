@@ -20,6 +20,13 @@ public partial class App : Application
             : new AnthropicClient(anthropicKey);
         IPipeline pipeline = new ChatPipeline(ai);
 
+        // Sourcing provider: Nexar aggregator when a key is configured, else offline (PRD §8.7).
+        var nexarKey = credentials.Read(CredentialStore.NexarTarget);
+        Foundry.Core.Sourcing.SourcingService.Shared = new Foundry.Core.Sourcing.SourcingService(
+            string.IsNullOrWhiteSpace(nexarKey)
+                ? new Foundry.Core.Sourcing.NullSourcingProvider()
+                : new Foundry.Core.Sourcing.NexarSourcingProvider(nexarKey));
+
         var main = new MainViewModel(credentials, ai, pipeline);
 
         // Dev affordance: FOUNDRY_START=projects|workspace jumps straight to a screen,
