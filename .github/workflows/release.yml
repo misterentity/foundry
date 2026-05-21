@@ -1,6 +1,6 @@
 name: release
 
-# Tag a version (e.g. v0.4.2) to build the installer and publish a GitHub Release.
+# Tag a version (e.g. v0.4.5) to build the installer and publish a GitHub Release.
 # The in-app updater (tray → Check for updates) downloads the FoundrySetup.exe asset.
 on:
   push:
@@ -20,11 +20,25 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Clean build first so the publish can't reuse a stale project-reference DLL
+      # (a prior `dotnet test` build left MSBuild thinking Foundry.Core was up to date,
+      #  which shipped a Core.dll without ProjectGenerator in v0.4.2–v0.4.4).
+      - name: Publish (self-contained win-x64, no incremental)
+        run: dotnet publish Foundry.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false --no-incremental -o build/publish
+
+      - name: Verify build integrity
+        shell: pwsh
+        run: |
+          $core = (Resolve-Path "build/publish/Foundry.Core.dll").Path
+          $asm = [System.Reflection.Assembly]::LoadFile($core)
+          $types = 'Foundry.Core.Generation.ProjectGenerator','Foundry.Core.Update.GitHubUpdater','Foundry.Core.AppInfo'
+          foreach ($t in $types) {
+            if (-not $asm.GetType($t)) { Write-Error "MISSING type $t in $core — aborting release."; exit 1 }
+          }
+          Write-Host "OK: published Foundry.Core.dll contains all expected types ($((Get-Item $core).Length) bytes)."
+
       - name: Test
         run: dotnet test Foundry.Tests -c Release
-
-      - name: Publish (self-contained win-x64)
-        run: dotnet publish Foundry.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o build/publish
 
       - uses: actions/setup-python@v5
         with:
