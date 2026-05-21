@@ -41,7 +41,7 @@ public sealed partial class NewProjectViewModel : ObservableObject
     {
         if (IsGenerating) return;
         IsGenerating = true;
-        Status = "Designing your project — selecting parts, wiring, firmware, enclosure, validation…";
+        Status = "Designing your project, then writing full firmware — this can take a minute…";
         try
         {
             var result = await _generator.GenerateAsync(Prompt);

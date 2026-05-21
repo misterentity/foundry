@@ -70,15 +70,93 @@ Keep it realistic and minimal. Output ONLY the JSON object.
         var json = ExtractJson(raw);
         if (json is null) return new GenerationResult(false, null, "The model did not return valid JSON. Try again.");
 
+        Project.Project project;
+        try { project = Map(json, prompt); }
+        catch (Exception ex) { return new GenerationResult(false, null, $"Could not parse the design: {ex.Message}"); }
+
+        // Second pass: have the AI write the full, project-specific firmware (the deterministic
+        // build from Map() stays as the fallback if this call fails). Pins remain netlist-derived.
+        await EnrichFirmwareAsync(project, prompt, ct);
+
+        return new GenerationResult(true, project, "Generated.");
+    }
+
+    /// <summary>Ask the model for complete, working firmware for this exact device; inject the derived pin map.</summary>
+    private async Task EnrichFirmwareAsync(Project.Project project, string prompt, CancellationToken ct)
+    {
         try
         {
-            var project = Map(json, prompt);
-            return new GenerationResult(true, project, "Generated.");
+            var kb = new ComponentKb(project.Components);
+            var entries = PinMap.Build(project.Connections, kb);
+            var platform = project.Firmware.Platform;
+            var pinmapName = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "pinmap.py" : "pinmap.h";
+            var pinmap = platform.Contains("python", StringComparison.OrdinalIgnoreCase)
+                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.Gpio}  # {e.Net}: {e.FromPin} <-> {e.ToPin}"))
+                : PinMap.RenderHeader(entries);
+
+            var parts = string.Join("\n", project.Components.Select(c =>
+                $"- {c.Alias} ({c.Name}): pins {string.Join(", ", c.Pins.Select(p => p.Name))}"));
+            var nets = string.Join("\n", project.Connections.Select(c => $"- {c.From} -> {c.To} [{c.Net}]"));
+
+            var user =
+                $"Device: {prompt}\n\nPlatform: {platform}\nParts:\n{parts}\n\nNetlist:\n{nets}\n\n" +
+                $"Pin map ({pinmapName}) — reference these macros, do not redefine pins:\n{pinmap}";
+
+            var raw = await _ai.CompleteAsync(FirmwareSystemPrompt, user, _model, ct);
+            var json = ExtractJson(raw);
+            if (json is null) return; // keep deterministic fallback
+
+            var fw = MapFirmware(json, project.Firmware.Platform);
+            if (fw.Files.Count == 0) return; // AI returned nothing usable — keep the deterministic fallback
+
+            // guarantee the netlist-derived pin map is present + authoritative
+            fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
+            fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
+            foreach (var f in fw.Files) f.Active = false;
+            (fw.Files.FirstOrDefault(f => f.Name.StartsWith("main", StringComparison.OrdinalIgnoreCase)) ?? fw.Files[0]).Active = true;
+            project.Firmware = fw;
         }
-        catch (Exception ex)
+        catch { /* keep the deterministic firmware from Map() */ }
+    }
+
+    private const string FirmwareSystemPrompt = """
+You are a senior embedded-firmware engineer. Write COMPLETE, working firmware for the exact device
+described — real application logic, not a skeleton: initialize every peripheral, implement the
+protocols it needs (Wi-Fi/MQTT/HTTP/BLE/I2C/SPI/ADC as appropriate), the main control loop, timing,
+and sensible defaults. Reference the pin macros from the provided pin map; never hard-code or redefine
+pins. Put secrets (Wi-Fi creds, tokens) as clearly-marked #define/constant placeholders in a separate
+config file. Return ONLY one JSON object, no prose:
+{
+ "platform": "Arduino C++" | "MicroPython",
+ "board": "esp32:esp32:esp32",
+ "files": [{"name":"main.ino","content":"<full source>"}, {"name":"config.h","content":"..."}],
+ "libraries": [["WiFi","built-in"], ["PubSubClient","2.8"]]
+}
+Include the main sketch and any helper/config files. Do NOT include the pin-map file (it is supplied).
+""";
+
+    private static Project.Firmware MapFirmware(string json, string fallbackPlatform)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        return new Project.Firmware
         {
-            return new GenerationResult(false, null, $"Could not parse the design: {ex.Message}");
-        }
+            Platform = Str(root, "platform", fallbackPlatform),
+            Board = Str(root, "board", ""),
+            Files = Arr(root, "files")
+                .Where(f => f.TryGetProperty("name", out _) )
+                .Select(f => new FirmwareFile
+                {
+                    Name = Str(f, "name", "file.txt"),
+                    Path = "/foundry/firmware/",
+                    Content = Str(f, "content", ""),
+                })
+                .Where(f => f.Content.Length > 0)
+                .ToList(),
+            Libraries = Arr(root, "libraries")
+                .Where(l => l.ValueKind == JsonValueKind.Array && l.GetArrayLength() >= 2)
+                .Select(l => new SpecPair(l[0].GetString() ?? "", l[1].GetString() ?? "")).ToList(),
+        };
     }
 
     /// <summary>Tolerate accidental markdown fences / leading prose by extracting the outermost JSON object.</summary>
