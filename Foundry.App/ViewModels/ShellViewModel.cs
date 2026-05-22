@@ -178,8 +178,10 @@ public sealed partial class ShellViewModel : ObservableObject
     private async Task ApplyAiFixAsync(Finding finding)
     {
         if (IsGenerating) return;
+        var vm = CurrentTabView as ValidationViewModel;   // the page the user is looking at
         IsGenerating = true;
         _cts = new CancellationTokenSource();
+        if (vm is not null) { vm.IsFixing = true; vm.Status = $"Generating a fix for {finding.Code} — {finding.Title}…"; }
         Chat.Add(new ChatMessage { Role = "user", Time = DateTime.Now.ToString("HH:mm"), Text = $"Fix: {finding.Title}" });
         try
         {
@@ -190,23 +192,34 @@ public sealed partial class ShellViewModel : ObservableObject
             if (result.Ok && result.Project is not null)
             {
                 bool stillThere = result.Project.Findings.Any(f => f.Code == finding.Code && f.Title == finding.Title);
+                _pendingFixStatus = stillThere
+                    ? $"⚠ Reworked the design for {finding.Code}, but the check still flags it — may need a manual change."
+                    : $"✓ Fixed {finding.Code}: {finding.Title}. Re-validated — {result.Project.Findings.Count(f => f.Severity == "fail")} fail · {result.Project.Findings.Count(f => f.Severity == "warn")} warn.";
                 ApplyRevision(result.Project, stillThere
                     ? $"Reworked the design for {finding.Code}, but the check still flags it — may need a manual change."
                     : $"Fixed {finding.Code}: {finding.Title}. Re-validated.");
             }
             else
+            {
+                if (vm is not null) { vm.IsFixing = false; vm.Status = $"Couldn't generate a fix: {result.Message}"; }
                 Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
+            }
         }
         catch (OperationCanceledException)
         {
+            if (vm is not null) { vm.IsFixing = false; vm.Status = "Fix cancelled."; }
             Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = "Cancelled." });
         }
         catch (Exception ex)
         {
+            if (vm is not null) { vm.IsFixing = false; vm.Status = $"Couldn't generate a fix: {ex.Message}"; }
             Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = $"Couldn't generate a fix: {ex.Message}" });
         }
         finally { IsGenerating = false; }
     }
+
+    // Carries the fix outcome to the freshly-rebuilt validation tab (the old VM is replaced on apply).
+    private string? _pendingFixStatus;
 
     /// <summary>Recompute the validation rail badge from the current findings (fails over warns; hidden when clean).</summary>
     private void UpdateValidationBadge()
@@ -290,6 +303,9 @@ public sealed partial class ShellViewModel : ObservableObject
         UpdateValidationBadge();
         var view = SelectedTab.Factory(Project);         // rebuild the active tab against the new project
         WireTab(view);
+        if (view is ValidationViewModel vv && _pendingFixStatus is not null)
+            vv.Status = _pendingFixStatus;               // show the fix outcome on the re-validated page
+        _pendingFixStatus = null;
         CurrentTabView = view;
         if (ShowHistory) RefreshRevisions();
     }

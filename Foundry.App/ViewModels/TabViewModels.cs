@@ -359,6 +359,10 @@ public sealed class PowerSlice
 public sealed partial class ValidationViewModel : TabViewModelBase
 {
     [ObservableProperty] private string _status = "";
+    /// <summary>True while an AI fix is being generated for a finding (drives the on-page indicator).</summary>
+    [ObservableProperty] private bool _isFixing;
+    public bool HasStatus => !string.IsNullOrEmpty(Status);
+    partial void OnStatusChanged(string value) => OnPropertyChanged(nameof(HasStatus));
 
     /// <summary>Observable copy of the findings so Re-run / Apply refresh the list live.</summary>
     public ObservableCollection<Finding> Findings { get; } = new();

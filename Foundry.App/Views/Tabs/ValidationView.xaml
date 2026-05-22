@@ -29,6 +29,19 @@
         </StackPanel>
       </Grid>
 
+      <!-- FIX / RE-RUN STATUS BANNER -->
+      <Border Background="{StaticResource Brush.Surface1}" BorderBrush="{DynamicResource Brush.Accent}" BorderThickness="1" Padding="16,12" Margin="0,0,0,20"
+              Visibility="{Binding HasStatus, Converter={StaticResource BoolVis}}">
+        <StackPanel>
+          <StackPanel Orientation="Horizontal">
+            <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock Style="{StaticResource Mono}" FontSize="12.5" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" Text="{Binding Status}"/>
+          </StackPanel>
+          <ProgressBar IsIndeterminate="True" Height="3" Margin="0,10,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
+                       Visibility="{Binding IsFixing, Converter={StaticResource BoolVis}}"/>
+        </StackPanel>
+      </Border>
+
       <!-- SUMMARY STRIP -->
       <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,0,0,28">
         <Grid>

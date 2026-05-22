@@ -59,7 +59,9 @@ applicable. Pin kind is power|ground|input|output|bidir|analog. Mark input-only 
 Power source — ALWAYS include it (never omit it):
 - Portable/battery designs: add the battery as a component AND a BOM line, with realistic "capacityMah"
   (e.g. a single 18650 ≈ 3000), plus its charger/regulator (e.g. TP4056 + 3.3 V LDO) as components/BOM.
-- USB- or mains-powered: add the input (USB-C / DC jack) + regulator as components and BOM lines.
+- USB- or DC-jack-powered: add the input (USB-C / DC jack) + regulator as components and BOM lines.
+- Mains/AC-powered (relays, triacs, AC loads): add an ISOLATED AC-DC supply (e.g. HLK-PM01 5 V module)
+  as a component and BOM line — never leave a mains design without its low-voltage supply.
 - Wire the power/ground rails from the source through the regulator to each component.
 
 Enclosure — design it for THIS device, not a generic box:
