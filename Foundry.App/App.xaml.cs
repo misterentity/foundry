@@ -61,6 +61,8 @@ public partial class App : Application
             var dir = Environment.GetEnvironmentVariable("FOUNDRY_EXPORT_DIR") ?? System.IO.Path.GetTempPath();
             var png = Foundry.App.Rendering.WiringImage.Render(p);
             if (png is not null) System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, "_diag_wiring.png"), png);
+            var bb = Foundry.App.Rendering.WiringImage.RenderBreadboard(p);
+            if (bb is not null) System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, "_diag_breadboard.png"), bb);
             System.IO.File.WriteAllBytes(System.IO.Path.Combine(dir, "_diag_spec.pdf"),
                 Foundry.Core.Export.PdfExporter.ProjectPdf(p, png));
         }

@@ -39,6 +39,28 @@ public static class WiringImage
         }
     }
 
+    /// <summary>Render the breadboard view to a PNG. Must be called on the UI thread.</summary>
+    public static byte[]? RenderBreadboard(FProject project, double dpiScale = 2.0)
+    {
+        try
+        {
+            var ctrl = new BreadboardControl { Project = project };
+            ctrl.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var size = ctrl.DesiredSize;
+            if (size.Width < 10 || size.Height < 10) size = new Size(1000, 560);
+            ctrl.Arrange(new Rect(size));
+            ctrl.UpdateLayout();
+            var rtb = new RenderTargetBitmap((int)Math.Ceiling(size.Width * dpiScale), (int)Math.Ceiling(size.Height * dpiScale), 96 * dpiScale, 96 * dpiScale, PixelFormats.Pbgra32);
+            rtb.Render(ctrl);
+            var enc = new PngBitmapEncoder();
+            enc.Frames.Add(BitmapFrame.Create(rtb));
+            using var ms = new MemoryStream();
+            enc.Save(ms);
+            return ms.ToArray();
+        }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Warn("export", $"breadboard render failed: {ex.Message}"); return null; }
+    }
+
     /// <summary>Render the wiring diagram to SVG (vector). Must be called on the UI thread.</summary>
     public static string? RenderSvg(FProject project)
     {

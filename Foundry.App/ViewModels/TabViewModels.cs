@@ -318,17 +318,22 @@ public sealed partial class WiringViewModel : TabViewModelBase
     public int NetCount => Project.Connections.Count;
     [ObservableProperty] private string _status = "";
 
+    // v2 G5: schematic ⇄ breadboard view
+    [ObservableProperty] private bool _breadboard;
+    [RelayCommand] private void ShowSchematic() => Breadboard = false;
+    [RelayCommand] private void ShowBreadboard() => Breadboard = true;
+
     /// <summary>Render the wiring diagram to a PNG in the configured export folder.</summary>
     [RelayCommand]
     private void ExportPng()
     {
         try
         {
-            var png = Rendering.WiringImage.Render(Project);
+            var png = Breadboard ? Rendering.WiringImage.RenderBreadboard(Project) : Rendering.WiringImage.Render(Project);
             if (png is null) { Status = "Couldn't render the diagram."; return; }
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "wiring.png");
+            var path = Path.Combine(dir, Breadboard ? "breadboard.png" : "wiring.png");
             File.WriteAllBytes(path, png);
             Foundry.Core.Diagnostics.AppLog.Info("export", $"wiring PNG → {path}");
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });

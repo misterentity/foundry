@@ -30,8 +30,16 @@ document that every tab reads from and writes to:
 | **Wiring** | An authoritative netlist, auto-laid-out as an orthogonal schematic (power · controller · peripherals) |
 | **Firmware** | **Complete, device-specific firmware** written by the AI — real Wi-Fi/MQTT/I²C/ADC logic, with a netlist-derived `pinmap.h` |
 | **Enclosure** | A purpose-built 3D-printable case (base + lid, rounded corners, per-port cutouts, ventilation, wall-mount tabs, screw bosses) exported as STL |
-| **Validation** | A deterministic rules engine (power budget, voltage/logic levels, pin conflicts, strapping pins, I²C) with one-click auto-fixes |
+| **Validation** | A deterministic rules engine (power budget, voltage/logic levels, pin conflicts, strapping pins, I²C, pull-ups, LED resistors) with one-click fixes + a report-card grade |
 | **Assembly guide** | Step-by-step build instructions, exportable as a branded PDF |
+
+### v2 — design → fabrication & verification
+
+- **Verify build** — compile the generated firmware with arduino-cli right in the app; **Fix build** lets the AI repair compiler errors and recompile.
+- **KiCad export** — drop the netlist into PCB layout (`.net`) + a pinout CSV.
+- **Breadboard view** — a recognizable breadboard render with colored jumper wires, alongside the schematic.
+- **Smarter sourcing** — ranked part substitutes (cheaper / in-stock), DigiKey + Mouser carts, and a budget mode that reworks the BOM to a target price.
+- **Reuse** — save designs as templates, and export/import shareable `.foundryproj` bundles.
 
 Then **iterate by chat** — "swap the OLED for e-paper", "add a status LED", "make it solar powered" — and
 Foundry revises the whole project and re-runs every downstream stage. Ask a question instead ("why did you
@@ -51,9 +59,9 @@ pick this regulator?") and it just answers.
 | --- | --- |
 | ![Firmware](docs/screenshots/06-firmware.png) | ![Validation](docs/screenshots/07-validation.png) |
 
-| Settings |
-| --- |
-| ![Settings](docs/screenshots/08-settings.png) |
+| Breadboard view (v2) | Settings |
+| --- | --- |
+| ![Breadboard](docs/screenshots/09-breadboard.png) | ![Settings](docs/screenshots/08-settings.png) |
 
 ## Highlights
 
@@ -148,10 +156,12 @@ Python · FastAPI · trimesh + manifold3d + shapely (CAD) · PyInstaller · Inno
 
 ## Status
 
-**v1.0** — all PRD functional requirements (F1–F12) and acceptance criteria met. The two
-externally-gated items are activation-only: **code-signing** (add a cert to remove the SmartScreen
-warning — pipeline is wired) and **live Nexar pricing** (add a Nexar key in Settings; BOM uses
-estimates + cart links otherwise). See [`GO_LIVE.md`](GO_LIVE.md).
+**v2.0** — the v1 PRD (F1–F12, §19) plus the v2 roadmap ([`PRD-v2.md`](PRD-v2.md)): firmware
+compile-check + AI build-fix, KiCad export, breadboard view, Validation 2.0, ranked substitutes +
+multi-distributor cart + budget mode, templates + project bundles. Externally-gated, activation-only:
+**code-signing** (add a cert to remove the SmartScreen warning — pipeline is wired) and **live Nexar
+pricing** (add a Nexar key; BOM uses estimates + cart links otherwise). Remaining v2 stretch: one-click
+flash (needs a connected board) and multi-board projects.
 
 ## License
 

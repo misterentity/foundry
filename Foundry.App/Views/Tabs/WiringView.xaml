@@ -27,11 +27,22 @@
         </StackPanel>
       </Grid>
 
+      <!-- VIEW TOGGLE -->
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+        <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,6,0" Command="{Binding ShowSchematicCommand}" Content="SCHEMATIC"/>
+        <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Command="{Binding ShowBreadboardCommand}" Content="BREADBOARD"/>
+      </StackPanel>
+
       <!-- WIRING STAGE -->
       <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="24" Margin="0,0,0,28">
-        <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
-          <r:WiringDiagramControl Project="{Binding Project}"/>
-        </Viewbox>
+        <Grid>
+          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+            <r:WiringDiagramControl Project="{Binding Project}"/>
+          </Viewbox>
+          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}}">
+            <r:BreadboardControl Project="{Binding Project}"/>
+          </Viewbox>
+        </Grid>
       </Border>
 
       <!-- LEGEND + LEDGER -->
