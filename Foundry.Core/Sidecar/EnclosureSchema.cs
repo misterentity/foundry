@@ -17,7 +17,7 @@ public static class EnclosureSchema
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    public static string ToJson(Enclosure enclosure)
+    public static string ToJson(Enclosure enclosure, string format = "stl")
     {
         var schema = new SchemaDto
         {
@@ -27,6 +27,7 @@ public static class EnclosureSchema
             Lid = new LidDto { Style = enclosure.Lid },
             Standoffs = enclosure.Standoffs,
             Mount = enclosure.Mount,
+            Format = (format ?? "stl").ToLowerInvariant() == "3mf" ? "3mf" : "stl",
             Vents = enclosure.Vents.Select(v => new VentDto { Face = v.Face, Count = v.Count }).ToList(),
             Cutouts = enclosure.Cutouts.Select(c => new CutoutDto
             {
@@ -51,6 +52,7 @@ public static class EnclosureSchema
         public string Mount { get; set; } = "none";
         public List<VentDto> Vents { get; set; } = new();
         public List<CutoutDto> Cutouts { get; set; } = new();
+        public string Format { get; set; } = "stl";
     }
     private sealed class LidDto { public string Style { get; set; } = "snap"; }
     private sealed class VentDto { public string Face { get; set; } = "left"; public int Count { get; set; } }

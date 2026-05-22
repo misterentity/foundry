@@ -272,7 +272,7 @@ Output ONLY the JSON object.
             fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
             fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
             foreach (var f in fw.Files) f.Active = false;
-            (fw.Files.FirstOrDefault(f => f.Name.StartsWith("main", StringComparison.OrdinalIgnoreCase)) ?? fw.Files[0]).Active = true;
+            PickMainFile(fw.Files).Active = true;
             project.Firmware = fw;
         }
         catch (Exception ex)
@@ -285,9 +285,10 @@ Output ONLY the JSON object.
 You are a senior embedded-firmware engineer. Write COMPLETE, working firmware for the exact device
 described — real application logic, not a skeleton: initialize every peripheral, implement the
 protocols it needs (Wi-Fi/MQTT/HTTP/BLE/I2C/SPI/ADC as appropriate), the main control loop, timing,
-and sensible defaults. Reference the pin macros from the provided pin map; never hard-code or redefine
-pins. Put secrets (Wi-Fi creds, tokens) as clearly-marked #define/constant placeholders in a separate
-config file. Return ONLY one JSON object, no prose:
+and sensible defaults. The primary sketch MUST be named exactly "main.ino" (Arduino C++) or "main.py"
+(MicroPython) — name it nothing else. Reference the PIN_* macros from the provided pin map for every
+pin you use; never hard-code or redefine pin numbers. Put secrets (Wi-Fi creds, tokens) as clearly-marked
+#define/constant placeholders in a separate config file. Return ONLY one JSON object, no prose:
 {
  "platform": "Arduino C++" | "MicroPython",
  "board": "esp32:esp32:esp32",
@@ -296,6 +297,16 @@ config file. Return ONLY one JSON object, no prose:
 }
 Include the main sketch and any helper/config files. Do NOT include the pin-map file (it is supplied).
 """;
+
+    /// <summary>The sketch to show/flash first: a main.* file if present, else the largest source file.</summary>
+    public static FirmwareFile PickMainFile(IReadOnlyList<FirmwareFile> files)
+    {
+        var main = files.FirstOrDefault(f => f.Name.StartsWith("main", StringComparison.OrdinalIgnoreCase));
+        if (main is not null) return main;
+        bool IsSource(string n) => n.EndsWith(".ino") || n.EndsWith(".py") || n.EndsWith(".cpp") || n.EndsWith(".c");
+        return files.Where(f => IsSource(f.Name.ToLowerInvariant())).OrderByDescending(f => f.Content.Length).FirstOrDefault()
+               ?? files[0];
+    }
 
     private static Project.Firmware MapFirmware(string json, string fallbackPlatform)
     {

@@ -231,6 +231,25 @@ public sealed partial class WiringViewModel : TabViewModelBase
         }
         catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
     }
+
+    /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>
+    [RelayCommand]
+    private void ExportSvg()
+    {
+        try
+        {
+            var svg = Rendering.WiringImage.RenderSvg(Project);
+            if (svg is null) { Status = "Couldn't render the diagram."; return; }
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "wiring.svg");
+            File.WriteAllText(path, svg);
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"wiring SVG → {path}");
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            Status = $"Exported to {path}";
+        }
+        catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
+    }
 }
 
 // ---------------- Enclosure ----------------
@@ -293,20 +312,31 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
         }
     }
 
-    /// <summary>Save the generated STL to the configured export folder (PRD F7).</summary>
+    public string ExportLabel => $"EXPORT {((ConfigStore.Load().EnclosureFormat ?? "STL").ToUpperInvariant() == "3MF" ? "3MF" : "STL")}";
+
+    /// <summary>Export the enclosure mesh in the configured format (STL or 3MF) to the export folder (PRD F7).</summary>
     [RelayCommand]
-    private void ExportStl()
+    private async Task ExportStl()
     {
-        if (StlBytes is null) { SidecarStatus = "no mesh to export — sidecar offline"; return; }
         try
         {
+            var fmt = (ConfigStore.Load().EnclosureFormat ?? "STL").ToLowerInvariant() == "3mf" ? "3mf" : "stl";
+            byte[]? data = (fmt == "stl") ? StlBytes : null;
+            if (data is null)
+            {
+                var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
+                if (client is null) { SidecarStatus = "can't export — CAD sidecar offline"; return; }
+                var mesh = await client.BuildEnclosureAsync(Foundry.Core.Sidecar.EnclosureSchema.ToJson(E, fmt));
+                data = mesh.Stl;
+            }
+            if (data is null || data.Length == 0) { SidecarStatus = "no mesh to export"; return; }
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, "enclosure.stl");
-            File.WriteAllBytes(path, StlBytes);
-            Foundry.Core.Diagnostics.AppLog.Info("export", $"enclosure STL → {path}");
+            var path = Path.Combine(dir, $"enclosure.{fmt}");
+            File.WriteAllBytes(path, data);
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"enclosure {fmt.ToUpperInvariant()} → {path}");
             Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
-            SidecarStatus = $"STL exported to {path}";
+            SidecarStatus = $"{fmt.ToUpperInvariant()} exported to {path}";
         }
         catch (Exception ex) { SidecarStatus = $"export failed: {ex.Message}"; }
     }
@@ -319,8 +349,10 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
 
     public FirmwareViewModel(Project project) : base(project)
     {
-        // Firmware (incl. the netlist-derived pinmap.h) is generated in the Project; just bind it.
-        _activeFile = project.Firmware.Files.FirstOrDefault() ?? new FirmwareFile();
+        // Firmware (incl. the netlist-derived pinmap.h) is generated in the Project; open the main sketch.
+        var files = project.Firmware.Files;
+        _activeFile = files.FirstOrDefault(f => f.Active)
+            ?? (files.Count > 0 ? Foundry.Core.Generation.ProjectGenerator.PickMainFile(files) : new FirmwareFile());
     }
 
     public Firmware F => Project.Firmware;

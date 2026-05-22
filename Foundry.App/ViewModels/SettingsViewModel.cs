@@ -57,7 +57,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _outputFolder;
     [ObservableProperty] private string _enclosureFormat;
     public string[] FirmwarePlatforms { get; } = { "Arduino C++", "MicroPython" };
-    public string[] EnclosureFormats { get; } = { "STL", "3MF", "STEP" };
+    // STL + 3MF are mesh formats the CAD kernel exports; STEP (B-rep) isn't produced by the mesh kernel.
+    public string[] EnclosureFormats { get; } = { "STL", "3MF" };
 
     // ---- keys ----
     [ObservableProperty] private string _anthropicKeyInput = "";

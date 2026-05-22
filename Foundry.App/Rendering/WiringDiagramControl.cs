@@ -317,4 +317,47 @@ public sealed class WiringDiagramControl : FrameworkElement
         new(s, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
             new Typeface(fam, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal),
             size, new SolidColorBrush(color), 1.25);
+
+    // ----- vector (SVG) export — reuses the exact computed layout, so it matches the on-screen diagram -----
+    public string ToSvg()
+    {
+        Build();
+        static string Hex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+        static string Esc(string s) => System.Security.SecurityElement.Escape(s) ?? s;
+        string F(double d) => d.ToString("0.#", CultureInfo.InvariantCulture);
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{F(_w)}\" height=\"{F(_h)}\" viewBox=\"0 0 {F(_w)} {F(_h)}\" font-family=\"Consolas, monospace\">");
+        sb.Append($"<rect width=\"{F(_w)}\" height=\"{F(_h)}\" fill=\"{Hex(CBg)}\"/>");
+
+        if (Project is null || _comps.Count == 0)
+        {
+            sb.Append($"<text x=\"{F(_w / 2)}\" y=\"{F(_h / 2)}\" font-size=\"14\" fill=\"{Hex(CInkMute)}\" text-anchor=\"middle\">no netlist</text></svg>");
+            return sb.ToString();
+        }
+
+        foreach (var (d, c) in _nets)
+            sb.Append($"<path d=\"{d}\" fill=\"none\" stroke=\"{Hex(c)}\" stroke-width=\"2\" stroke-linejoin=\"round\"/>");
+
+        foreach (var comp in _comps)
+        {
+            sb.Append($"<rect x=\"{F(comp.X)}\" y=\"{F(comp.Y)}\" width=\"{F(comp.W)}\" height=\"{F(comp.H)}\" fill=\"{Hex(CBody)}\" stroke=\"{Hex(CLine)}\"/>");
+            sb.Append($"<rect x=\"{F(comp.X)}\" y=\"{F(comp.Y)}\" width=\"{F(comp.W)}\" height=\"{F(HeaderH)}\" fill=\"{Hex(CBand)}\" stroke=\"{Hex(CLine)}\"/>");
+            sb.Append($"<text x=\"{F(comp.X + 10)}\" y=\"{F(comp.Y + 17)}\" font-size=\"10.5\" fill=\"{Hex(CInk)}\">{Esc(Truncate(comp.Title, 26))}</text>");
+            var kind = comp.Kind == "mcu" ? "CONTROLLER" : comp.Kind == "power" ? "POWER" : "PERIPHERAL";
+            sb.Append($"<text x=\"{F(comp.X + comp.W - 10)}\" y=\"{F(comp.Y + comp.H - 7)}\" font-size=\"8\" fill=\"{Hex(CInkMute)}\" text-anchor=\"end\">{kind}</text>");
+            foreach (var lp in comp.Left)
+            {
+                sb.Append($"<rect x=\"{F(lp.X - 5)}\" y=\"{F(lp.Y - 3)}\" width=\"10\" height=\"6\" fill=\"{Hex(CBand)}\" stroke=\"{Hex(NetColor(lp.Net))}\"/>");
+                sb.Append($"<text x=\"{F(lp.X + 10)}\" y=\"{F(lp.Y + 3)}\" font-size=\"9\" fill=\"{Hex(CInkSoft)}\">{Esc(lp.Pin)}</text>");
+            }
+            foreach (var lp in comp.Right)
+            {
+                sb.Append($"<rect x=\"{F(lp.X - 5)}\" y=\"{F(lp.Y - 3)}\" width=\"10\" height=\"6\" fill=\"{Hex(CBand)}\" stroke=\"{Hex(NetColor(lp.Net))}\"/>");
+                sb.Append($"<text x=\"{F(lp.X - 10)}\" y=\"{F(lp.Y + 3)}\" font-size=\"9\" fill=\"{Hex(CInkSoft)}\" text-anchor=\"end\">{Esc(lp.Pin)}</text>");
+            }
+        }
+        sb.Append("</svg>");
+        return sb.ToString();
+    }
 }

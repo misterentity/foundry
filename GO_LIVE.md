@@ -1,6 +1,15 @@
 # Foundry — Go-Live Checklist
 
-Status of the build and what's left before a public 1.0. Checked = done; unchecked = remaining.
+**v1.0 reached.** Every PRD functional requirement (F1–F12) and acceptance criterion (§19) is met.
+The only remaining items are **externally gated** (need the user to supply a credential), not missing
+features:
+- **Code-signing** — the signing pipeline (`build/sign.ps1` + `release.yml`) and the updater's
+  publisher-verification are wired; add a code-signing cert as the `SIGN_PFX_BASE64`/`SIGN_PASSWORD`
+  repo secrets to remove the Windows SmartScreen warning.
+- **Live Nexar pricing** — `NexarSourcingProvider` is implemented; add a Nexar key in Settings to get
+  live price/stock. Without it, the BOM uses generated estimates and still produces working cart links.
+
+Status history below. Checked = done; unchecked = remaining.
 
 ## Done (shipping in v0.4.2)
 - [x] Full UI: onboarding, library launcher, workspace (rail/main/chat), all 7 tabs.

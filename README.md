@@ -148,8 +148,10 @@ Python · FastAPI · trimesh + manifold3d + shapely (CAD) · PyInstaller · Inno
 
 ## Status
 
-Active development (v0.4.x). Roadmap / open items live in [`GO_LIVE.md`](GO_LIVE.md): code-signing
-certificate, live Nexar verification, wiring SVG export.
+**v1.0** — all PRD functional requirements (F1–F12) and acceptance criteria met. The two
+externally-gated items are activation-only: **code-signing** (add a cert to remove the SmartScreen
+warning — pipeline is wired) and **live Nexar pricing** (add a Nexar key in Settings; BOM uses
+estimates + cart links otherwise). See [`GO_LIVE.md`](GO_LIVE.md).
 
 ## License
 

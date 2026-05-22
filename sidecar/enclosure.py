@@ -43,7 +43,7 @@ def _rounded_box(trimesh, w, h, d, r):
     return box
 
 
-def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none"):
+def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none", fmt="stl"):
     import numpy as np  # noqa: F401  (trimesh pulls it in; kept explicit for PyInstaller)
     import trimesh
     from trimesh.transformations import rotation_matrix
@@ -93,16 +93,20 @@ def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none"):
     lid.apply_translation([0, 0, oz + gap])
 
     model = trimesh.util.concatenate([base, lid])
-    stl = model.export(file_type="stl")
-    if isinstance(stl, str):
-        stl = stl.encode("utf-8")
+    fmt = (fmt or "stl").lower()
+    if fmt not in ("stl", "3mf"):
+        fmt = "stl"
+    data = model.export(file_type=fmt)
+    if isinstance(data, str):
+        data = data.encode("utf-8")
     stats = {
         "kernel": "manifold",
+        "format": fmt,
         "triangles": int(len(model.faces)),
         "outer_mm": [round(ox, 2), round(oy, 2), round(oz, 2)],
-        "bytes": len(stl),
+        "bytes": len(data),
     }
-    return bytes(stl), stats
+    return bytes(data), stats
 
 
 def _build_lid(trimesh, L, Wd, ox, oy, t, corner, boss_xy):
@@ -328,7 +332,8 @@ def build_stl(schema: dict) -> Tuple[bytes, dict]:
     lid = schema.get("lid")
     vents = schema.get("vents", []) or []
     mount = schema.get("mount", "none")
+    fmt = str(schema.get("format", "stl")).lower()
     try:
-        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount)
+        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount, fmt)
     except Exception:
-        return _fallback_build(inner, wall)
+        return _fallback_build(inner, wall)   # dependency-free fallback is STL only

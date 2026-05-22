@@ -29,6 +29,7 @@ class EnclosureSchema(BaseModel):
     standoffs: list[dict] | int | None = None
     vents: list[dict] = []
     mount: str = "none"
+    format: str = "stl"   # stl | 3mf
 
 
 @app.get("/health")
@@ -38,15 +39,18 @@ def health() -> JSONResponse:
 
 @app.post("/enclosure")
 def build_enclosure(schema: EnclosureSchema) -> StreamingResponse:
-    stl, stats = enclosure.build_stl(schema.model_dump())
+    data, stats = enclosure.build_stl(schema.model_dump())
+    fmt = str(stats.get("format", "stl")).lower()
+    media = "model/3mf" if fmt == "3mf" else "model/stl"
     headers = {
         "X-Foundry-Kernel": str(stats["kernel"]),
+        "X-Foundry-Format": fmt,
         "X-Foundry-Triangles": str(stats["triangles"]),
         "X-Foundry-Bytes": str(stats["bytes"]),
         "X-Foundry-Outer": ",".join(str(x) for x in stats["outer_mm"]),
-        "Content-Disposition": 'attachment; filename="enclosure.stl"',
+        "Content-Disposition": f'attachment; filename="enclosure.{fmt}"',
     }
-    return StreamingResponse(io.BytesIO(stl), media_type="model/stl", headers=headers)
+    return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)
 
 
 if __name__ == "__main__":

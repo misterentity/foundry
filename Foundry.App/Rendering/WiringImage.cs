@@ -38,4 +38,15 @@ public static class WiringImage
             return null;
         }
     }
+
+    /// <summary>Render the wiring diagram to SVG (vector). Must be called on the UI thread.</summary>
+    public static string? RenderSvg(FProject project)
+    {
+        try { return new WiringDiagramControl { Project = project }.ToSvg(); }
+        catch (Exception ex)
+        {
+            Foundry.Core.Diagnostics.AppLog.Warn("export", $"wiring SVG render failed: {ex.Message}");
+            return null;
+        }
+    }
 }

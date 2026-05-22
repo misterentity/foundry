@@ -16,11 +16,11 @@
             <Run Text="What you'll "/><Run Text="print." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
-                     Text="A snap-lid enclosure sized from your component footprints. Cutouts and standoffs are derived directly from the components — ports always line up. Export as STL/3MF for slicing or STEP for manual editing."/>
+                     Text="An enclosure sized from your component footprints. Cutouts and standoffs are derived directly from the components — ports always line up. Export as STL or 3MF for slicing (set the format in Settings)."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportStlCommand}">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT STL"/></StackPanel>
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="{Binding ExportLabel}"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>

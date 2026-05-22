@@ -10,7 +10,7 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
 for pkg in ("uvicorn", "fastapi", "starlette", "pydantic", "pydantic_core", "anyio", "click", "h11",
-            "trimesh", "manifold3d", "numpy", "shapely"):
+            "trimesh", "manifold3d", "numpy", "shapely", "networkx", "lxml"):
     try:
         d, b, h = collect_all(pkg)
         datas += d; binaries += b; hiddenimports += h
