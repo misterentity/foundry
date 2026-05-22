@@ -19,6 +19,9 @@
                      Text="Real-time pricing and availability per MPN, with one-click cart links to DigiKey, Mouser, or Amazon. Substitute parts with chat ('swap the OLED for e-paper') and downstream stages re-run."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
+          <TextBox Style="{StaticResource FieldInput}" Width="86" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,5"
+                   Text="{Binding TargetBudget, UpdateSourceTrigger=PropertyChanged}" Tag="budget $"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding OptimizeForBudgetCommand}" Content="HIT BUDGET" ToolTip="Substitute cheaper parts to come in under your target budget"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RefreshPricesCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="REFRESH PRICES"/></StackPanel>
           </Button>

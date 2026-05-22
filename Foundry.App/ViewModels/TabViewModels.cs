@@ -215,6 +215,21 @@ public sealed partial class BomViewModel : TabViewModelBase
         finally { row.AltBusy = false; }
     }
 
+    // v2 G12: budget mode
+    [ObservableProperty] private string _targetBudget = "";
+
+    /// <summary>Ask the AI to bring the BOM under a target budget by substituting cheaper parts (PRD v2 G12).</summary>
+    [RelayCommand]
+    private void OptimizeForBudget()
+    {
+        var t = TargetBudget.Trim().TrimStart('$');
+        if (!double.TryParse(t, out var budget) || budget <= 0) { SourcingStatus = "Enter a target budget (e.g. 25) first."; return; }
+        SwapRequested?.Invoke(
+            $"Rework the design to bring the total BOM cost under ${budget:0.00} by substituting cheaper but " +
+            $"suitable, pin-compatible parts where possible. Keep the device fully functional; if a tradeoff is " +
+            $"unavoidable, make the most reasonable choice. Current total is about {TotalText}.");
+    }
+
     /// <summary>Swap a BOM part for a suggested alternate — revises the whole project.</summary>
     [RelayCommand]
     private void Swap(Foundry.Core.Sourcing.Alternate? alt)
