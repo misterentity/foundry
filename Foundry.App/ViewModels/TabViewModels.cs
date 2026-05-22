@@ -429,8 +429,9 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     private void ApplyFix(Finding? finding)
     {
         if (finding is null) return;
-        // Fast path: a deterministic netlist edit (remap to a free pin / connect a rail) when possible.
-        if (ProjectValidator.CanAutoFix(finding) && ProjectValidator.TryAutoFix(Project, finding))
+        // Fast path: a deterministic netlist edit (remap to a free pin / connect a rail) for a single
+        // issue. Grouped findings (many refs) go to the AI, which resolves them all in one pass.
+        if (finding.Refs.Count <= 1 && ProjectValidator.CanAutoFix(finding) && ProjectValidator.TryAutoFix(Project, finding))
         {
             ProjectValidator.Revalidate(Project);
             Refresh();

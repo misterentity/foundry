@@ -270,11 +270,53 @@ public static class RulesEngine
                 });
     }
 
+    // Issue codes that can repeat across a large netlist — collapsed into one summarized finding each
+    // so validation stays readable (a 160-net design shouldn't produce 40 identical "add level shifter" rows).
+    private static readonly Dictionary<string, string> GroupNoun = new()
+    {
+        ["VLT-LVL"] = "logic-level mismatches",
+        ["VLT-SUP"] = "supply-voltage mismatches",
+        ["PIN-04"] = "strapping pins used as I/O",
+        ["PIN-IO"] = "input-only pins driving an output",
+        ["PIN-CONF"] = "pins claimed by multiple nets",
+        ["PWR-NC"] = "components with no power connection",
+        ["GND-NC"] = "components with no ground connection",
+        ["I2C-DUP"] = "I²C address collisions",
+    };
+
+    /// <summary>Collapse repeated findings of the same code into one summarized finding (refs aggregated).</summary>
+    private static List<Finding> Collapse(List<Finding> findings)
+    {
+        var result = new List<Finding>();
+        foreach (var grp in findings.GroupBy(f => f.Code))
+        {
+            var items = grp.ToList();
+            if (items.Count == 1 || !GroupNoun.TryGetValue(grp.Key, out var noun))
+            {
+                result.AddRange(items);
+                continue;
+            }
+            var first = items[0];
+            var refs = items.SelectMany(i => i.Refs).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var shown = string.Join(", ", refs.Take(12)) + (refs.Count > 12 ? $", +{refs.Count - 12} more" : "");
+            result.Add(new Finding
+            {
+                Severity = first.Severity,
+                Code = first.Code,
+                Title = $"{items.Count} {noun}",
+                Description = $"{first.Description} Affected ({refs.Count}): {shown}.",
+                Refs = refs,
+                Fix = first.Fix,
+            });
+        }
+        return result;
+    }
+
     // ---- ordering + numbering (fail → warn → info → pass), to match the UI ----
     private static List<Finding> Order(List<Finding> findings)
     {
         int Rank(string s) => s switch { "fail" => 0, "warn" => 1, "info" => 2, _ => 3 };
-        var ordered = findings.OrderBy(f => Rank(f.Severity)).ToList();
+        var ordered = Collapse(findings).OrderBy(f => Rank(f.Severity)).ToList();
 
         int w = 0, fail = 0, info = 0;
         foreach (var f in ordered)

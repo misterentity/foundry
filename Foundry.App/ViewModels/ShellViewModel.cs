@@ -191,7 +191,7 @@ public sealed partial class ShellViewModel : ObservableObject
             var result = await _reviser.ReviseAsync(Project, req, _cts.Token, forceEdit: true);
             if (result.Ok && result.Project is not null)
             {
-                bool stillThere = result.Project.Findings.Any(f => f.Code == finding.Code && f.Title == finding.Title);
+                bool stillThere = result.Project.Findings.Any(f => f.Code == finding.Code);
                 _pendingFixStatus = stillThere
                     ? $"⚠ Reworked the design for {finding.Code}, but the check still flags it — may need a manual change."
                     : $"✓ Fixed {finding.Code}: {finding.Title}. Re-validated — {result.Project.Findings.Count(f => f.Severity == "fail")} fail · {result.Project.Findings.Count(f => f.Severity == "warn")} warn.";
