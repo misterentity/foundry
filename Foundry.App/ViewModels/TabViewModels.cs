@@ -149,17 +149,28 @@ public sealed partial class BomRow : ObservableObject
     partial void OnPriceChanged(double value) => OnPropertyChanged(nameof(Extended));
 
     public void Apply(SourcingQuote q) { Dist = q.Distributor; Price = q.UnitPrice; Stock = q.Stock; Lead = q.Lead; }
+
+    // v2 G10: substitutes
+    [ObservableProperty] private bool _showAlternates;
+    [ObservableProperty] private bool _altBusy;
+    [ObservableProperty] private bool _altLoaded;
+    public ObservableCollection<Foundry.Core.Sourcing.Alternate> Alternates { get; } = new();
 }
 
 public sealed partial class BomViewModel : TabViewModelBase
 {
+    private readonly Foundry.Core.Generation.ProjectGenerator? _reviser;
     [ObservableProperty] private string _sourcingStatus;
     [ObservableProperty] private bool _isRefreshing;
 
     public ObservableCollection<BomRow> Rows { get; }
 
-    public BomViewModel(Project project) : base(project)
+    /// <summary>Raised to ask the shell to swap a part (revise + re-run downstream).</summary>
+    public event Action<string>? SwapRequested;
+
+    public BomViewModel(Project project, Foundry.Core.Generation.ProjectGenerator? reviser = null) : base(project)
     {
+        _reviser = reviser;
         Rows = new ObservableCollection<BomRow>(project.Bom.Select(l => new BomRow(l)));
         var svc = SourcingService.Shared;
         _sourcingStatus = svc.IsLive
@@ -183,6 +194,36 @@ public sealed partial class BomViewModel : TabViewModelBase
             Status = g.Any(r => r.Stock < 100) ? "warn" : "ok",
         })
         .OrderByDescending(s => s.Cost).ToList();
+
+    /// <summary>Expand a row and lazily fetch AI-suggested substitutes (PRD v2 G10).</summary>
+    [RelayCommand]
+    private async Task ToggleAlternates(BomRow? row)
+    {
+        if (row is null) return;
+        row.ShowAlternates = !row.ShowAlternates;
+        if (!row.ShowAlternates || row.AltLoaded || _reviser is null) return;
+        row.AltBusy = true;
+        try
+        {
+            var alts = await _reviser.SuggestAlternatesAsync(row.Name, row.Mpn);
+            row.Alternates.Clear();
+            foreach (var a in alts) row.Alternates.Add(a);
+            row.AltLoaded = true;
+            if (alts.Count == 0) row.Alternates.Add(new Foundry.Core.Sourcing.Alternate { Name = "No substitutes suggested.", Note = "" });
+        }
+        catch { }
+        finally { row.AltBusy = false; }
+    }
+
+    /// <summary>Swap a BOM part for a suggested alternate — revises the whole project.</summary>
+    [RelayCommand]
+    private void Swap(Foundry.Core.Sourcing.Alternate? alt)
+    {
+        if (alt is null || string.IsNullOrWhiteSpace(alt.Mpn)) return;
+        SwapRequested?.Invoke(
+            $"Replace the BOM part \"{alt.Replaces}\" with \"{alt.Name}\" (MPN {alt.Mpn}) and update the design, " +
+            $"netlist and firmware to match the substitute. Keep everything else the same.");
+    }
 
     [RelayCommand]
     private async Task RefreshPrices()

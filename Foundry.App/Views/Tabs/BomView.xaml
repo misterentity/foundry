@@ -60,11 +60,12 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
+                 <StackPanel>
                   <Grid>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="60"/><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/>
                       <ColumnDefinition Width="80"/><ColumnDefinition Width="80"/><ColumnDefinition Width="110"/>
-                      <ColumnDefinition Width="100"/><ColumnDefinition Width="80"/><ColumnDefinition Width="40"/>
+                      <ColumnDefinition Width="100"/><ColumnDefinition Width="80"/><ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Style="{StaticResource Mono}" Margin="14,12" HorizontalAlignment="Right" Text="{Binding Qty, StringFormat='{}{0}×'}"/>
                     <StackPanel Grid.Column="1" Margin="14,12">
@@ -80,13 +81,48 @@
                     </StackPanel>
                     <TextBlock Grid.Column="6" Style="{StaticResource Mono}" Foreground="{StaticResource Brush.Info}" Margin="14,12" Text="{Binding Dist}"/>
                     <TextBlock Grid.Column="7" Style="{StaticResource Mono}" Margin="14,12" Text="{Binding Lead}"/>
-                    <Button Grid.Column="8" Style="{StaticResource BtnGhost}" Padding="8,4" Margin="4,8" BorderBrush="{StaticResource Brush.Hairline2}"
-                            ToolTip="Open distributor search"
-                            Command="{Binding DataContext.BuyCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                            CommandParameter="{Binding}">
-                      <c:IconControl Glyph="chev" IconSize="10"/>
-                    </Button>
+                    <StackPanel Grid.Column="8" Orientation="Horizontal" Margin="4,8">
+                      <Button Style="{StaticResource BtnGhost}" Padding="8,4" Margin="0,0,4,0" BorderBrush="{StaticResource Brush.Hairline2}" FontSize="10"
+                              ToolTip="Suggest cheaper / in-stock substitutes" Content="ALT"
+                              Command="{Binding DataContext.ToggleAlternatesCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                              CommandParameter="{Binding}"/>
+                      <Button Style="{StaticResource BtnGhost}" Padding="8,4" BorderBrush="{StaticResource Brush.Hairline2}"
+                              ToolTip="Open distributor search"
+                              Command="{Binding DataContext.BuyCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                              CommandParameter="{Binding}">
+                        <c:IconControl Glyph="chev" IconSize="10"/>
+                      </Button>
+                    </StackPanel>
                   </Grid>
+
+                  <!-- substitutes (v2 G10) -->
+                  <Border Visibility="{Binding ShowAlternates, Converter={StaticResource BoolVis}}" Background="{StaticResource Brush.Surface0}"
+                          BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,1,0,0" Padding="60,10,16,12">
+                    <StackPanel>
+                      <StackPanel Orientation="Horizontal" Visibility="{Binding AltBusy, Converter={StaticResource BoolVis}}">
+                        <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Text="finding substitutes…"/>
+                      </StackPanel>
+                      <ItemsControl ItemsSource="{Binding Alternates}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Grid Margin="0,3">
+                              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                              <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.Ink}" Text="{Binding Name}"/>
+                                <TextBlock Style="{StaticResource Mono}" FontSize="10" Foreground="{StaticResource Brush.InkFaint}" TextWrapping="Wrap" Text="{Binding Note}"/>
+                              </StackPanel>
+                              <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Text="{Binding PriceText}"/>
+                              <Button Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource BtnGhost}" Padding="9,4" FontSize="10" Content="SWAP"
+                                      Visibility="{Binding Mpn, Converter={StaticResource NullVis}}"
+                                      Command="{Binding DataContext.SwapCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                      CommandParameter="{Binding}"/>
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                 </StackPanel>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

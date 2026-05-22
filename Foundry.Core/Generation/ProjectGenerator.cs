@@ -285,6 +285,34 @@ Output ONLY the JSON object.
         }
     }
 
+    /// <summary>Suggest pin-compatible substitute parts for a BOM line, ranked cheaper/in-stock (PRD v2 G10).</summary>
+    public async Task<List<Sourcing.Alternate>> SuggestAlternatesAsync(string partName, string mpn, CancellationToken ct = default)
+    {
+        var result = new List<Sourcing.Alternate>();
+        if (!_ai.HasKey || string.IsNullOrWhiteSpace(partName)) return result;
+        const string sys =
+            "You are a hardware sourcing expert. Given a component, propose up to 3 PIN-COMPATIBLE, drop-in " +
+            "alternative parts that are cheaper and/or more widely in stock. Real parts only, with real MPNs. " +
+            "Return ONLY this JSON: {\"alternates\":[{\"name\":\"\",\"mpn\":\"\",\"price\":0.0,\"note\":\"why it's a good swap\"}]}";
+        try
+        {
+            var raw = await _ai.CompleteAsync(sys, $"Component: {partName} (MPN {mpn}). Suggest pin-compatible alternatives.", _model, ct);
+            var json = ExtractJson(raw);
+            if (json is null) return result;
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("alternates", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                foreach (var a in arr.EnumerateArray())
+                    result.Add(new Sourcing.Alternate
+                    {
+                        Name = Str(a, "name", ""), Mpn = Str(a, "mpn", ""),
+                        Price = Num(a.TryGetProperty("price", out var pv) ? pv : default), Note = Str(a, "note", ""),
+                        Replaces = partName,
+                    });
+        }
+        catch (Exception ex) { Diagnostics.AppLog.Warn("sourcing", $"alternates failed: {ex.Message}"); }
+        return result.Where(a => a.Name.Length > 0).Take(3).ToList();
+    }
+
     /// <summary>Ask the AI to fix firmware that failed to compile, given the compiler errors (PRD v2 G3).</summary>
     public async Task<bool> FixFirmwareAsync(Project.Project project, string compilerErrors, CancellationToken ct = default)
     {

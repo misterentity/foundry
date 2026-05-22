@@ -72,7 +72,7 @@ public sealed partial class ShellViewModel : ObservableObject
         Tabs = new List<TabDescriptor>
         {
             new() { Id="overview",  Label="Overview",       Icon="spark",  Index=0, Factory=p => new OverviewViewModel(p) },
-            new() { Id="bom",       Label="BOM",            Icon="cart",   Index=1, Factory=p => new BomViewModel(p) },
+            new() { Id="bom",       Label="BOM",            Icon="cart",   Index=1, Factory=p => new BomViewModel(p, _reviser) },
             new() { Id="wiring",    Label="Wiring",         Icon="wire",   Index=2, Factory=p => new WiringViewModel(p) },
             new() { Id="enclosure", Label="Enclosure",      Icon="cube",   Index=3, Factory=p => new EnclosureViewModel(p) },
             new() { Id="firmware",  Label="Firmware",       Icon="code",   Index=4, Factory=p => new FirmwareViewModel(p, _reviser) },
@@ -111,6 +111,28 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         if (view is OverviewViewModel ovm)
             ovm.RebuildRequested += () => _ = RebuildAsync();
+        if (view is BomViewModel bvm)
+            bvm.SwapRequested += instr => _ = SwapPartAsync(instr);
+    }
+
+    /// <summary>Apply a BOM part swap (revise the whole project, re-run downstream) — PRD v2 G10.</summary>
+    private async Task SwapPartAsync(string instruction)
+    {
+        if (IsGenerating) return;
+        IsGenerating = true;
+        _cts = new CancellationTokenSource();
+        Chat.Add(new ChatMessage { Role = "user", Time = DateTime.Now.ToString("HH:mm"), Text = "Swap a part." });
+        try
+        {
+            var result = await _reviser.ReviseAsync(Project, instruction, _cts.Token, forceEdit: true);
+            if (result.Ok && result.Project is not null)
+                ApplyRevision(result.Project, "Swapped the part and updated the design.");
+            else
+                Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = result.Message });
+        }
+        catch (OperationCanceledException) { Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = "Cancelled." }); }
+        catch (Exception ex) { Chat.Add(new ChatMessage { Role = "assistant", Time = DateTime.Now.ToString("HH:mm"), Text = $"Swap failed: {ex.Message}" }); }
+        finally { IsGenerating = false; }
     }
 
     /// <summary>Regenerate the entire project from its prompt (replaces the current design).</summary>
