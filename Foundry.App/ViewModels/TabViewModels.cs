@@ -267,6 +267,22 @@ public sealed partial class BomViewModel : TabViewModelBase
         catch (Exception ex) { SourcingStatus = $"cart export failed: {ex.Message}"; }
     }
 
+    /// <summary>Write a Mouser-format BOM CSV and open Mouser's BOM tool (PRD v2 G11).</summary>
+    [RelayCommand]
+    private void CartMouser()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Foundry");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "mouser-bom.csv");
+            File.WriteAllText(path, CartLinks.MouserBomCsv(Project.Bom));
+            OpenUrl(CartLinks.MouserBom);
+            SourcingStatus = $"Mouser BOM CSV written to {path} — import it in Mouser's BOM tool";
+        }
+        catch (Exception ex) { SourcingStatus = $"cart export failed: {ex.Message}"; }
+    }
+
     [RelayCommand]
     private void Buy(BomRow? row)
     {

@@ -71,3 +71,18 @@ public class FabricationTests
         Assert.Contains("MCU,3V3,power,SENSOR.VCC", csv);
     }
 }
+
+public class CartTests
+{
+    [Fact]
+    public void MouserBomCsv_HasHeaderAndRows()
+    {
+        var bom = new System.Collections.Generic.List<Foundry.Core.Project.BomLine>
+        {
+            new() { Qty = 2, Name = "ESP32", Mpn = "ESP32-DEVKITC-32E", Price = 8.5 },
+        };
+        var csv = Foundry.Core.Sourcing.CartLinks.MouserBomCsv(bom);
+        Assert.StartsWith("Mfr Part Number,Quantity", csv);
+        Assert.Contains("ESP32-DEVKITC-32E,2", csv);
+    }
+}

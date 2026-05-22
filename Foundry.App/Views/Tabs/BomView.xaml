@@ -22,8 +22,9 @@
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RefreshPricesCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="REFRESH PRICES"/></StackPanel>
           </Button>
-          <Button Style="{StaticResource BtnPrimary}" Command="{Binding CartCommand}">
-            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="cart" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="{Binding TotalText, StringFormat='CART · {0}'}"/></StackPanel>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding CartMouserCommand}" Content="MOUSER BOM" ToolTip="Write a Mouser-format BOM CSV + open Mouser's BOM tool"/>
+          <Button Style="{StaticResource BtnPrimary}" Command="{Binding CartCommand}" ToolTip="Write a DigiKey BOM CSV + open the DigiKey BOM manager">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="cart" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="{Binding TotalText, StringFormat='DIGIKEY · {0}'}"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>

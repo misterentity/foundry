@@ -40,6 +40,16 @@ public static class CartLinks
         return sb.ToString();
     }
 
+    /// <summary>Mouser BOM-tool CSV: "Mfr Part Number,Quantity" — uploadable in Mouser's BOM importer.</summary>
+    public static string MouserBomCsv(IEnumerable<BomLine> bom)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Mfr Part Number,Quantity");
+        foreach (var l in bom)
+            sb.AppendLine($"{Escape(l.Mpn)},{l.Qty}");
+        return sb.ToString();
+    }
+
     private static string Escape(string field) =>
         field.Contains(',') || field.Contains('"')
             ? "\"" + field.Replace("\"", "\"\"") + "\""
