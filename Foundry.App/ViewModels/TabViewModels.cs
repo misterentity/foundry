@@ -232,6 +232,24 @@ public sealed partial class WiringViewModel : TabViewModelBase
         catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
     }
 
+    /// <summary>Export a KiCad netlist (.net) + a CSV pin report for PCB layout (PRD v2 G4/G6).</summary>
+    [RelayCommand]
+    private void ExportKiCad()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var net = Path.Combine(dir, "netlist.net");
+            File.WriteAllText(net, Foundry.Core.Fabrication.KiCadNetlist.Export(Project));
+            File.WriteAllText(Path.Combine(dir, "pinout.csv"), Foundry.Core.Fabrication.PinReport.Csv(Project));
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"KiCad netlist + pinout → {dir}");
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            Status = $"KiCad netlist + pinout exported to {dir}";
+        }
+        catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
+    }
+
     /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>
     [RelayCommand]
     private void ExportSvg()
