@@ -252,9 +252,13 @@ Output ONLY the JSON object.
                 $"- {c.Alias} ({c.Name}): pins {string.Join(", ", c.Pins.Select(p => p.Name))}"));
             var nets = string.Join("\n", project.Connections.Select(c => $"- {c.From} -> {c.To} [{c.Net}]"));
 
+            var macroList = string.Join(", ", entries.Select(e => e.Macro));
+            var inc = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "from pinmap import *" : "#include \"pinmap.h\"";
             var user =
                 $"Device: {prompt}\n\nPlatform: {platform}\nParts:\n{parts}\n\nNetlist:\n{nets}\n\n" +
-                $"Pin map ({pinmapName}) — reference these macros, do not redefine pins:\n{pinmap}";
+                $"Pin map ({pinmapName}) is PRE-DEFINED and supplied — DO NOT redefine pins. In your main file you MUST " +
+                $"`{inc}` and use ONLY these exact macro names (do not invent, rename, or alias them):\n{pinmap}\n\n" +
+                $"Available pin macros (use verbatim): {macroList}";
 
             var raw = await _ai.CompleteAsync(FirmwareSystemPrompt, user, _model, ct);
             var json = ExtractJson(raw);
@@ -286,9 +290,11 @@ You are a senior embedded-firmware engineer. Write COMPLETE, working firmware fo
 described — real application logic, not a skeleton: initialize every peripheral, implement the
 protocols it needs (Wi-Fi/MQTT/HTTP/BLE/I2C/SPI/ADC as appropriate), the main control loop, timing,
 and sensible defaults. The primary sketch MUST be named exactly "main.ino" (Arduino C++) or "main.py"
-(MicroPython) — name it nothing else. Reference the PIN_* macros from the provided pin map for every
-pin you use; never hard-code or redefine pin numbers. Put secrets (Wi-Fi creds, tokens) as clearly-marked
-#define/constant placeholders in a separate config file. Return ONLY one JSON object, no prose:
+(MicroPython) — name it nothing else. The main file MUST include the supplied pin map
+(`#include "pinmap.h"` for Arduino, `from pinmap import *` for MicroPython) and use its PIN_* macros
+verbatim for every pin — never hard-code, rename, redefine, or invent pin macros not in the supplied map.
+Put secrets (Wi-Fi creds, tokens) as clearly-marked #define/constant placeholders in a separate config
+file. Use only widely-available libraries. Return ONLY one JSON object, no prose:
 {
  "platform": "Arduino C++" | "MicroPython",
  "board": "esp32:esp32:esp32",

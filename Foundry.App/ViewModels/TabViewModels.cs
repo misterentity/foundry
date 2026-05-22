@@ -398,6 +398,14 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
 {
     [ObservableProperty] private FirmwareFile _activeFile;
 
+    // v2 G1: compile verification
+    [ObservableProperty] private bool _isBuilding;
+    [ObservableProperty] private string _buildStatus = "";
+    [ObservableProperty] private string _buildSeverity = "info";  // ok | fail | info
+    public ObservableCollection<Foundry.Core.Firmware.BuildDiagnostic> BuildDiagnostics { get; } = new();
+    public bool HasBuildStatus => !string.IsNullOrEmpty(BuildStatus);
+    partial void OnBuildStatusChanged(string value) => OnPropertyChanged(nameof(HasBuildStatus));
+
     public FirmwareViewModel(Project project) : base(project)
     {
         // Firmware (incl. the netlist-derived pinmap.h) is generated in the Project; open the main sketch.
@@ -408,6 +416,47 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
 
     public Firmware F => Project.Firmware;
     public string HeaderText => $"{F.Platform} · {F.Board} · {F.Files.Count} files";
+
+    /// <summary>Compile the sketch with arduino-cli and surface diagnostics (PRD v2 G1).</summary>
+    [RelayCommand]
+    private async Task VerifyBuild()
+    {
+        if (IsBuilding) return;
+        IsBuilding = true;
+        BuildDiagnostics.Clear();
+        BuildStatus = "Compiling…"; BuildSeverity = "info";
+        try
+        {
+            var r = await Foundry.Core.Firmware.FirmwareBuilder.CompileAsync(Project);
+            if (!r.Installed)
+            {
+                BuildSeverity = "info";
+                BuildStatus = "Build toolchain (arduino-cli) isn't installed. Click INSTALL TOOLCHAIN to add it.";
+                return;
+            }
+            foreach (var d in r.Diagnostics) BuildDiagnostics.Add(d);
+            BuildSeverity = r.Ok ? "pass" : "fail";
+            BuildStatus = r.Summary;
+        }
+        catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Build failed to run: {ex.Message}"; }
+        finally { IsBuilding = false; }
+    }
+
+    /// <summary>Download arduino-cli into the app tools folder on demand (PRD v2 G1).</summary>
+    [RelayCommand]
+    private async Task InstallToolchain()
+    {
+        if (IsBuilding) return;
+        IsBuilding = true;
+        BuildSeverity = "info"; BuildStatus = "Downloading arduino-cli…";
+        try
+        {
+            await Foundry.Core.Firmware.FirmwareBuilder.DownloadCliAsync();
+            BuildStatus = "arduino-cli installed. Click VERIFY BUILD to compile (the board core installs on first use).";
+        }
+        catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Install failed: {ex.Message}"; }
+        finally { IsBuilding = false; }
+    }
 
     /// <summary>Copy the active file's source to the clipboard.</summary>
     [RelayCommand]
