@@ -39,8 +39,11 @@
       <!-- RECENT -->
       <StackPanel Margin="44,40,44,60">
         <Grid>
-          <TextBlock Style="{StaticResource Kicker}" Text="Recent"/>
-          <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" Foreground="{StaticResource Brush.InkFaint}" Text="{Binding Recent.Count, StringFormat='{}{0} saved'}"/>
+          <TextBlock Style="{StaticResource Kicker}" Text="Recent" VerticalAlignment="Center"/>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,12,0" Command="{Binding ImportCommand}" Content="IMPORT BUNDLE" ToolTip="Import a shared .foundryproj"/>
+            <TextBlock Style="{StaticResource Kicker}" VerticalAlignment="Center" Foreground="{StaticResource Brush.InkFaint}" Text="{Binding Recent.Count, StringFormat='{}{0} saved'}"/>
+          </StackPanel>
         </Grid>
 
         <!-- empty state -->

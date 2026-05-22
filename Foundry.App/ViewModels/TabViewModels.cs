@@ -76,6 +76,23 @@ public sealed partial class OverviewViewModel : TabViewModelBase
         catch { /* best effort */ }
     }
 
+    /// <summary>Export a shareable .foundryproj bundle (project + deliverables) to the export folder.</summary>
+    [RelayCommand]
+    private void ExportBundle()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var safe = string.Concat((Project.Title ?? "project").Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
+            var path = Path.Combine(dir, (string.IsNullOrWhiteSpace(safe) ? "project" : safe) + ProjectBundle.Extension);
+            ProjectBundle.Export(Project, path);
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"bundle → {path}");
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
+
     /// <summary>Write the DigiKey BOM CSV and open the cart manager.</summary>
     [RelayCommand]
     private void Cart()

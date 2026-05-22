@@ -32,6 +32,7 @@
               <c:IconControl Glyph="refresh" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="REBUILD"/>
             </StackPanel>
           </Button>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportBundleCommand}" Content="BUNDLE" ToolTip="Export a shareable .foundryproj (project + firmware + BOM + netlist + guide)"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPdfCommand}">
             <StackPanel Orientation="Horizontal">
               <c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PDF"/>
