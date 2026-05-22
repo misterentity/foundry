@@ -82,16 +82,16 @@
 
               <!-- caption buttons -->
               <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Width="46" Style="{StaticResource CaptionButton}" Command="{Binding ShowSettingsCommand}" ToolTip="Settings">
+                <Button Width="46" Style="{StaticResource CaptionButton}" Command="{Binding ShowSettingsCommand}" ToolTip="Settings" AutomationProperties.Name="Settings">
                   <c:IconControl Glyph="settings" IconSize="12" Stroke="{StaticResource Brush.InkMute}"/>
                 </Button>
-                <Button Width="46" Style="{StaticResource CaptionButton}" Click="Minimize_Click">
+                <Button Width="46" Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize" AutomationProperties.Name="Minimize">
                   <c:IconControl Glyph="minimize" IconSize="12" Stroke="{StaticResource Brush.InkMute}"/>
                 </Button>
-                <Button Width="46" Style="{StaticResource CaptionButton}" Click="Maximize_Click">
+                <Button Width="46" Style="{StaticResource CaptionButton}" Click="Maximize_Click" ToolTip="Maximize" AutomationProperties.Name="Maximize">
                   <c:IconControl Glyph="maximize" IconSize="11" Stroke="{StaticResource Brush.InkMute}"/>
                 </Button>
-                <Button Width="46" Style="{StaticResource CaptionButtonClose}" Click="Close_Click">
+                <Button Width="46" Style="{StaticResource CaptionButtonClose}" Click="Close_Click" ToolTip="Close" AutomationProperties.Name="Close">
                   <c:IconControl Glyph="close" IconSize="11" Stroke="{StaticResource Brush.InkMute}"/>
                 </Button>
               </StackPanel>

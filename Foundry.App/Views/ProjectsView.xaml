@@ -78,6 +78,7 @@
                     <TextBlock Grid.Column="3" Style="{StaticResource Mono}" FontSize="11" VerticalAlignment="Center" Margin="0,0,18,0"
                                Foreground="{Binding Status, Converter={StaticResource SevBrush}}" Text="{Binding StatusText}"/>
                     <Button Grid.Column="4" Style="{StaticResource BtnGhost}" Padding="8,4" FontSize="10" VerticalAlignment="Center" Content="✕"
+                            ToolTip="Delete project" AutomationProperties.Name="Delete project"
                             Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                             CommandParameter="{Binding Id}"/>
                   </Grid>

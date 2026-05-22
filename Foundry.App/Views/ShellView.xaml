@@ -121,7 +121,7 @@
                 <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="11" Margin="0,0,8,0"/><TextBlock Text="EXPORT PDF"/></StackPanel>
               </Button>
               <Button Style="{StaticResource Btn}" BorderThickness="1,0,0,0" Padding="14,0" Background="Transparent"
-                      Command="{Binding SettingsCommand}" ToolTip="Settings">
+                      Command="{Binding SettingsCommand}" ToolTip="Settings" AutomationProperties.Name="Settings">
                 <c:IconControl Glyph="settings" IconSize="11"/>
               </Button>
             </StackPanel>

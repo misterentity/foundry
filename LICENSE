@@ -1,0 +1,29 @@
+Foundry — Proprietary License
+Copyright (c) 2026 Dave MacNeill. All rights reserved.
+
+This software, including its source code, assets, and documentation (the "Software"),
+is proprietary and confidential. The source is published publicly on GitHub for
+transparency, evaluation, and portfolio purposes only.
+
+No license or right is granted, expressly or by implication, to any person or entity to
+use, copy, reproduce, modify, adapt, merge, publish, distribute, sublicense, sell, or
+create derivative works of the Software or any portion of it, in source or binary form,
+without the prior written permission of the copyright holder.
+
+You may view the source code on GitHub. You may not redistribute the compiled
+application or the source, in whole or in part, without permission.
+
+Third-party components are licensed under their own terms (see each dependency's
+license). "Claude" and "Anthropic" are trademarks of Anthropic; Foundry is not
+affiliated with or endorsed by Anthropic. You must supply your own API keys and comply
+with the terms of any third-party services you connect.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, AND NONINFRINGEMENT. THE OUTPUTS OF THE SOFTWARE ARE A DESIGN AID ONLY AND ARE
+NOT A MANUFACTURABLE SPECIFICATION — VERIFY ALL ELECTRICAL, MECHANICAL, AND SAFETY
+DETAILS BEFORE BUILDING OR APPLYING POWER. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+For licensing inquiries, contact the copyright holder via the GitHub repository:
+https://github.com/misterentity/foundry

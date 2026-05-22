@@ -149,7 +149,12 @@ Python · FastAPI · trimesh + manifold3d + shapely (CAD) · PyInstaller · Inno
 ## Status
 
 Active development (v0.4.x). Roadmap / open items live in [`GO_LIVE.md`](GO_LIVE.md): code-signing
-certificate, live Nexar verification, wiring image/SVG export.
+certificate, live Nexar verification, wiring SVG export.
+
+## License
+
+**Proprietary — © 2026 Dave MacNeill. All rights reserved.** The source is published for transparency
+and portfolio purposes; no rights to copy, modify, or redistribute are granted. See [`LICENSE`](LICENSE).
 
 ---
 
