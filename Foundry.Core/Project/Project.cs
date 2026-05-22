@@ -169,6 +169,14 @@ public sealed class Finding
     /// <summary>True when the rules engine can apply this fix deterministically (pin remap / rail connect).</summary>
     [JsonIgnore]
     public bool AutoFixable => Code is "PIN-04" or "PIN-IO" or "PIN-CONF" or "PWR-NC" or "GND-NC";
+
+    /// <summary>
+    /// Advisory findings have no design-edit resolution — they depend on firmware behaviour or usage
+    /// (e.g. battery life vs. sleep duty cycle) or are sourcing notes. The UI shows them as guidance and
+    /// does NOT offer "Apply &amp; re-run", since an AI design edit can never clear them.
+    /// </summary>
+    [JsonIgnore]
+    public bool Advisory => Severity == "info" || Code is "PWR-02" or "BOM-01";
 }
 
 public sealed class AssemblyStep

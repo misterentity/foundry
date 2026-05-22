@@ -92,12 +92,20 @@
 
                 <Border Grid.Column="2" Background="{StaticResource Brush.Surface1}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="1,0,0,0" Padding="18" MinWidth="200">
                   <StackPanel VerticalAlignment="Center">
+                    <!-- design-fixable: shows APPLY & RE-RUN -->
                     <StackPanel Visibility="{Binding Fix, Converter={StaticResource NullVis}}">
-                      <TextBlock Style="{StaticResource KickerAccent}" Text="Suggested fix"/>
-                      <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,4" TextWrapping="Wrap" Text="{Binding Fix}"/>
-                      <Button Style="{StaticResource BtnPrimary}" Padding="10,6" FontSize="10" HorizontalAlignment="Left" Content="APPLY &amp; RE-RUN"
-                              Command="{Binding DataContext.ApplyFixCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                              CommandParameter="{Binding}"/>
+                      <StackPanel Visibility="{Binding Advisory, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+                        <TextBlock Style="{StaticResource KickerAccent}" Text="Suggested fix"/>
+                        <TextBlock Style="{StaticResource Serif}" FontSize="18" Margin="0,4" TextWrapping="Wrap" Text="{Binding Fix}"/>
+                        <Button Style="{StaticResource BtnPrimary}" Padding="10,6" FontSize="10" HorizontalAlignment="Left" Content="APPLY &amp; RE-RUN"
+                                Command="{Binding DataContext.ApplyFixCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                CommandParameter="{Binding}"/>
+                      </StackPanel>
+                      <!-- advisory: guidance only, no auto-fix (it depends on firmware/usage, not the netlist) -->
+                      <StackPanel Visibility="{Binding Advisory, Converter={StaticResource BoolVis}}">
+                        <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Text="Guidance"/>
+                        <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{StaticResource Brush.InkSoft}" Text="{Binding Fix}"/>
+                      </StackPanel>
                     </StackPanel>
                     <TextBlock Visibility="{Binding Fix, Converter={StaticResource NullVis}, ConverterParameter=invert}"
                                Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.Ok}" Text="✓ no action needed"/>

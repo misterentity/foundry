@@ -212,17 +212,20 @@ public static class RulesEngine
         if (peakMa <= 0 || battery is null) return;
 
         double hoursAtPeak = (double)battery.CapacityMah / peakMa;
-        var sev = goalDays > 0 && hoursAtPeak / 24.0 < goalDays ? "warn" : "warn";
+        // Advisory: battery life is governed by the firmware sleep/duty cycle, not the netlist. Only a
+        // stated battery goal that the continuous draw can't meet escalates it to a warning.
+        var sev = goalDays > 0 && hoursAtPeak / 24.0 < goalDays ? "warn" : "info";
         findings.Add(new Finding
         {
             Severity = sev, Code = "PWR-02",
-            Title = "Battery life sensitive to duty cycle",
+            Title = "Battery life depends on duty cycle",
             Description =
                 $"Active draw is {peakMa} mA. At {peakMa} mA continuous, {battery.CapacityMah} mAh lasts ~{hoursAtPeak:0.#} h — " +
-                $"real life depends on your sleep schedule. Lower the Wi-Fi duty cycle or TX power to extend it" +
+                $"but a duty-cycled device sleeps most of the time, so real life depends on your sleep schedule. " +
+                $"Lower the Wi-Fi duty cycle or TX power to extend it" +
                 (goalDays > 0 ? $" past the {goalDays}-day goal." : "."),
             Refs = new() { "BAT.+" },
-            Fix = "Auto-tune duty",
+            Fix = "Reduce active duty cycle / TX power in firmware, or fit a larger cell.",
         });
     }
 
