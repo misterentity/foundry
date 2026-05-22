@@ -61,6 +61,20 @@
         </Grid>
       </Border>
 
+      <!-- REPORT CARD (v2 G9) -->
+      <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,0,0,28" Padding="22,16">
+        <StackPanel Orientation="Horizontal">
+          <Border Background="{StaticResource Brush.Surface1}" Width="64" Height="64" VerticalAlignment="Center">
+            <TextBlock Style="{StaticResource Serif}" FontSize="40" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{Binding GradeSeverity, Converter={StaticResource SevBrush}}" Text="{Binding Grade}"/>
+          </Border>
+          <StackPanel VerticalAlignment="Center" Margin="18,0,0,0">
+            <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Text="REPORT CARD · SAFE TO POWER ON?"/>
+            <TextBlock Style="{StaticResource Serif}" FontSize="20" Margin="0,4,0,0" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" MaxWidth="760" Text="{Binding Verdict}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
       <!-- FINDINGS -->
       <ItemsControl ItemsSource="{Binding Findings}" Margin="0,0,0,28">
         <ItemsControl.ItemTemplate>

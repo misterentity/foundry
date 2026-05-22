@@ -31,6 +31,7 @@ public static class RulesEngine
         PowerGround(aliases, eps, kb, findings);
         PowerBudget(aliases, kb, batteryGoalDays, findings);
         I2cCollisions(aliases, kb, findings);
+        PassivesPresent(connections, kb, findings);   // v2: I²C pull-ups + LED current-limit resistors
 
         return Order(findings);
     }
@@ -310,6 +311,80 @@ public static class RulesEngine
             });
         }
         return result;
+    }
+
+    // ---- Rule (v2 G7): required passives — I²C pull-ups + LED current-limit resistors ----
+    private static bool IsResistor(ComponentSpec? s) =>
+        s is not null && (s.Name.Contains("resistor", StringComparison.OrdinalIgnoreCase)
+            || s.Name.Contains('Ω') || s.Name.Contains(" ohm", StringComparison.OrdinalIgnoreCase)
+            || s.Name.Contains("kΩ", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBareLed(ComponentSpec? s)
+    {
+        if (s is null || !s.Name.Contains("led", StringComparison.OrdinalIgnoreCase)) return false;
+        // smart/driven LEDs have their own current control — exclude them
+        string[] driven = { "strip", "matrix", "neopixel", "ws2812", "sk6812", "apa10", "module", "ring", "panel", "7-seg", "segment", "backlight", "driver" };
+        return !driven.Any(w => s.Name.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void PassivesPresent(IReadOnlyList<Connection> connections, ComponentKb kb, List<Finding> findings)
+    {
+        string PinUp(string ep) { var d = ep.IndexOf('.'); return (d < 0 ? "" : ep[(d + 1)..]).ToUpperInvariant(); }
+        string Ref(string ep) { var d = ep.IndexOf('.'); return d < 0 ? ep : ep[..d]; }
+
+        // ---- I²C pull-ups ----
+        var i2c = connections.Where(c => c.Net == "i2c").ToList();
+        if (i2c.Count > 0)
+        {
+            bool pullup = connections.Any(c =>
+            {
+                bool ra = IsResistor(kb.ByAlias(Ref(c.From))), rb = IsResistor(kb.ByAlias(Ref(c.To)));
+                bool sclSdaA = PinUp(c.From) is "SDA" or "SCL", sclSdaB = PinUp(c.To) is "SDA" or "SCL";
+                return (ra && sclSdaB) || (rb && sclSdaA);
+            });
+            if (!pullup)
+                findings.Add(new Finding
+                {
+                    Severity = "warn", Code = "PULL-I2C",
+                    Title = "I²C bus has no pull-up resistors",
+                    Description = "SDA and SCL need pull-ups to VCC (typically 4.7 kΩ) for the bus to work. " +
+                                  "Some breakout boards include them — check yours; otherwise add a pair.",
+                    Refs = i2c.Select(c => c.From).Concat(i2c.Select(c => c.To)).Where(e => PinUp(e) is "SDA" or "SCL").Distinct().ToList(),
+                    Fix = "Add 4.7 kΩ pull-up resistors from SDA and SCL to VCC.",
+                });
+        }
+
+        // ---- LED current-limit resistors ----
+        var ledAliases = connections
+            .SelectMany(c => new[] { Ref(c.From), Ref(c.To) })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(a => IsBareLed(kb.ByAlias(a)))
+            .ToList();
+        var unprotected = new List<string>();
+        foreach (var led in ledAliases)
+        {
+            bool drivenBySignal = connections.Any(c => c.Net == "signal" &&
+                (Ref(c.From).Equals(led, StringComparison.OrdinalIgnoreCase) || Ref(c.To).Equals(led, StringComparison.OrdinalIgnoreCase)));
+            if (!drivenBySignal) continue;
+            bool hasResistor = connections.Any(c =>
+            {
+                bool touchesLed = Ref(c.From).Equals(led, StringComparison.OrdinalIgnoreCase) || Ref(c.To).Equals(led, StringComparison.OrdinalIgnoreCase);
+                bool otherIsR = IsResistor(kb.ByAlias(Ref(c.From))) || IsResistor(kb.ByAlias(Ref(c.To)));
+                return touchesLed && otherIsR;
+            });
+            if (!hasResistor) unprotected.Add(led);
+        }
+        if (unprotected.Count > 0)
+            findings.Add(new Finding
+            {
+                Severity = "warn", Code = "LED-R",
+                Title = unprotected.Count == 1 ? $"LED {unprotected[0]} has no current-limit resistor"
+                                               : $"{unprotected.Count} LEDs have no current-limit resistor",
+                Description = "An LED driven directly from a GPIO without a series resistor can over-current the " +
+                              "pin and the LED. Add a series resistor (≈220–470 Ω at 3.3–5 V).",
+                Refs = unprotected,
+                Fix = "Add a series current-limit resistor (≈330 Ω) between the GPIO and each LED.",
+            });
     }
 
     // ---- ordering + numbering (fail → warn → info → pass), to match the UI ----

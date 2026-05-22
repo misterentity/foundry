@@ -437,6 +437,15 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     public string PassText => $"{PassCount} / {Project.Findings.Count}";
     public string ChecksLabel => $"DETERMINISTIC RULES ENGINE · {Project.Findings.Count} CHECKS";
 
+    // v2 G9: report card — a grade + a plain "safe to power on?" verdict.
+    public string Grade => FailCount > 0 ? "F" : WarnCount == 0 ? "A" : WarnCount <= 2 ? "B" : WarnCount <= 5 ? "C" : "D";
+    public string GradeSeverity => FailCount > 0 ? "fail" : WarnCount > 0 ? "warn" : "pass";
+    public string Verdict => FailCount > 0
+        ? "Not yet — resolve the failures before applying power."
+        : WarnCount > 0
+            ? "Likely OK — review the warnings, then verify before powering on."
+            : "Deterministic checks pass — safe to power on (still verify before building).";
+
     private void Refresh()
     {
         Findings.Clear();
@@ -447,6 +456,9 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         OnPropertyChanged(nameof(OverallStatus));
         OnPropertyChanged(nameof(PassText));
         OnPropertyChanged(nameof(ChecksLabel));
+        OnPropertyChanged(nameof(Grade));
+        OnPropertyChanged(nameof(GradeSeverity));
+        OnPropertyChanged(nameof(Verdict));
         FindingsChanged?.Invoke();
     }
 

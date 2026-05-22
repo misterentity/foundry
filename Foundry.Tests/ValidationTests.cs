@@ -21,6 +21,55 @@ public class ValidationTests
     }
 
     [Fact]
+    public void MissingI2cPullups_AreFlagged_AndPresentOnesArent()
+    {
+        var mcu = new ComponentSpec { Ref = "esp32", Alias = "MCU", Name = "ESP32", LogicV = 3.3,
+            Pins = new() { new PinSpec { Name = "GPIO21", Kind = PinKind.Bidir }, new PinSpec { Name = "GPIO22", Kind = PinKind.Bidir } } };
+        var dev = new ComponentSpec { Ref = "bme", Alias = "DEV", Name = "BME280", LogicV = 3.3,
+            Pins = new() { new PinSpec { Name = "SDA", Kind = PinKind.Bidir }, new PinSpec { Name = "SCL", Kind = PinKind.Bidir } } };
+        var res = new ComponentSpec { Ref = "r", Alias = "RPU", Name = "4.7kΩ Resistor",
+            Pins = new() { new PinSpec { Name = "1", Kind = PinKind.Bidir }, new PinSpec { Name = "2", Kind = PinKind.Bidir } } };
+
+        var i2c = new List<Connection>
+        {
+            new() { From = "MCU.GPIO21", To = "DEV.SDA", Net = "i2c" },
+            new() { From = "MCU.GPIO22", To = "DEV.SCL", Net = "i2c" },
+        };
+
+        var without = RulesEngine.Validate(i2c, new ComponentKb(new[] { mcu, dev }));
+        Assert.Contains(without, f => f.Code == "PULL-I2C");
+
+        var withPull = new List<Connection>(i2c)
+        {
+            new() { From = "RPU.1", To = "DEV.SDA", Net = "i2c" },
+            new() { From = "RPU.2", To = "DEV.SCL", Net = "i2c" },
+        };
+        var with = RulesEngine.Validate(withPull, new ComponentKb(new[] { mcu, dev, res }));
+        Assert.DoesNotContain(with, f => f.Code == "PULL-I2C");
+    }
+
+    [Fact]
+    public void BareLedWithoutResistor_IsFlagged()
+    {
+        var mcu = new ComponentSpec { Ref = "uno", Alias = "MCU", Name = "Arduino Uno", LogicV = 5.0,
+            Pins = new() { new PinSpec { Name = "D13", Kind = PinKind.Output } } };
+        var led = new ComponentSpec { Ref = "led", Alias = "LED1", Name = "5mm Red LED",
+            Pins = new() { new PinSpec { Name = "A", Kind = PinKind.Input }, new PinSpec { Name = "K", Kind = PinKind.Ground } } };
+
+        var direct = new List<Connection> { new() { From = "MCU.D13", To = "LED1.A", Net = "signal" } };
+        Assert.Contains(RulesEngine.Validate(direct, new ComponentKb(new[] { mcu, led })), f => f.Code == "LED-R");
+
+        var res = new ComponentSpec { Ref = "r", Alias = "R1", Name = "330Ω Resistor",
+            Pins = new() { new PinSpec { Name = "1", Kind = PinKind.Bidir }, new PinSpec { Name = "2", Kind = PinKind.Bidir } } };
+        var withR = new List<Connection>
+        {
+            new() { From = "MCU.D13", To = "R1.1", Net = "signal" },
+            new() { From = "R1.2", To = "LED1.A", Net = "signal" },
+        };
+        Assert.DoesNotContain(RulesEngine.Validate(withR, new ComponentKb(new[] { mcu, led, res })), f => f.Code == "LED-R");
+    }
+
+    [Fact]
     public void InjectedFault_5VSensorOn3V3Pin_IsCaught()
     {
         // PRD §19 acceptance: a 5V sensor output driving the 3.3V-only MCU pin must be flagged.
