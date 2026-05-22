@@ -24,6 +24,10 @@ public sealed partial class NewProjectViewModel : ObservableObject
         "An ESP32 garage-door sensor that reports open/closed to Home Assistant.",
     };
 
+    /// <summary>Saved full-project templates — start a new project from one instantly (no AI).</summary>
+    public System.Collections.ObjectModel.ObservableCollection<Foundry.Core.Project.ProjectSummary> Templates { get; } = new();
+    public bool HasTemplates => Templates.Count > 0;
+
     public NewProjectViewModel(IAnthropicClient ai, string model, Action<Foundry.Core.Project.Project> onGenerated, Action onCancel)
     {
         _generator = new ProjectGenerator(ai, model);
@@ -31,11 +35,21 @@ public sealed partial class NewProjectViewModel : ObservableObject
         _onCancel = onCancel;
         _hasKey = ai.HasKey;
         if (!_hasKey) _status = "Add your Anthropic API key in Settings to generate. You can still open the sample project.";
+        foreach (var t in Foundry.Core.Project.TemplateStore.List()) Templates.Add(t);
     }
 
     private System.Threading.CancellationTokenSource? _cts;
 
     [RelayCommand] private void UseExample(string example) => Prompt = example;
+
+    /// <summary>Instantiate a saved template into a new project (no AI call).</summary>
+    [RelayCommand]
+    private void UseTemplate(string? id)
+    {
+        if (string.IsNullOrEmpty(id)) return;
+        var p = Foundry.Core.Project.TemplateStore.Load(id);
+        if (p is not null) _onGenerated(p);
+    }
     [RelayCommand] private void Cancel() => _onCancel();
     [RelayCommand] private void CancelGenerate() => _cts?.Cancel();
 

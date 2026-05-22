@@ -53,6 +53,30 @@
                     Visibility="{Binding IsGenerating, Converter={StaticResource BoolVis}}"/>
             <TextBlock VerticalAlignment="Center" Margin="14,0,0,0" FontFamily="{StaticResource Font.Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" MaxWidth="460" Text="{Binding Status}"/>
           </StackPanel>
+
+          <!-- TEMPLATES (instant, no AI) -->
+          <StackPanel Margin="0,40,0,0" Visibility="{Binding HasTemplates, Converter={StaticResource BoolVis}}">
+            <TextBlock Style="{StaticResource Kicker}" Text="START FROM A TEMPLATE · INSTANT"/>
+            <ItemsControl ItemsSource="{Binding Templates}" Margin="0,14,0,0">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Button HorizontalContentAlignment="Stretch" Cursor="Hand" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,0,8"
+                          Command="{Binding DataContext.UseTemplateCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding Id}">
+                    <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Background="{StaticResource Brush.Surface0}" Padding="16,12">
+                      <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                          <TextBlock Style="{StaticResource Serif}" FontSize="16" Foreground="{StaticResource Brush.Ink}" Text="{Binding Title}"/>
+                          <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,3,0,0" Text="{Binding Prompt}"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource Mono}" FontSize="10" Foreground="{StaticResource Brush.InkFaint}" Text="{Binding PartsText}"/>
+                      </Grid>
+                    </Border>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
         </StackPanel>
       </ScrollViewer>
     </DockPanel>

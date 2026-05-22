@@ -76,6 +76,22 @@ public sealed partial class OverviewViewModel : TabViewModelBase
         catch { /* best effort */ }
     }
 
+    /// <summary>Save the current design as a reusable template (PRD v2 G13).</summary>
+    [RelayCommand]
+    private void SaveAsTemplate()
+    {
+        try
+        {
+            Foundry.Core.Project.TemplateStore.Save(Project, Project.Title);
+            System.Windows.MessageBox.Show($"Saved “{Project.Title}” as a template. Start a new project from it via New project → Templates.",
+                "Foundry — template saved", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Couldn't save the template: {ex.Message}", "Foundry", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        }
+    }
+
     /// <summary>Export a shareable .foundryproj bundle (project + deliverables) to the export folder.</summary>
     [RelayCommand]
     private void ExportBundle()
