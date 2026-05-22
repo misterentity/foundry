@@ -75,7 +75,7 @@ public sealed partial class ShellViewModel : ObservableObject
             new() { Id="bom",       Label="BOM",            Icon="cart",   Index=1, Factory=p => new BomViewModel(p) },
             new() { Id="wiring",    Label="Wiring",         Icon="wire",   Index=2, Factory=p => new WiringViewModel(p) },
             new() { Id="enclosure", Label="Enclosure",      Icon="cube",   Index=3, Factory=p => new EnclosureViewModel(p) },
-            new() { Id="firmware",  Label="Firmware",       Icon="code",   Index=4, Factory=p => new FirmwareViewModel(p) },
+            new() { Id="firmware",  Label="Firmware",       Icon="code",   Index=4, Factory=p => new FirmwareViewModel(p, _reviser) },
             new() { Id="validation",Label="Validation",     Icon="shield", Index=5, Factory=p => new ValidationViewModel(p) },
             new() { Id="guide",     Label="Assembly guide", Icon="book",   Index=6, Factory=p => new GuideViewModel(p) },
         };

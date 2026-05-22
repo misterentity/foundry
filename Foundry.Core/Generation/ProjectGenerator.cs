@@ -285,6 +285,51 @@ Output ONLY the JSON object.
         }
     }
 
+    /// <summary>Ask the AI to fix firmware that failed to compile, given the compiler errors (PRD v2 G3).</summary>
+    public async Task<bool> FixFirmwareAsync(Project.Project project, string compilerErrors, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey || string.IsNullOrWhiteSpace(compilerErrors)) return false;
+        try
+        {
+            var kb = new ComponentKb(project.Components);
+            var entries = PinMap.Build(project.Connections, kb);
+            var platform = project.Firmware.Platform;
+            var pinmapName = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "pinmap.py" : "pinmap.h";
+            var pinmap = platform.Contains("python", StringComparison.OrdinalIgnoreCase)
+                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.Gpio}"))
+                : PinMap.RenderHeader(entries);
+            var inc = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "from pinmap import *" : "#include \"pinmap.h\"";
+            var current = string.Join("\n\n", project.Firmware.Files
+                .Where(f => !f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase))
+                .Select(f => $"// ===== FILE: {f.Name} =====\n{f.Content}"));
+
+            var user =
+                $"This {platform} firmware fails to compile. Fix the errors and return the FULL corrected firmware as " +
+                $"the usual JSON. Keep the same files; change only what's needed.\n\nCOMPILER ERRORS:\n{compilerErrors}\n\n" +
+                $"Pin map ({pinmapName}) is PRE-DEFINED — `{inc}` and use these macros verbatim:\n{pinmap}\n\n" +
+                $"CURRENT FIRMWARE:\n{current}";
+
+            var raw = await _ai.CompleteAsync(FirmwareSystemPrompt, user, _model, ct);
+            var json = ExtractJson(raw);
+            if (json is null) return false;
+            var fw = MapFirmware(json, platform);
+            if (fw.Files.Count == 0) return false;
+
+            fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
+            fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
+            foreach (var f in fw.Files) f.Active = false;
+            PickMainFile(fw.Files).Active = true;
+            project.Firmware = fw;
+            Diagnostics.AppLog.Info("build", $"AI build-fix applied · {fw.Files.Count} files");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Warn("build", $"build-fix failed: {ex.Message}");
+            return false;
+        }
+    }
+
     private const string FirmwareSystemPrompt = """
 You are a senior embedded-firmware engineer. Write COMPLETE, working firmware for the exact device
 described — real application logic, not a skeleton: initialize every peripheral, implement the

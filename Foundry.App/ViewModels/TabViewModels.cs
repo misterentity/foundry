@@ -396,18 +396,21 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
 // ---------------- Firmware ----------------
 public sealed partial class FirmwareViewModel : TabViewModelBase
 {
+    private readonly Foundry.Core.Generation.ProjectGenerator? _fixer;
     [ObservableProperty] private FirmwareFile _activeFile;
 
-    // v2 G1: compile verification
+    // v2 G1/G3: compile verification + AI build-fix
     [ObservableProperty] private bool _isBuilding;
     [ObservableProperty] private string _buildStatus = "";
-    [ObservableProperty] private string _buildSeverity = "info";  // ok | fail | info
+    [ObservableProperty] private string _buildSeverity = "info";  // pass | fail | info
+    [ObservableProperty] private bool _canFixBuild;
     public ObservableCollection<Foundry.Core.Firmware.BuildDiagnostic> BuildDiagnostics { get; } = new();
     public bool HasBuildStatus => !string.IsNullOrEmpty(BuildStatus);
     partial void OnBuildStatusChanged(string value) => OnPropertyChanged(nameof(HasBuildStatus));
 
-    public FirmwareViewModel(Project project) : base(project)
+    public FirmwareViewModel(Project project, Foundry.Core.Generation.ProjectGenerator? fixer = null) : base(project)
     {
+        _fixer = fixer;
         // Firmware (incl. the netlist-derived pinmap.h) is generated in the Project; open the main sketch.
         var files = project.Firmware.Files;
         _activeFile = files.FirstOrDefault(f => f.Active)
@@ -437,9 +440,33 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
             foreach (var d in r.Diagnostics) BuildDiagnostics.Add(d);
             BuildSeverity = r.Ok ? "pass" : "fail";
             BuildStatus = r.Summary;
+            CanFixBuild = !r.Ok && r.Diagnostics.Count > 0 && _fixer is not null;
         }
         catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Build failed to run: {ex.Message}"; }
         finally { IsBuilding = false; }
+    }
+
+    /// <summary>Have the AI fix the compile errors, then re-verify (PRD v2 G3).</summary>
+    [RelayCommand]
+    private async Task FixBuild()
+    {
+        if (IsBuilding || _fixer is null || BuildDiagnostics.Count == 0) return;
+        IsBuilding = true;
+        CanFixBuild = false;
+        BuildSeverity = "info"; BuildStatus = "Asking the AI to fix the build errors…";
+        try
+        {
+            var errors = string.Join("\n", BuildDiagnostics.Select(d => d.Display));
+            var ok = await _fixer.FixFirmwareAsync(Project, errors);
+            if (!ok) { BuildSeverity = "fail"; BuildStatus = "Couldn't generate a firmware fix. Try again or edit manually."; return; }
+            // refresh the file list + active sketch, then re-verify
+            OnPropertyChanged(nameof(F));
+            ActiveFile = Foundry.Core.Generation.ProjectGenerator.PickMainFile(Project.Firmware.Files);
+            BuildStatus = "Firmware updated — re-compiling…";
+        }
+        catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Fix failed: {ex.Message}"; }
+        finally { IsBuilding = false; }
+        await VerifyBuild();   // recompile to confirm
     }
 
     /// <summary>Download arduino-cli into the app tools folder on demand (PRD v2 G1).</summary>

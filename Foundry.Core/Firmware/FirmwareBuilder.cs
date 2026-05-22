@@ -36,19 +36,26 @@ public static class FirmwareBuilder
         return null;
     }
 
-    /// <summary>Best-guess Fully Qualified Board Name from the firmware board hint / components.</summary>
+    /// <summary>
+    /// Best-guess Fully Qualified Board Name. Inference from the actual components is primary (the AI
+    /// often parrots the prompt's example board field); the firmware board hint is only a fallback for
+    /// chips the keyword inference doesn't recognise.
+    /// </summary>
     public static string Fqbn(Project.Project p)
     {
-        var board = (p.Firmware.Board ?? "").Trim();
-        if (board.Count(c => c == ':') == 2) return board;   // already an FQBN
-
         var hay = (string.Join(" ", p.Components.Select(c => c.Name)) + " " + p.Title + " " + p.Prompt).ToLowerInvariant();
-        if (hay.Contains("esp32")) return "esp32:esp32:esp32";
-        if (hay.Contains("esp8266") || hay.Contains("nodemcu") || hay.Contains("wemos")) return "esp8266:esp8266:nodemcuv2";
-        if (hay.Contains("rp2040") || hay.Contains("pico")) return "rp2040:rp2040:rpipico";
-        if (hay.Contains("mega")) return "arduino:avr:mega";
-        if (hay.Contains("nano")) return "arduino:avr:nano";
-        if (hay.Contains("leonardo") || hay.Contains("32u4")) return "arduino:avr:leonardo";
+        string? inferred =
+            hay.Contains("esp32") ? "esp32:esp32:esp32" :
+            (hay.Contains("esp8266") || hay.Contains("nodemcu") || hay.Contains("wemos")) ? "esp8266:esp8266:nodemcuv2" :
+            (hay.Contains("rp2040") || hay.Contains("pico")) ? "rp2040:rp2040:rpipico" :
+            hay.Contains("mega") ? "arduino:avr:mega" :
+            hay.Contains("nano") ? "arduino:avr:nano" :
+            (hay.Contains("leonardo") || hay.Contains("32u4")) ? "arduino:avr:leonardo" :
+            (hay.Contains("uno") || hay.Contains("atmega328")) ? "arduino:avr:uno" : null;
+        if (inferred is not null) return inferred;
+
+        var board = (p.Firmware.Board ?? "").Trim();
+        if (board.Count(c => c == ':') == 2) return board;   // explicit FQBN for an unrecognised chip
         return "arduino:avr:uno";   // safe default (smallest core)
     }
 

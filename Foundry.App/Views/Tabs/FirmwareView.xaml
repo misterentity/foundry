@@ -39,7 +39,11 @@
               <Rectangle Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding BuildSeverity, Converter={StaticResource SevBrush}}"/>
               <TextBlock Style="{StaticResource Mono}" FontSize="12.5" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" Text="{Binding BuildStatus}"/>
             </StackPanel>
-            <Button HorizontalAlignment="Right" Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Command="{Binding InstallToolchainCommand}" Content="INSTALL TOOLCHAIN"/>
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+              <Button Style="{StaticResource BtnPrimary}" Padding="10,5" FontSize="10" Margin="0,0,8,0" Command="{Binding FixBuildCommand}" Content="FIX BUILD"
+                      Visibility="{Binding CanFixBuild, Converter={StaticResource BoolVis}}"/>
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Command="{Binding InstallToolchainCommand}" Content="INSTALL TOOLCHAIN"/>
+            </StackPanel>
           </Grid>
           <ProgressBar IsIndeterminate="True" Height="3" Margin="0,10,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
                        Visibility="{Binding IsBuilding, Converter={StaticResource BoolVis}}"/>
