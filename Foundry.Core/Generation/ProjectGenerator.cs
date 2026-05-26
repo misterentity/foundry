@@ -299,12 +299,35 @@ Output ONLY the JSON object.
         var vents = e.Vents.Count == 0 ? "(none)" : string.Join(", ", e.Vents.Select(v => $"{v.Count}×{v.Face}"));
         var parts = string.Join("\n", project.Components.Take(8).Select(c => $"  - {c.Alias} ({c.Name})"));
 
+        // Surface face dimensions and an occupied/free map so the model can apply style
+        // features only to clear faces and size the recessed panel to contain its cutouts.
+        double il = e.Inner is { Length: > 0 } ? e.Inner[0] : 60, iw = e.Inner is { Length: > 1 } ? e.Inner[1] : 40, ih = e.Inner is { Length: > 2 } ? e.Inner[2] : 25;
+        double w = e.Wall, outerL = il + 2 * w, outerW = iw + 2 * w, outerH = ih + w;
+        var occupied = new HashSet<string>(e.Cutouts.Select(c => c.Face), StringComparer.OrdinalIgnoreCase);
+        occupied.UnionWith(e.Vents.Select(v => v.Face));
+        string FaceState(string face, double fw, double fh) =>
+            $"  - {face,-6} {fw:0.##}×{fh:0.##} mm  {(occupied.Contains(face) ? "[OCCUPIED — cutouts/vents present]" : "[free — style here]")}";
+        var faceMap = string.Join("\n", new[]
+        {
+            FaceState("front",  outerL, outerH),
+            FaceState("back",   outerL, outerH),
+            FaceState("left",   outerW, outerH),
+            FaceState("right",  outerW, outerH),
+            FaceState("top",    outerL, outerW),
+            FaceState("bottom", outerL, outerW),
+        });
+
         var user =
             $"Design a 3D-printable enclosure for this device. Output ONLY parametric OpenSCAD code (no prose, no fences).\n\n" +
-            $"Inner cavity: [{Dim(0)}, {Dim(1)}, {Dim(2)}] mm   wall: {e.Wall:0.##} mm   lid: {e.Lid}   mount: {e.Mount}   standoffs: {e.Standoffs}\n" +
+            $"Inner cavity: [{il:0.##}, {iw:0.##}, {ih:0.##}] mm   outer: [{outerL:0.##}, {outerW:0.##}, {outerH:0.##}] mm   wall: {w:0.##} mm   lid: {e.Lid}   mount: {e.Mount}   standoffs: {e.Standoffs}\n" +
+            $"Faces (outer dimensions + occupancy):\n{faceMap}\n\n" +
             $"Vents: {vents}\nCutouts:\n{(string.IsNullOrEmpty(cutouts) ? "  (none)" : cutouts)}\n\nComponents:\n{parts}\n\n" +
-            "Cutout face axes: front/back → cut through Y; left/right → cut through X; top/bottom → cut through Z. " +
-            "pos is [x,y] mm offset from the face's centre, x=horizontal y=vertical on that face.";
+            "Reminder: cutout `pos = [x,y]` is the offset from the FACE's centre (x = horizontal axis of that face, y = vertical axis); " +
+            "see the face-axes block in the system prompt. " +
+            "Apply the recess/bezel to a face that has cutouts (size the recess to contain ALL of that face's cutouts + a 2 mm margin). " +
+            "Place the accent ridge on a face marked [free] (prefer the lid top, then back); never run it across an OCCUPIED face. " +
+            "Apply the 45° corner clip only at a corner whose two adjacent faces are [free] within 8 mm. " +
+            "Subtract every cutout LAST and use a cut depth ≥ wall + bezel_inset + accent_ridge_w + 4 mm so it pierces through any style feature in front of it.";
 
         try
         {
@@ -355,33 +378,74 @@ Required parametric structure
   `style_features` module for the futurist details. Use difference/union/hull/minkowski/rotate/
   translate cleanly. Keep `$fn = 32` for speed (use 24 for very small fillets).
 
-Techno-futurist styling — REQUIRED, not optional
-- **Chamfered vertical edges** on the outer shell (`hull()` over offset round-rects, or a `minkowski`
-  with a small chamfer cylinder). 2–3 mm radius reads "designed", not "printed-box".
-- **Top edge chamfer/bevel** on both the base wall tops and the lid — a ~1.5 mm 45° bevel softens
-  the silhouette and gives a "tech bezel" feel.
-- **Recessed face panel** on the front face (where the main port cutouts live): inset 1–2 mm with a
-  slim raised border (the bezel) framing the cutouts.
-- **Slim accent ridge** running along one side of the lid or the long face (~1 mm proud, ~3 mm wide),
-  parallel to the long axis, to break up the surface. Stop short of the corners.
-- **Diagonal/angled vent grille** instead of plain horizontal slots: rotate vent slots by `vent_angle`
-  (default 25°) or arrange them as a fan/array; alternatively use a triangular or hex slot pattern.
-- **Stealth corner detail**: clip one corner with a 45° angled cut so the device has a clear
-  "front" direction.
-- **Light-pipe slits** for indicator LEDs near the front bezel (thin 1.0×4 mm cutouts) when an LED
-  appears in the components.
-- Keep the design printable: no overhangs >45°, no bridges longer than the wall is thick, no fragile
-  features <0.8 mm. Avoid `text()` (fonts aren't installed).
+Coordinate convention — STRICT
+- The base origin is the OUTER box centre at z=0. The base sits with its bottom on z=0 and its
+  open top at z = `inner_h + wall_thickness`. Outer footprint is `outer_l × outer_w` where
+  `outer_l = inner_l + 2*wall_thickness` and `outer_w = inner_w + 2*wall_thickness`.
+- Cutout `pos = [x, y]` is the offset from the FACE'S OWN CENTRE, in millimetres, where x is the
+  horizontal axis of that face and y is the vertical axis of that face (z is "up" on the
+  side/front/back faces; y is "up" on the top/bottom faces). `(0,0)` means the face's exact centre.
+- Face axes (re-confirm before placing each cutout):
+    * front  (−Y wall)  → x along +X (left→right), y along +Z (down→up)
+    * back   (+Y wall)  → x along −X,              y along +Z
+    * left   (−X wall)  → x along +Y (back→front), y along +Z
+    * right  (+X wall)  → x along −Y,              y along +Z
+    * top    (+Z lid)   → x along +X,              y along +Y
+    * bottom (−Z floor) → x along +X,              y along −Y
+
+Build order — MUST follow this sequence
+1. Build the outer shell (chamfered + top-bevelled).
+2. UNION style additions (recessed panels, raised bezels, accent ridges, light-pipe trim).
+3. UNION standoffs and mount tabs/flanges.
+4. DIFFERENCE the inner cavity.
+5. DIFFERENCE every cutout — LAST. Each cutout's subtracting tool extends from the inside of the
+   cavity all the way through any style additions on that face (cut depth ≥ `wall_thickness +
+   bezel_inset + accent_ridge_w + 4`). Result: cutouts always read as clean openings, never
+   partially blocked by a ridge, bezel border, or recess wall.
+6. DIFFERENCE vent slots (also using a generous depth, same reasoning).
+
+Cutout keepout — style features must yield to cutouts
+- For every cutout, treat its bounding box plus a 2 mm margin as a KEEPOUT zone on its face.
+- The accent ridge must skip keepout zones (split it into segments that go AROUND them, or place
+  the ridge on a face that has NO cutouts — preferring the lid top, then the back face).
+- The recessed-panel bezel border must STAY CLEAR of every cutout's keepout — either size the
+  recess big enough to contain all the face's cutouts inside it (with the 2 mm margin), or shrink
+  it to a region that contains no cutouts at all. Never let the raised bezel border cross a cutout.
+- The 45° stealth corner clip is allowed ONLY on a corner whose two adjacent faces have NO cutouts
+  within 8 mm of that corner. If no such corner exists, omit the corner clip rather than break a
+  cutout.
+- Light-pipe slits are extra cutouts — they obey the same keepout rule (never inside another
+  cutout's keepout).
+
+Techno-futurist styling — REQUIRED, applied subject to the keepout rule above
+- **Chamfered vertical edges** on the outer shell (`hull()` over offset round-rects, or a
+  `minkowski` with a small chamfer cylinder). 2–3 mm radius reads "designed", not "printed-box".
+- **Top edge chamfer/bevel** on the base wall tops and the lid — a ~1.5 mm 45° bevel.
+- **Recessed face panel** on a face that has cutouts (front by default): inset `bezel_inset`
+  (1–2 mm) with a slim raised border (the bezel) framing the cutouts. The recess must contain
+  ALL of that face's cutouts plus their 2 mm margin.
+- **Slim accent ridge** (~1 mm proud, `accent_ridge_w` ≈ 3 mm wide), parallel to the long axis,
+  stopping short of corners. Prefer the lid top or a cutout-free side; segment around keepouts.
+- **Diagonal/angled vent grille**: rotate vent slots by `vent_angle` (default 25°) or use a
+  triangular/hex slot pattern. Keep the rotated slot bounding box entirely inside the face.
+- **Stealth corner detail**: 45° angled cut on a corner — subject to the keepout rule above.
+- **Light-pipe slits** for indicator LEDs near the front bezel (thin 1.0×4 mm cutouts) when an
+  LED appears in the components and a clear spot exists.
+- Keep the design printable: no overhangs >45°, no bridges longer than the wall is thick, no
+  fragile features <0.8 mm. Avoid `text()` (fonts aren't installed).
 
 Functional rules (must still be met)
-- Place every requested cutout on its named face at the given (x,y) offset.
+- Place every requested cutout on its named face at the given (x,y) offset, using the face
+  axes above. Do not drop or relocate cutouts.
 - Vent slots respect the schema's face + count, but render as the angled/grille style above.
-- Add corner standoffs with M2/M3 pilot holes when the schema asks for them.
+- Add corner standoffs with M2/M3 pilot holes when the schema asks for them; position them so
+  they do not collide with any cutout's keepout.
 - `lid == "screw"` → add corner screw bosses + matching clearance holes in the lid.
 - `lid == "snap"` → add a locating lip on the lid that nests inside the base opening.
-- `mount == "wall-tabs"` → flanged wall-mount tabs with screw holes on the long sides.
+- `mount == "wall-tabs"` → flanged wall-mount tabs with screw holes on the long sides
+  (avoid faces dense with cutouts).
 - Render the base and the lid SIDE-BY-SIDE at z=0 (translate the lid +X past the base by
-  `inner_l + 2*wall_thickness + 12`), oriented for printing so the .stl is ready to slice.
+  `outer_l + 12`), oriented for printing so the .stl is ready to slice.
 
 Output discipline
 - OpenSCAD 2021.01 only. No external libraries, no `text()`, no `import()`.
