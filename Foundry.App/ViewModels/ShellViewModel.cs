@@ -38,6 +38,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly Action _onBack;
     private readonly Action<string> _onTabChanged;
     private readonly Action _onSettings;
+    private readonly Action _onLogs;
     private readonly Action<Project, string> _onProjectRevised;
     private TabDescriptor? _validationTab;
 
@@ -57,8 +58,15 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private string _chatInput = "";
     [ObservableProperty] private bool _isGenerating;
 
+    // Inline error banner (PRD §13: surface failures without making the user open the Logs view).
+    // Populated from AppLog's ERROR/WARN events so anything that's already logged also banners.
+    [ObservableProperty] private string _errorText = "";
+    [ObservableProperty] private string _errorKind = "fail";   // fail | warn
+    public bool HasError => !string.IsNullOrEmpty(ErrorText);
+    partial void OnErrorTextChanged(string value) => OnPropertyChanged(nameof(HasError));
+
     public ShellViewModel(Project project, IPipeline pipeline, ProjectGenerator reviser, ProjectGenerator rebuilder,
-        Action onBack, Action<string> onTabChanged, Action onSettings, Action<Project, string> onProjectRevised)
+        Action onBack, Action<string> onTabChanged, Action onSettings, Action onLogs, Action<Project, string> onProjectRevised)
     {
         Project = project;
         _pipeline = pipeline;
@@ -67,6 +75,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _onBack = onBack;
         _onTabChanged = onTabChanged;
         _onSettings = onSettings;
+        _onLogs = onLogs;
         _onProjectRevised = onProjectRevised;
 
         Tabs = new List<TabDescriptor>
@@ -91,7 +100,28 @@ public sealed partial class ShellViewModel : ObservableObject
         Chat = new ObservableCollection<ChatMessage>(project.Chat);
         var startTab = Environment.GetEnvironmentVariable("FOUNDRY_TAB");
         SelectedTab = Tabs.FirstOrDefault(t => t.Id == startTab) ?? Tabs[0];
+
+        // Surface ERROR-level log entries as an inline banner. AppLog raises Logged from any thread;
+        // marshal back to the dispatcher before touching observable properties.
+        Foundry.Core.Diagnostics.AppLog.Logged += entry =>
+        {
+            if (entry.Level != "ERROR" && entry.Level != "WARN") return;
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ErrorKind = entry.Sev;                 // "fail" or "warn"
+                ErrorText = $"{entry.Category}: {entry.Message}";
+            }));
+        };
     }
+
+    [RelayCommand] private void DismissError() => ErrorText = "";
+    [RelayCommand] private void OpenLogs() { _onLogs(); ErrorText = ""; }
+
+    // Chat column is shown by default but the view auto-collapses it at narrow window widths
+    // (< 1280px) so the main panel doesn't lose room for the 3D preview / tables. Toggleable
+    // via the CHAT button in the topbar.
+    [ObservableProperty] private bool _chatVisible = true;
+    [RelayCommand] private void ToggleChat() => ChatVisible = !ChatVisible;
 
     partial void OnSelectedTabChanged(TabDescriptor value)
     {

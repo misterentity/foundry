@@ -4,7 +4,7 @@
         xmlns:c="clr-namespace:Foundry.App.Controls"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Foundry — AI Hardware Design Studio"
-        Height="960" Width="1500" MinHeight="640" MinWidth="1040"
+        Height="960" Width="1500" MinHeight="720" MinWidth="1100"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" Background="Black"
         FontFamily="{StaticResource Font.Mono}" FontSize="13"

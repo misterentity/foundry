@@ -37,7 +37,10 @@
         <StackPanel>
           <Grid>
             <StackPanel Orientation="Horizontal">
-              <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <Rectangle Style="{StaticResource PulseDot}" Margin="0,0,8,0"
+                         Visibility="{Binding ScadBusy, Converter={StaticResource BoolVis}}"/>
+              <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,8,0"
+                         Visibility="{Binding ScadBusy, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
               <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.Ink}" Text="ADVANCED · AI-written parametric OpenSCAD"/>
             </StackPanel>
             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
@@ -168,7 +171,11 @@
 
             <TextBlock Style="{StaticResource Kicker}" Text="Cutouts · derived from footprints"/>
             <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,8,0,18">
-              <ItemsControl ItemsSource="{Binding E.Cutouts}">
+              <Grid>
+                <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.InkFaint}"
+                           Margin="14,16" Text="No cutouts — sealed enclosure. Components with external interfaces will add ports automatically."
+                           Visibility="{Binding HasItems, ElementName=CutoutList, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
+              <ItemsControl x:Name="CutoutList" ItemsSource="{Binding E.Cutouts}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
@@ -182,6 +189,7 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+              </Grid>
             </Border>
 
             <TextBlock Style="{StaticResource Kicker}" Text="Build features"/>

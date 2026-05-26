@@ -24,6 +24,7 @@
       <conv:ActiveTabBrushConverter x:Key="ActiveTabBrush"/>
       <conv:ActiveTabInkConverter x:Key="ActiveTabInk"/>
       <conv:StockBrushConverter x:Key="StockBrush"/>
+      <conv:BoolToGridLengthConverter x:Key="BoolGridLen"/>
 
       <!-- ===== VM → View mapping ===== -->
       <DataTemplate DataType="{x:Type vm:OnboardingViewModel}">

@@ -75,26 +75,31 @@
             <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="18,16">
               <TextBlock Style="{StaticResource Kicker}" Text="{Binding NetCount, StringFormat='Connection ledger · {0} nets'}"/>
             </Border>
-            <ItemsControl ItemsSource="{Binding Project.Connections}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
-                    <Grid>
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/>
-                      </Grid.ColumnDefinitions>
-                      <TextBlock Grid.Column="0" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkFaint}" Margin="14,12" Text="·"/>
-                      <TextBlock Grid.Column="1" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,12" Text="{Binding From}"/>
-                      <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,12" Text="{Binding To}"/>
-                      <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="0,12">
-                        <Rectangle Width="16" Height="2" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Net, Converter={StaticResource NetBrush}}"/>
-                        <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{Binding Net, Converter={StaticResource NetBrush}}" Text="{Binding Net}"/>
-                      </StackPanel>
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <Grid>
+              <TextBlock Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.InkFaint}"
+                         Margin="18,18" Text="No connections yet — the netlist drives every downstream stage."
+                         Visibility="{Binding HasItems, ElementName=NetLedger, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
+              <ItemsControl x:Name="NetLedger" ItemsSource="{Binding Project.Connections}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkFaint}" Margin="14,12" Text="·"/>
+                        <TextBlock Grid.Column="1" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,12" Text="{Binding From}"/>
+                        <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,12" Text="{Binding To}"/>
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="0,12">
+                          <Rectangle Width="16" Height="2" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Net, Converter={StaticResource NetBrush}}"/>
+                          <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{Binding Net, Converter={StaticResource NetBrush}}" Text="{Binding Net}"/>
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Grid>
           </StackPanel>
         </Grid>
       </Border>

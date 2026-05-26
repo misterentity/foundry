@@ -54,20 +54,31 @@
     <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="14,9"/>
     <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="bd" Background="{TemplateBinding Background}"
-                  BorderBrush="{TemplateBinding BorderBrush}"
-                  BorderThickness="{TemplateBinding BorderThickness}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                              Margin="{TemplateBinding Padding}"
-                              TextElement.Foreground="{TemplateBinding Foreground}"/>
-          </Border>
+          <!-- outer ring renders only when keyboard-focused; sharp 1px accent line offset 2px from the body -->
+          <Grid>
+            <Border x:Name="ring" Margin="-2" BorderBrush="{DynamicResource Brush.Accent}" BorderThickness="1" Opacity="0"/>
+            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}"
+                                TextElement.Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+          </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
               <Setter TargetName="bd" Property="Background" Value="{StaticResource Brush.Surface2}"/>
               <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Brush.InkFaint}"/>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="ring" Property="Opacity" Value="1"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="bd" Property="Opacity" Value="0.4"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -80,20 +91,30 @@
     <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
     <Setter Property="Foreground" Value="{StaticResource Brush.OnAccent}"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
+    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Button">
-          <Border x:Name="bd" Background="{TemplateBinding Background}"
-                  BorderBrush="{TemplateBinding BorderBrush}"
-                  BorderThickness="{TemplateBinding BorderThickness}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                              Margin="{TemplateBinding Padding}"
-                              TextElement.Foreground="{TemplateBinding Foreground}"/>
-          </Border>
+          <Grid>
+            <Border x:Name="ring" Margin="-2" BorderBrush="{DynamicResource Brush.Accent}" BorderThickness="1" Opacity="0"/>
+            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}"
+                                TextElement.Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+          </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
               <Setter TargetName="bd" Property="Background" Value="#FFFF7340"/>
               <Setter TargetName="bd" Property="BorderBrush" Value="#FFFF7340"/>
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="ring" Property="Opacity" Value="1"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="bd" Property="Opacity" Value="0.4"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -105,6 +126,39 @@
     <Setter Property="Background" Value="Transparent"/>
     <Setter Property="BorderBrush" Value="{StaticResource Brush.Hairline2}"/>
     <Setter Property="Foreground" Value="{StaticResource Brush.InkSoft}"/>
+  </Style>
+
+  <!-- ===================== PULSE DOT ===================== -->
+  <!-- 6×6 accent square that breathes opacity 1 → 0.35 → 1 over 1.2s, looping. Use for any
+       "the app is doing something live" indicator. -->
+  <Style x:Key="PulseDot" TargetType="Rectangle">
+    <Setter Property="Width" Value="6"/>
+    <Setter Property="Height" Value="6"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="Fill" Value="{DynamicResource Brush.Accent}"/>
+    <Style.Triggers>
+      <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+        <BeginStoryboard>
+          <Storyboard RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.35" Duration="0:0:0.6" AutoReverse="True"/>
+          </Storyboard>
+        </BeginStoryboard>
+      </EventTrigger>
+    </Style.Triggers>
+  </Style>
+
+  <!-- ===================== PLACEHOLDER OVERLAY ===================== -->
+  <!-- A TextBlock styled to layer on top of a TextBox/Grid sibling. Bind its Visibility to
+       the TextBox's Text emptiness via NullVis/invert and set IsHitTestVisible=False so the
+       click passes through. Padding matches FieldInput. -->
+  <Style x:Key="PlaceholderOverlay" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource Font.Mono}"/>
+    <Setter Property="FontSize" Value="12.5"/>
+    <Setter Property="Foreground" Value="{StaticResource Brush.InkFaint}"/>
+    <Setter Property="Margin" Value="15,13,15,0"/>
+    <Setter Property="VerticalAlignment" Value="Top"/>
+    <Setter Property="IsHitTestVisible" Value="False"/>
+    <Setter Property="TextWrapping" Value="Wrap"/>
   </Style>
 
   <!-- ===================== TAG ===================== -->

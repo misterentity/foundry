@@ -59,8 +59,13 @@
             </Grid>
           </Border>
 
+          <!-- empty state -->
+          <TextBlock Grid.Row="1" Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.InkFaint}"
+                     Margin="14,18" Text="No parts yet — generate or revise the design to populate the BOM."
+                     Visibility="{Binding HasItems, ElementName=BomRows, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
+
           <!-- rows -->
-          <ItemsControl Grid.Row="1" ItemsSource="{Binding Rows}">
+          <ItemsControl x:Name="BomRows" Grid.Row="1" ItemsSource="{Binding Rows}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
                 <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1">

@@ -167,7 +167,7 @@ public sealed partial class MainViewModel : ObservableObject
         var reviser = new ProjectGenerator(_ai, cfg.ChatModelId);   // chat/edits + fixes use the fast model
         var rebuilder = new ProjectGenerator(_ai, cfg.ModelId);     // full rebuild uses the main model
         var shell = new ShellViewModel(Project, _pipeline, reviser, rebuilder,
-            onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings,
+            onBack: ShowProjects, onTabChanged: UpdateWorkspaceCrumb, onSettings: ShowSettings, onLogs: ShowLogs,
             onProjectRevised: (p, label) =>
             {
                 Project = p;

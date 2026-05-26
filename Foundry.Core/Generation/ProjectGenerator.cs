@@ -290,7 +290,6 @@ Output ONLY the JSON object.
     {
         if (!_ai.HasKey) return (false, "", "Add your Anthropic API key in Settings.");
         var e = project.Enclosure;
-        string Dim(int i) => e.Inner is { Length: > 0 } a && i < a.Length ? a[i].ToString("0.##") : "60";
         var cutouts = string.Join("\n", e.Cutouts.Select(c =>
             $"  - face {c.Face} · {c.Shape}" + (c.Shape == "circle"
                 ? $" d={c.D:0.##}"

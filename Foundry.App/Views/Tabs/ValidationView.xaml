@@ -75,8 +75,18 @@
         </StackPanel>
       </Border>
 
+      <!-- empty state when there are zero findings (i.e. clean design) -->
+      <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Background="{StaticResource Brush.FindPassBg}" Padding="20,16" Margin="0,0,0,28"
+              Visibility="{Binding HasItems, ElementName=FindingsList, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+        <StackPanel>
+          <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.Ok}" Text="✓ NO FINDINGS"/>
+          <TextBlock Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.InkSoft}" Margin="0,4,0,0"
+                     Text="Every rule passed — power budget, voltage levels, pin conflicts, I²C addresses. Re-run after design edits to re-validate."/>
+        </StackPanel>
+      </Border>
+
       <!-- FINDINGS -->
-      <ItemsControl ItemsSource="{Binding Findings}" Margin="0,0,0,28">
+      <ItemsControl x:Name="FindingsList" ItemsSource="{Binding Findings}" Margin="0,0,0,28">
         <ItemsControl.ItemTemplate>
           <DataTemplate>
             <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1,1,1,0" Background="{StaticResource Brush.Surface0}">

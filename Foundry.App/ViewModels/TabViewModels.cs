@@ -536,6 +536,9 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             StlBytes = r.Bytes;
             IsLoading = false; ShowOffline = false; MeshReady = true;
             ScadStatus = $"Rendered with OpenSCAD · {r.Bytes.Length:N0} bytes";
+            // Mirror the active render in the on-model status badge so it no longer reads the stale
+            // schema-build value once Advanced takes over. Schema rebuilds (LoadMeshAsync) overwrite this.
+            SidecarStatus = $"openscad · {(r.Format.Length == 0 ? "stl" : r.Format)} · {r.Bytes.Length:N0} bytes · {client.BaseUrl}";
         }
         catch (OperationCanceledException) { ScadStatus = "Render cancelled."; }
         catch (Exception ex) { ScadStatus = $"Render failed: {ex.Message}"; }

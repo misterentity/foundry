@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 
@@ -146,6 +147,20 @@ public sealed class ActiveTabInkConverter : IValueConverter
             ? Brushes.Res("Brush.Ink")
             : Brushes.Res("Brush.InkMute");
 
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>bool → GridLength (true=value or Auto, false=0). Param is the visible length, default 360.</summary>
+public sealed class BoolToGridLengthConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c)
+    {
+        var on = value is bool b && b;
+        if (!on) return new GridLength(0);
+        if (p is string s && double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var px))
+            return new GridLength(px);
+        return new GridLength(360);
+    }
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
 }
 
