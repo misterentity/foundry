@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Foundry.App.Controls">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="1280" HorizontalAlignment="Left" Margin="32,28,32,60">
+    <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Margin="32,28,32,60">
 
       <!-- PAGE HEAD -->
       <Grid Margin="0,0,0,28">
@@ -20,7 +20,7 @@
               </MultiBinding>
             </TextBlock.Text>
           </TextBlock>
-          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68"
+          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="44" LineHeight="52"
                      Text="{Binding Project.Title}"/>
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13"
                      TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0" HorizontalAlignment="Left"

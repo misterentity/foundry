@@ -3,14 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Foundry.App.Controls">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="1280" HorizontalAlignment="Left" Margin="32,28,32,60">
+    <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Margin="32,28,32,60">
 
       <!-- PAGE HEAD -->
       <Grid Margin="0,0,0,28">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel>
           <TextBlock Style="{StaticResource Kicker}" Text="{Binding ChecksLabel}"/>
-          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
+          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="44" LineHeight="52">
             <Run Text="Sanity "/><Run Text="check." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
@@ -47,7 +47,7 @@
         <Grid>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
           <Border Grid.Column="0" Background="{StaticResource Brush.FindWarnBg}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0" Padding="22">
-            <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Status"/><TextBlock Style="{StaticResource Serif}" FontSize="42" Foreground="{StaticResource Brush.Warn}" Margin="0,6,0,0" Text="{Binding OverallStatus}"/></StackPanel>
+            <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Status"/><TextBlock Style="{StaticResource Serif}" FontSize="28" Foreground="{StaticResource Brush.Warn}" Margin="0,12,0,0" Text="{Binding OverallStatus}"/></StackPanel>
           </Border>
           <Border Grid.Column="1" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,0" Padding="22">
             <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Failures"/><TextBlock Style="{StaticResource Serif}" FontSize="42" Foreground="{StaticResource Brush.Fail}" Margin="0,6,0,0" Text="{Binding FailCount}"/></StackPanel>

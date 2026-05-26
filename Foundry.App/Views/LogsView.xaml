@@ -38,8 +38,11 @@
             </StackPanel>
           </Grid>
           <Grid Margin="0,10,0,0">
-            <TextBox Style="{StaticResource FieldInput}" Background="{StaticResource Brush.Surface1}" Padding="8,5"
-                     Text="{Binding Search, UpdateSourceTrigger=PropertyChanged, Delay=200}" Tag="Filter by message, category, or detail…"/>
+            <TextBox x:Name="SearchBox" Style="{StaticResource FieldInput}" Background="{StaticResource Brush.Surface1}" Padding="8,5"
+                     Text="{Binding Search, UpdateSourceTrigger=PropertyChanged, Delay=200}"/>
+            <TextBlock Style="{StaticResource PlaceholderOverlay}" Margin="9,7,9,0" FontSize="12"
+                       Text="Filter by message, category, or detail…"
+                       Visibility="{Binding Text, ElementName=SearchBox, Converter={StaticResource NullVis}, ConverterParameter=invert}"/>
           </Grid>
           <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="10" Foreground="{StaticResource Brush.InkMute}" Margin="0,8,0,0" Text="{Binding Status}"/>
         </StackPanel>

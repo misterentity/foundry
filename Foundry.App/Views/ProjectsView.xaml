@@ -18,20 +18,18 @@
       <StackPanel Margin="44,40,44,0">
         <TextBlock Style="{StaticResource Kicker}" Text="Start"/>
         <Border Margin="0,14,0,0" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1,1,0,0">
-          <!-- New project -->
-          <Border Background="{StaticResource Brush.AccentWash}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="36,32" Cursor="Hand" MinHeight="200">
+          <!-- New project (title → description → action, top-aligned single column) -->
+          <Border Background="{StaticResource Brush.AccentWash}" BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,1,1" Padding="28,26" Cursor="Hand">
             <Border.InputBindings><MouseBinding MouseAction="LeftClick" Command="{Binding NewCommand}"/></Border.InputBindings>
-            <DockPanel>
-              <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,20,0,0">
+            <StackPanel HorizontalAlignment="Left">
+              <TextBlock Style="{StaticResource Serif}" FontSize="40" LineHeight="46" TextWrapping="Wrap" Text="Describe a device."/>
+              <TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" Margin="0,12,0,0" MaxWidth="640" HorizontalAlignment="Left"
+                         Text="One prompt → architecture, BOM, wiring, firmware, a printable enclosure, and validation. Requires your Anthropic key (add it in Settings)."/>
+              <StackPanel Orientation="Horizontal" Margin="0,16,0,0" HorizontalAlignment="Left">
                 <c:IconControl Glyph="plus" IconSize="12" Stroke="{DynamicResource Brush.Accent}" VerticalAlignment="Center"/>
                 <TextBlock Style="{StaticResource KickerAccent}" Margin="8,0,0,0" Text="NEW PROJECT"/>
               </StackPanel>
-              <StackPanel>
-                <TextBlock Style="{StaticResource Serif}" FontSize="44" LineHeight="50" TextWrapping="Wrap" Text="Describe a device."/>
-                <TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" Margin="0,14,0,0" MaxWidth="560"
-                           Text="One prompt → architecture, BOM, wiring, firmware, a printable enclosure, and validation. Requires your Anthropic key (add it in Settings)."/>
-              </StackPanel>
-            </DockPanel>
+            </StackPanel>
           </Border>
         </Border>
       </StackPanel>

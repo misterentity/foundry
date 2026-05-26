@@ -19,7 +19,7 @@
       </Border>
 
       <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="820" HorizontalAlignment="Left" Margin="32,28,32,60">
+        <StackPanel MaxWidth="780" HorizontalAlignment="Center" Margin="32,28,32,60">
           <TextBlock Style="{StaticResource Kicker}" Text="CONFIGURATION · §8.9"/>
           <TextBlock Style="{StaticResource PageH1}" FontSize="56" LineHeight="64" Margin="0,8,0,0">
             <Run Text="Set "/><Run Text="up." Foreground="{DynamicResource Brush.Accent}"/>
@@ -73,27 +73,22 @@
                 </StackPanel>
               </Grid>
 
-              <Grid Margin="0,18,0,0">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                  <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Margin="0,0,0,8" Text="CHAT / EDIT MODEL"/>
-                  <ComboBox Style="{StaticResource Combo}" ItemsSource="{Binding Models}"
-                            SelectedValue="{Binding ChatModelId, Mode=TwoWay}" SelectedValuePath="Id">
-                    <ComboBox.ItemTemplate>
-                      <DataTemplate>
-                        <StackPanel>
-                          <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="12" Foreground="{StaticResource Brush.Ink}" Text="{Binding DisplayName}"/>
-                          <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="10" Foreground="{StaticResource Brush.InkMute}" Text="{Binding Id}"/>
-                        </StackPanel>
-                      </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                  </ComboBox>
-                </StackPanel>
-                <StackPanel Grid.Column="1" VerticalAlignment="Bottom">
-                  <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap"
-                             Text="Used for chat iteration &amp; validation fixes — pick a faster model (Sonnet/Haiku) for snappier edits."/>
-                </StackPanel>
-              </Grid>
+              <StackPanel Margin="0,18,0,0">
+                <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Margin="0,0,0,8" Text="CHAT / EDIT MODEL"/>
+                <ComboBox Style="{StaticResource Combo}" ItemsSource="{Binding Models}"
+                          SelectedValue="{Binding ChatModelId, Mode=TwoWay}" SelectedValuePath="Id">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel>
+                        <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="12" Foreground="{StaticResource Brush.Ink}" Text="{Binding DisplayName}"/>
+                        <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="10" Foreground="{StaticResource Brush.InkMute}" Text="{Binding Id}"/>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="Used for chat iteration &amp; validation fixes — pick a faster model (Sonnet/Haiku) for snappier edits."/>
+              </StackPanel>
             </StackPanel>
           </Border>
 

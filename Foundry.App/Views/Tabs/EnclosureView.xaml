@@ -5,14 +5,14 @@
              xmlns:r="clr-namespace:Foundry.App.Rendering"
              xmlns:h="clr-namespace:HelixToolkit.Wpf;assembly=HelixToolkit.Wpf">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="1280" HorizontalAlignment="Left" Margin="32,28,32,60">
+    <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Margin="32,28,32,60">
 
       <!-- PAGE HEAD -->
       <Grid Margin="0,0,0,28">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel>
           <TextBlock Style="{StaticResource Kicker}" Text="PARAMETRIC CAD · trimesh + manifold3d · base + lid"/>
-          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="60" LineHeight="68">
+          <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="44" LineHeight="52">
             <Run Text="What you'll "/><Run Text="print." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
