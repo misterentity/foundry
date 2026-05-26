@@ -105,6 +105,8 @@ public sealed class Enclosure
     public string Mount { get; set; } = "none";
     public int MassGrams { get; set; }
     public string PrintTime { get; set; } = "";
+    /// <summary>Optional AI-generated parametric OpenSCAD (v2 Phase B "Advanced" mode); empty for schema-only.</summary>
+    public string Scad { get; set; } = "";
 }
 
 public sealed class Vent

@@ -285,6 +285,91 @@ Output ONLY the JSON object.
         }
     }
 
+    /// <summary>Ask the AI to write parametric OpenSCAD for this enclosure (PRD v2 Phase B).</summary>
+    public async Task<(bool Ok, string Scad, string Message)> GenerateEnclosureScadAsync(Project.Project project, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey) return (false, "", "Add your Anthropic API key in Settings.");
+        var e = project.Enclosure;
+        string Dim(int i) => e.Inner is { Length: > 0 } a && i < a.Length ? a[i].ToString("0.##") : "60";
+        var cutouts = string.Join("\n", e.Cutouts.Select(c =>
+            $"  - face {c.Face} · {c.Shape}" + (c.Shape == "circle"
+                ? $" d={c.D:0.##}"
+                : $" {(c.Size?.Length > 0 ? c.Size[0].ToString("0.##") : "10")}×{(c.Size?.Length > 1 ? c.Size[1].ToString("0.##") : "6")}")
+              + $" pos=[{string.Join(",", c.Pos.Select(p => p.ToString("0.##")))}]  label=\"{c.Label}\""));
+        var vents = e.Vents.Count == 0 ? "(none)" : string.Join(", ", e.Vents.Select(v => $"{v.Count}×{v.Face}"));
+        var parts = string.Join("\n", project.Components.Take(8).Select(c => $"  - {c.Alias} ({c.Name})"));
+
+        var user =
+            $"Design a 3D-printable enclosure for this device. Output ONLY parametric OpenSCAD code (no prose, no fences).\n\n" +
+            $"Inner cavity: [{Dim(0)}, {Dim(1)}, {Dim(2)}] mm   wall: {e.Wall:0.##} mm   lid: {e.Lid}   mount: {e.Mount}   standoffs: {e.Standoffs}\n" +
+            $"Vents: {vents}\nCutouts:\n{(string.IsNullOrEmpty(cutouts) ? "  (none)" : cutouts)}\n\nComponents:\n{parts}\n\n" +
+            "Cutout face axes: front/back → cut through Y; left/right → cut through X; top/bottom → cut through Z. " +
+            "pos is [x,y] mm offset from the face's centre, x=horizontal y=vertical on that face.";
+
+        try
+        {
+            var raw = await _ai.CompleteAsync(EnclosureScadSystemPrompt, user, _model, ct);
+            var scad = StripFences(raw).Trim();
+            if (scad.Length < 50 || !LooksLikeScad(scad))
+                return (false, "", "The model didn't return OpenSCAD code. Try again.");
+            Diagnostics.AppLog.Info("scad", $"enclosure SCAD generated · {scad.Length} chars");
+            return (true, scad, "Generated.");
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Error("scad", $"enclosure SCAD failed: {ex.Message}");
+            return (false, "", $"Failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Ask the AI to repair OpenSCAD code given the compiler stderr (PRD v2 Phase D — SCAD fix loop).</summary>
+    public async Task<(bool Ok, string Scad, string Message)> FixEnclosureScadAsync(Project.Project project, string currentScad, string compilerError, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey || string.IsNullOrWhiteSpace(compilerError)) return (false, currentScad, "no error to fix");
+        var user =
+            $"This OpenSCAD script fails to render in OpenSCAD 2021.01. Fix it and return ONLY the corrected " +
+            $"OpenSCAD code (no prose, no fences). Keep the parametric structure.\n\n" +
+            $"COMPILER ERROR:\n{compilerError}\n\nCURRENT SCAD:\n{currentScad}";
+        try
+        {
+            var raw = await _ai.CompleteAsync(EnclosureScadSystemPrompt, user, _model, ct);
+            var scad = StripFences(raw).Trim();
+            if (scad.Length < 50 || !LooksLikeScad(scad)) return (false, currentScad, "fix didn't return SCAD");
+            Diagnostics.AppLog.Info("scad", $"SCAD fix applied · {scad.Length} chars");
+            return (true, scad, "Fixed.");
+        }
+        catch (Exception ex) { return (false, currentScad, $"Fix failed: {ex.Message}"); }
+    }
+
+    private const string EnclosureScadSystemPrompt = """
+You are a senior parametric CAD engineer. Write COMPLETE, valid OpenSCAD for a 3D-printable enclosure
+that satisfies the request. Constraints:
+- Start with a clearly-named block of top-level parameters (wall_thickness, inner_l, inner_w, inner_h,
+  lid_thickness, screw_diameter, etc.) so the user can tweak them.
+- Build the geometry from modules: outer_box, lid, cutouts, standoffs, mounts. Use difference()/union()/
+  hull()/translate()/rotate() cleanly; favour low $fn (e.g. 32) for performance.
+- Place every requested cutout on its named face at the given (x,y) offset; put vent slots as small
+  rectangular cutouts on the requested face.
+- Include corner standoffs with M2/M3 pilot holes when the schema asks for them.
+- If lid == "screw" add lid screw bosses; if "snap" add a locating lip on the lid that nests into the base.
+- If mount == "wall-tabs" add two flanged wall-mount tabs with screw holes.
+- Render the base and the lid side-by-side at z=0 (translate the lid +X past the base) so the .stl
+  shows both parts ready to slice.
+- OpenSCAD 2021.01 features only — no `text()` requiring fonts not installed, no external libraries.
+- Output ONLY OpenSCAD code (no markdown fences, no prose).
+""";
+
+    private static bool LooksLikeScad(string s) =>
+        s.Contains("module ") || s.Contains("difference(") || s.Contains("union(") || s.Contains("cube(") || s.Contains("cylinder(");
+
+    private static string StripFences(string s)
+    {
+        s = s.Trim();
+        if (s.StartsWith("```")) { var nl = s.IndexOf('\n'); if (nl > 0) s = s[(nl + 1)..]; }
+        if (s.EndsWith("```")) s = s[..^3];
+        return s.Trim();
+    }
+
     /// <summary>Suggest pin-compatible substitute parts for a BOM line, ranked cheaper/in-stock (PRD v2 G10).</summary>
     public async Task<List<Sourcing.Alternate>> SuggestAlternatesAsync(string partName, string mpn, CancellationToken ct = default)
     {

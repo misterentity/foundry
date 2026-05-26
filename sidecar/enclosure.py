@@ -323,6 +323,30 @@ def _fallback_build(inner, wall):
     }
 
 
+def build_scad(scad: str, fmt: str, exe: str) -> Tuple[bytes, dict]:
+    """Render an AI-written OpenSCAD script to STL/3MF via the OpenSCAD CLI (PRD v2 Phase A)."""
+    import os, subprocess, tempfile, shutil as _sh
+    fmt = (fmt or "stl").lower()
+    if fmt not in ("stl", "3mf"):
+        fmt = "stl"
+    work = tempfile.mkdtemp(prefix="foundry_scad_")
+    try:
+        scad_path = os.path.join(work, "in.scad")
+        out_path = os.path.join(work, f"out.{fmt}")
+        with open(scad_path, "w", encoding="utf-8") as f:
+            f.write(scad or "")
+        proc = subprocess.run([exe, "-o", out_path, scad_path],
+                              capture_output=True, timeout=180)
+        if proc.returncode != 0 or not os.path.isfile(out_path):
+            msg = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="replace")[:4000]
+            raise RuntimeError(msg or "openscad failed")
+        with open(out_path, "rb") as f:
+            data = f.read()
+        return data, {"kernel": "openscad", "format": fmt, "bytes": len(data)}
+    finally:
+        _sh.rmtree(work, ignore_errors=True)
+
+
 def build_stl(schema: dict) -> Tuple[bytes, dict]:
     """schema -> (stl_bytes, stats). See PRD §8.5 for the schema shape."""
     inner = [float(x) for x in schema.get("inner", [62, 48, 26])]

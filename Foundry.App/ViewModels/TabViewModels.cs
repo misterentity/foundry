@@ -381,8 +381,30 @@ public sealed partial class WiringViewModel : TabViewModelBase
 }
 
 // ---------------- Enclosure ----------------
+/// <summary>One row in the Enclosure tab's parametric-slider panel (PRD v2 Phase D).</summary>
+public sealed partial class ScadParamRow : ObservableObject
+{
+    private readonly Action<ScadParamRow> _onChanged;
+    public ScadParamRow(Foundry.Core.Cad.ScadParam p, Action<ScadParamRow> onChanged)
+    {
+        Name = p.Name; DisplayName = p.DisplayName;
+        Min = p.Min; Max = p.Max; Step = p.Step;
+        _value = p.Value;
+        _onChanged = onChanged;
+    }
+    public string Name { get; }
+    public string DisplayName { get; }
+    public double Min { get; }
+    public double Max { get; }
+    public double Step { get; }
+    [ObservableProperty] private double _value;
+    public string ValueText => Step >= 1 ? Value.ToString("0") : Value.ToString("0.##");
+    partial void OnValueChanged(double value) { OnPropertyChanged(nameof(ValueText)); _onChanged(this); }
+}
+
 public sealed partial class EnclosureViewModel : TabViewModelBase
 {
+    private readonly Foundry.Core.Generation.ProjectGenerator? _ai;
     [ObservableProperty] private string _view = "ISO";
     [ObservableProperty] private bool _meshReady;
     [ObservableProperty] private bool _isLoading = true;
@@ -391,8 +413,23 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
     [ObservableProperty] private string _sidecarStatus = "connecting to CAD sidecar…";
     [ObservableProperty] private byte[]? _stlBytes;
 
-    public EnclosureViewModel(Project project) : base(project)
+    // v2 Phase B/C/D: AI-written OpenSCAD ("Advanced" mode) + parametric sliders
+    [ObservableProperty] private bool _advanced;
+    [ObservableProperty] private string _scad = "";
+    [ObservableProperty] private bool _scadBusy;
+    [ObservableProperty] private string _scadStatus = "";
+    [ObservableProperty] private string _scadError = "";
+    public bool OpenScadInstalled => Foundry.Core.Cad.OpenScadInstaller.IsInstalled;
+    public ObservableCollection<ScadParamRow> Parameters { get; } = new();
+    public bool HasScadError => !string.IsNullOrEmpty(ScadError);
+    partial void OnScadErrorChanged(string value) => OnPropertyChanged(nameof(HasScadError));
+
+    private System.Windows.Threading.DispatcherTimer? _scadDebounce;
+
+    public EnclosureViewModel(Project project, Foundry.Core.Generation.ProjectGenerator? ai = null) : base(project)
     {
+        _ai = ai;
+        _scad = project.Enclosure.Scad ?? "";
         _ = LoadMeshAsync();
     }
 
@@ -438,6 +475,138 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             ShowOffline = true;
             SidecarStatus = $"CAD sidecar error: {ex.Message}";
         }
+    }
+
+    // ----- v2 Phase B/C: Advanced OpenSCAD mode -----
+    [RelayCommand]
+    private async Task ToggleAdvanced()
+    {
+        Advanced = !Advanced;
+        if (!Advanced) { await LoadMeshAsync(); return; }   // back to schema render
+        if (!OpenScadInstalled) { ScadStatus = "OpenSCAD isn't installed — click INSTALL OPENSCAD."; return; }
+        if (string.IsNullOrWhiteSpace(Scad)) await GenerateScad();
+        else await RenderScad();
+    }
+
+    /// <summary>Ask the AI to write parametric OpenSCAD for this enclosure (PRD v2 Phase B).</summary>
+    [RelayCommand]
+    private async Task GenerateScad()
+    {
+        if (ScadBusy || _ai is null) return;
+        ScadBusy = true;
+        ScadStatus = "Writing OpenSCAD…";
+        try
+        {
+            var (ok, scad, msg) = await _ai.GenerateEnclosureScadAsync(Project);
+            if (!ok) { ScadStatus = msg; return; }
+            Scad = scad;
+            Project.Enclosure.Scad = scad;
+            RebuildParameters();
+            ScadStatus = $"Generated · {scad.Length} chars · {Parameters.Count} parameters · rendering…";
+            await RenderScad();
+        }
+        catch (Exception ex) { ScadStatus = $"Failed: {ex.Message}"; }
+        finally { ScadBusy = false; }
+    }
+
+    /// <summary>Render the current SCAD via the sidecar's OpenSCAD path; updates the 3D preview.</summary>
+    [RelayCommand]
+    private async Task RenderScad()
+    {
+        if (string.IsNullOrWhiteSpace(Scad)) { ScadStatus = "No SCAD yet — click REGENERATE."; return; }
+        ScadBusy = true;
+        try
+        {
+            var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
+            if (client is null) { ScadStatus = "CAD sidecar offline."; return; }
+            var r = await client.RenderScadAsync(Scad);
+            if (!r.Ok)
+            {
+                ScadStatus = "OpenSCAD couldn't build the script.";
+                ScadError = ExtractScadError(r.Error);
+                return;
+            }
+            ScadError = "";
+            StlBytes = r.Bytes;
+            IsLoading = false; ShowOffline = false; MeshReady = true;
+            ScadStatus = $"Rendered with OpenSCAD · {r.Bytes.Length:N0} bytes";
+        }
+        catch (Exception ex) { ScadStatus = $"Render failed: {ex.Message}"; }
+        finally { ScadBusy = false; }
+    }
+
+    /// <summary>Have the AI fix an OpenSCAD compile error (mirrors firmware FIX BUILD).</summary>
+    [RelayCommand]
+    private async Task FixScad()
+    {
+        if (_ai is null || ScadBusy || string.IsNullOrWhiteSpace(ScadError)) return;
+        ScadBusy = true;
+        ScadStatus = "Asking the AI to fix the SCAD…";
+        try
+        {
+            var (ok, scad, _) = await _ai.FixEnclosureScadAsync(Project, Scad, ScadError);
+            if (!ok) { ScadStatus = "Couldn't generate a SCAD fix."; return; }
+            Scad = scad; Project.Enclosure.Scad = scad;
+            RebuildParameters();
+            ScadStatus = "Reworked the SCAD — rendering…";
+            await RenderScad();
+        }
+        catch (Exception ex) { ScadStatus = $"Fix failed: {ex.Message}"; }
+        finally { ScadBusy = false; }
+    }
+
+    private void RebuildParameters()
+    {
+        Parameters.Clear();
+        foreach (var p in Foundry.Core.Cad.ScadParameters.Parse(Scad))
+            Parameters.Add(new ScadParamRow(p, OnParamChanged));
+    }
+
+    private void OnParamChanged(ScadParamRow row)
+    {
+        Scad = Foundry.Core.Cad.ScadParameters.Patch(Scad, row.Name, row.Value);
+        Project.Enclosure.Scad = Scad;
+        // debounce 600ms so dragging a slider doesn't fire one OpenSCAD call per pixel
+        _scadDebounce ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _scadDebounce.Stop();
+        _scadDebounce.Tick -= ScadDebounceTick;
+        _scadDebounce.Tick += ScadDebounceTick;
+        _scadDebounce.Start();
+    }
+    private async void ScadDebounceTick(object? sender, EventArgs e)
+    {
+        _scadDebounce?.Stop();
+        await RenderScad();
+    }
+
+    private static string ExtractScadError(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            if (doc.RootElement.TryGetProperty("stderr", out var s)) return s.GetString() ?? raw;
+            if (doc.RootElement.TryGetProperty("detail", out var d)) return d.GetString() ?? raw;
+        }
+        catch { }
+        return raw;
+    }
+
+    /// <summary>Download a portable OpenSCAD to the app tools folder (one-time, ~22 MB).</summary>
+    [RelayCommand]
+    private async Task InstallOpenScad()
+    {
+        if (ScadBusy) return;
+        ScadBusy = true;
+        ScadStatus = "Downloading OpenSCAD (~22 MB)…";
+        try
+        {
+            await Foundry.Core.Cad.OpenScadInstaller.DownloadAsync();
+            OnPropertyChanged(nameof(OpenScadInstalled));
+            ScadStatus = "OpenSCAD installed. Click GENERATE to write the parametric SCAD.";
+        }
+        catch (Exception ex) { ScadStatus = $"Install failed: {ex.Message}"; }
+        finally { ScadBusy = false; }
     }
 
     public string ExportLabel => $"EXPORT {((ConfigStore.Load().EnclosureFormat ?? "STL").ToUpperInvariant() == "3MF" ? "3MF" : "STL")}";

@@ -19,11 +19,75 @@
                      Text="An enclosure sized from your component footprints. Cutouts and standoffs are derived directly from the components — ports always line up. Export as STL or 3MF for slicing (set the format in Settings)."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ToggleAdvancedCommand}" Content="ADVANCED"
+                  ToolTip="Switch to AI-written parametric OpenSCAD"
+                  Visibility="{Binding Advanced, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ToggleAdvancedCommand}" Content="◀ SCHEMA"
+                  ToolTip="Back to the fast deterministic schema build"
+                  Visibility="{Binding Advanced, Converter={StaticResource BoolVis}}"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportStlCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="{Binding ExportLabel}"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>
+
+      <!-- ADVANCED (OpenSCAD) STATUS STRIP -->
+      <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="16,12" Margin="0,0,0,18"
+              Visibility="{Binding Advanced, Converter={StaticResource BoolVis}}">
+        <StackPanel>
+          <Grid>
+            <StackPanel Orientation="Horizontal">
+              <Rectangle Width="6" Height="6" Fill="{DynamicResource Brush.Accent}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.Ink}" Text="ADVANCED · AI-written parametric OpenSCAD"/>
+            </StackPanel>
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding InstallOpenScadCommand}" Content="INSTALL OPENSCAD"
+                      Visibility="{Binding OpenScadInstalled, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding RenderScadCommand}" Content="BUILD"
+                      Visibility="{Binding OpenScadInstalled, Converter={StaticResource BoolVis}}"/>
+              <Button Style="{StaticResource BtnPrimary}" Padding="10,5" FontSize="10" Command="{Binding GenerateScadCommand}" Content="REGENERATE"
+                      Visibility="{Binding OpenScadInstalled, Converter={StaticResource BoolVis}}"/>
+            </StackPanel>
+          </Grid>
+          <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" Margin="0,8,0,0" TextWrapping="Wrap" Text="{Binding ScadStatus}"/>
+          <ProgressBar IsIndeterminate="True" Height="3" Margin="0,8,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
+                       Visibility="{Binding ScadBusy, Converter={StaticResource BoolVis}}"/>
+          <!-- parametric sliders (Phase D) -->
+          <ItemsControl ItemsSource="{Binding Parameters}" Margin="0,8,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid Margin="0,3">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="180"/><ColumnDefinition Width="*"/><ColumnDefinition Width="60"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" Style="{StaticResource Mono}" FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource Brush.InkSoft}" Text="{Binding DisplayName}"/>
+                  <Slider Grid.Column="1" Minimum="{Binding Min}" Maximum="{Binding Max}" TickFrequency="{Binding Step}" IsSnapToTickEnabled="True"
+                          Value="{Binding Value, Mode=TwoWay}" VerticalAlignment="Center" Margin="6,0"/>
+                  <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{StaticResource Brush.Ink}" Text="{Binding ValueText}"/>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- SCAD error (compiler stderr) + AI fix (Phase D fix-loop) -->
+          <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Fail}" BorderThickness="1" Padding="10,8" Margin="0,10,0,0"
+                  Visibility="{Binding HasScadError, Converter={StaticResource BoolVis}}">
+            <StackPanel>
+              <Grid>
+                <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.Fail}" Text="OPENSCAD ERROR"/>
+                <Button HorizontalAlignment="Right" Style="{StaticResource BtnPrimary}" Padding="10,5" FontSize="10" Command="{Binding FixScadCommand}" Content="FIX WITH AI"/>
+              </Grid>
+              <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" Margin="0,6,0,0" MaxHeight="120" Text="{Binding ScadError}"/>
+            </StackPanel>
+          </Border>
+
+          <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="180" Margin="0,8,0,0"
+                        Visibility="{Binding Scad, Converter={StaticResource NullVis}}">
+            <TextBox IsReadOnly="True" FontFamily="{StaticResource Font.Mono}" FontSize="10.5" Background="{StaticResource Brush.Surface1}"
+                     BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="1" Padding="10,8" TextWrapping="NoWrap" Text="{Binding Scad}"/>
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
 
       <!-- GRID: preview + controls -->
       <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">

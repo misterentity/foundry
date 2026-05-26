@@ -10,6 +10,8 @@ mesh builder when it isn't installed.
 from __future__ import annotations
 
 import io
+import os
+import shutil
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -48,6 +50,52 @@ def build_enclosure(schema: EnclosureSchema) -> StreamingResponse:
         "X-Foundry-Triangles": str(stats["triangles"]),
         "X-Foundry-Bytes": str(stats["bytes"]),
         "X-Foundry-Outer": ",".join(str(x) for x in stats["outer_mm"]),
+        "Content-Disposition": f'attachment; filename="enclosure.{fmt}"',
+    }
+    return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)
+
+
+# ----------------------------------------------------------------------------
+# /enclosure/scad — AI-written OpenSCAD code → STL/3MF via OpenSCAD CLI (PRD v2 Phase A)
+# ----------------------------------------------------------------------------
+class ScadRequest(BaseModel):
+    scad: str
+    format: str = "stl"   # stl | 3mf
+
+
+def _openscad_exe() -> str | None:
+    p = os.environ.get("OPENSCAD")
+    if p and os.path.exists(p):
+        return p
+    p = shutil.which("openscad")
+    if p:
+        return p
+    base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Foundry", "tools", "openscad")
+    candidates = [os.path.join(base, "openscad.exe")]
+    if os.path.isdir(base):   # extracted zip puts the binary under openscad-XXXX/
+        for name in os.listdir(base):
+            candidates.append(os.path.join(base, name, "openscad.exe"))
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+@app.post("/enclosure/scad")
+def build_scad(req: ScadRequest):
+    exe = _openscad_exe()
+    if exe is None:
+        return JSONResponse({"detail": "openscad not installed"}, status_code=503)
+    try:
+        data, stats = enclosure.build_scad(req.scad, req.format, exe)
+    except RuntimeError as ex:
+        return JSONResponse({"detail": "openscad error", "stderr": str(ex)}, status_code=400)
+    fmt = stats["format"]
+    media = "model/3mf" if fmt == "3mf" else "model/stl"
+    headers = {
+        "X-Foundry-Kernel": "openscad",
+        "X-Foundry-Format": fmt,
+        "X-Foundry-Bytes": str(stats["bytes"]),
         "Content-Disposition": f'attachment; filename="enclosure.{fmt}"',
     }
     return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)
