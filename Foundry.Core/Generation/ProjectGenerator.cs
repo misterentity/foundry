@@ -69,6 +69,8 @@ Enclosure — design it for THIS device, not a generic box:
 - Add a cutout for EVERY external interface: USB/DC-power, each connector/header, buttons, status LEDs (small
   circle d≈3 as a light pipe), displays, sensor windows/probes, antenna. Put each on the face it naturally exits;
   pos is [x,y] mm offset from that face's centre (x horizontal, y vertical). faces: front|back|left|right|top|bottom.
+  Keep every cutout at least ~6 mm in from every edge of its face — never place an opening at or near a corner,
+  the wall is curved/weakened there and corner standoffs may live underneath.
 - "vents":[{"face","count"}] — add ventilation slots when the design makes heat (regulators, motor/LED drivers,
   >300 mA draw, or a sealed warm part); omit for cool/low-power designs.
 - "mount": "none" | "wall-tabs" (flanged screw tabs) | "flange" — pick for how it installs (a wall sensor → wall-tabs).
@@ -371,8 +373,8 @@ diagonal vent grilles — never a plain box. Write COMPLETE, valid OpenSCAD that
 Required parametric structure
 - Start with a clearly-named block of top-level parameters: `wall_thickness`, `inner_l`, `inner_w`,
   `inner_h`, `lid_thickness`, `screw_diameter`, plus styling knobs (`chamfer`, `bezel_inset`,
-  `accent_ridge_w`, `vent_angle`) so the user can dial the look in. Realistic defaults; integer
-  for counts.
+  `accent_ridge_w`, `vent_angle`, `corner_clear`) so the user can dial the look in. Default
+  `corner_clear = 6` (mm). Realistic defaults; integer for counts.
 - Build geometry from named modules: `outer_shell`, `lid`, `cutouts`, `standoffs`, `mounts`, plus a
   `style_features` module for the futurist details. Use difference/union/hull/minkowski/rotate/
   translate cleanly. Keep `$fn = 32` for speed (use 24 for very small fillets).
@@ -416,6 +418,20 @@ Cutout keepout — style features must yield to cutouts
 - Light-pipe slits are extra cutouts — they obey the same keepout rule (never inside another
   cutout's keepout).
 
+Corner clearance — NO openings at corners
+- Every cutout's bounding box must stay at least `corner_clear` mm (default 6 mm) inside every
+  edge of its face. That means for a face of width `fw` and height `fh`, the cutout centre's
+  allowed range is `x ∈ [−fw/2 + corner_clear + size_x/2,  fw/2 − corner_clear − size_x/2]`
+  and `y ∈ [−fh/2 + corner_clear + size_y/2,  fh/2 − corner_clear − size_y/2]` (for a circle of
+  diameter `d`, use `size_x = size_y = d`).
+- If a requested `pos` would put the cutout closer than `corner_clear` to any edge — and therefore
+  near the corner where two edges meet — clamp `pos` to the nearest allowed value along that axis.
+  Keep the cutout on its requested face; only the offset within the face may move.
+- If the cutout itself is larger than the available room (`size > face_dim − 2*corner_clear`),
+  centre it on the face and add a `// note: <label> too big for corner clearance — centred` comment.
+- This protects the chamfered vertical edge, the top bevel, corner standoffs/screw bosses, and the
+  stealth corner clip. No opening should ever break the silhouette of a corner.
+
 Techno-futurist styling — REQUIRED, applied subject to the keepout rule above
 - **Chamfered vertical edges** on the outer shell (`hull()` over offset round-rects, or a
   `minkowski` with a small chamfer cylinder). 2–3 mm radius reads "designed", not "printed-box".
@@ -435,7 +451,8 @@ Techno-futurist styling — REQUIRED, applied subject to the keepout rule above
 
 Functional rules (must still be met)
 - Place every requested cutout on its named face at the given (x,y) offset, using the face
-  axes above. Do not drop or relocate cutouts.
+  axes above. Do NOT drop a cutout. You MAY clamp its (x,y) inward by up to a few millimetres
+  to satisfy the corner-clearance rule above — that's preferred over breaking a corner.
 - Vent slots respect the schema's face + count, but render as the angled/grille style above.
 - Add corner standoffs with M2/M3 pilot holes when the schema asks for them; position them so
   they do not collide with any cutout's keepout.
