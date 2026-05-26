@@ -425,6 +425,8 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
     partial void OnScadErrorChanged(string value) => OnPropertyChanged(nameof(HasScadError));
 
     private System.Windows.Threading.DispatcherTimer? _scadDebounce;
+    private System.Threading.CancellationTokenSource? _scadCts;
+    [RelayCommand] private void CancelScad() => _scadCts?.Cancel();
 
     public EnclosureViewModel(Project project, Foundry.Core.Generation.ProjectGenerator? ai = null) : base(project)
     {
@@ -515,11 +517,15 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
     {
         if (string.IsNullOrWhiteSpace(Scad)) { ScadStatus = "No SCAD yet — click REGENERATE."; return; }
         ScadBusy = true;
+        _scadCts?.Cancel();
+        _scadCts = new System.Threading.CancellationTokenSource();
+        var ct = _scadCts.Token;
         try
         {
-            var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
+            var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync(ct);
             if (client is null) { ScadStatus = "CAD sidecar offline."; return; }
-            var r = await client.RenderScadAsync(Scad);
+            ScadStatus = "Rendering with OpenSCAD…";
+            var r = await client.RenderScadAsync(Scad, "stl", ct);
             if (!r.Ok)
             {
                 ScadStatus = "OpenSCAD couldn't build the script.";
@@ -531,6 +537,7 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             IsLoading = false; ShowOffline = false; MeshReady = true;
             ScadStatus = $"Rendered with OpenSCAD · {r.Bytes.Length:N0} bytes";
         }
+        catch (OperationCanceledException) { ScadStatus = "Render cancelled."; }
         catch (Exception ex) { ScadStatus = $"Render failed: {ex.Message}"; }
         finally { ScadBusy = false; }
     }

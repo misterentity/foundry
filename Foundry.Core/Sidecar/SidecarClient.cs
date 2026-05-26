@@ -15,7 +15,9 @@ public sealed class SidecarClient
     {
         BaseUrl = baseUrl.TrimEnd('/');
         _http = http ?? new HttpClient();
-        _http.Timeout = TimeSpan.FromSeconds(20);
+        // OpenSCAD CSG renders can legitimately take 30–90 s for parametric scripts; the sidecar's
+        // own openscad subprocess cap is 180 s, so match it. Trimesh schema builds finish in <5 s.
+        _http.Timeout = TimeSpan.FromSeconds(180);
     }
 
     public async Task<bool> HealthAsync(CancellationToken ct = default)

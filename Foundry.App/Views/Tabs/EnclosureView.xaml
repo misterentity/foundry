@@ -41,6 +41,8 @@
               <TextBlock Style="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource Brush.Ink}" Text="ADVANCED · AI-written parametric OpenSCAD"/>
             </StackPanel>
             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+              <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding CancelScadCommand}" Content="CANCEL"
+                      Visibility="{Binding ScadBusy, Converter={StaticResource BoolVis}}"/>
               <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding InstallOpenScadCommand}" Content="INSTALL OPENSCAD"
                       Visibility="{Binding OpenScadInstalled, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
               <Button Style="{StaticResource BtnGhost}" Padding="10,5" FontSize="10" Margin="0,0,6,0" Command="{Binding RenderScadCommand}" Content="BUILD"
