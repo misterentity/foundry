@@ -418,6 +418,32 @@ Cutout keepout — style features must yield to cutouts
 - Light-pipe slits are extra cutouts — they obey the same keepout rule (never inside another
   cutout's keepout).
 
+Style-feature face restrictions — STRICT (these are the common AI mistakes)
+- **Accent ridge — allowed faces: LID TOP (default, preferred), BACK (+Y wall), or BASE BOTTOM
+  underside. NEVER on the LEFT or RIGHT side faces.** Rationale: the side faces need a
+  `rotate([0,±90,0])` to lay a 2D-extruded ridge on, and after that rotation the 2D x-axis
+  becomes global Z — so a `ridge_len = 50 mm` ends up as a 50 mm-tall vertical PILLAR that
+  pokes out the top and bottom of a 30 mm-tall wall. Lid-top and back-face placements use only
+  flat translates (or a single `rotate([90,0,0])`) and are reliably geometrically safe.
+- **Stealth corner clip — must be a SUBTRACTIVE 45° cube/wedge** removed from one vertical corner
+  of the `outer_shell`, with the cut at least the full wall height (z = 0 to outer_h). It is NOT
+  a decorative etched line, NOT a thin `linear_extrude(0.6)` of a hull — it is `difference() {
+  outer_shell(); translate([±outer_l/2, ±outer_w/2, 0]) rotate([0,0,45]) cube([2*chamfer_clip,
+  2*chamfer_clip, outer_h + 2], center=true); }` with `chamfer_clip ≈ 6 mm`. Omit it entirely
+  rather than render an etched/scribed substitute.
+- **Light-pipe slits** stay subtractive and on the front bezel face only.
+
+Sanity-check — every style addition must fit inside its face
+- Before unioning any style feature, mentally compute its bounding box in WORLD coordinates AFTER
+  every rotate/translate, and verify `[x_min, x_max] × [y_min, y_max] × [z_min, z_max]` is fully
+  inside the face it claims to sit on (or fully inside the outer_shell envelope for protruding
+  features ≤ 1.5 mm proud).
+- A feature on a vertical side face has `z ∈ [0, outer_h]` — never below 0, never above `outer_h`.
+- A feature on the lid top has `z ∈ [lid_thickness, lid_thickness + accent_ridge_h]`.
+- A feature on the bottom has `z ∈ [-accent_ridge_h, 0]`.
+- If your math doesn't satisfy these bounds, your rotate is wrong — try a different face or
+  use only translate (no rotate) on the lid top.
+
 Corner clearance — NO openings at corners
 - Every cutout's bounding box must stay at least `corner_clear` mm (default 6 mm) inside every
   edge of its face. That means for a face of width `fw` and height `fh`, the cutout centre's
@@ -440,10 +466,13 @@ Techno-futurist styling — REQUIRED, applied subject to the keepout rule above
   (1–2 mm) with a slim raised border (the bezel) framing the cutouts. The recess must contain
   ALL of that face's cutouts plus their 2 mm margin.
 - **Slim accent ridge** (~1 mm proud, `accent_ridge_w` ≈ 3 mm wide), parallel to the long axis,
-  stopping short of corners. Prefer the lid top or a cutout-free side; segment around keepouts.
+  stopping short of corners. Place on the LID TOP, BACK face, or BASE BOTTOM only — NEVER on
+  the left or right vertical side faces (see Style-feature face restrictions below). Segment
+  around keepouts.
 - **Diagonal/angled vent grille**: rotate vent slots by `vent_angle` (default 25°) or use a
   triangular/hex slot pattern. Keep the rotated slot bounding box entirely inside the face.
-- **Stealth corner detail**: 45° angled cut on a corner — subject to the keepout rule above.
+- **Stealth corner detail**: SUBTRACTIVE 45° wedge cut from one vertical corner of the
+  outer_shell (full wall height) — NOT a decorative etch. See restrictions below.
 - **Light-pipe slits** for indicator LEDs near the front bezel (thin 1.0×4 mm cutouts) when an
   LED appears in the components and a clear spot exists.
 - Keep the design printable: no overhangs >45°, no bridges longer than the wall is thick, no
