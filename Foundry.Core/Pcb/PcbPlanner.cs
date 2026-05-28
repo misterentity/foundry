@@ -69,6 +69,112 @@ edge ∈ none|left|right|top|bottom. rotation ∈ 0|90|180|270 (optional).
         }
     }
 
+    private const string RevisePromptSuffix = """
+
+
+--- REVISION MODE (DRC fix loop) ---
+The placement you proposed produced a board that FAILED DRC. The deterministic placer/router still own
+every coordinate — you only adjust the PLACEMENT PLAN (groups/edge/near/regionOrder, NEVER coordinates).
+You are given the CURRENT plan and the violating component refs + their violation classes. Revise the
+plan to relieve them:
+- clearance / courtyards_overlap / hole_clearance around some refs → SPREAD those parts: move them into
+  separate groups or to the ends of the region order so they aren't packed tightly together.
+- copper_edge_clearance → pull the named refs away from the edge (drop their edge affinity unless they are
+  connectors/antennas that must stay at an edge).
+- unconnected / dangling → loosen a dense block: split a crowded group, or reorder regions so the
+  congested nets have more routing room.
+Keep everything the violations don't touch. Return ONLY the revised JSON in the SAME contract (groups /
+hints / regionOrder). No prose, no fences, no coordinates.
+""";
+
+    /// <summary>
+    /// Fenced AI plan revision for the v2.5 DRC fix loop: feed the violating refs + their classes and the
+    /// current <see cref="PlacementPlan"/> back to the model and ask for a revised plan (advice only — same
+    /// JSON contract, never coordinates). No key / any failure / unparseable reply / empty parse ⇒ the
+    /// <paramref name="currentPlan"/> is kept unchanged (degrade to deterministic-only). NEVER throws.
+    /// </summary>
+    public async Task<PlacementPlan> RevisePlanAsync(Project.Project project, PlacementPlan currentPlan,
+        IReadOnlyList<DrcViolation> violations, CancellationToken ct = default)
+    {
+        currentPlan ??= PlacementPlan.Empty;
+        if (!_ai.HasKey) return currentPlan;
+        try
+        {
+            var user = BuildRevisePrompt(project, currentPlan, violations);
+            var raw = await _ai.CompleteAsync(SystemPrompt + RevisePromptSuffix, user, _model, ct);
+            var revised = PlacementPlan.Parse(ExtractJson(raw));
+            if (ReferenceEquals(revised, PlacementPlan.Empty))
+            {
+                AppLog.Warn("pcb", "plan revision returned empty/garbage — keeping current plan");
+                return currentPlan;
+            }
+            AppLog.Info("pcb", $"plan revised · {revised.Groups.Count} groups · {revised.Hints.Count} hints");
+            return revised;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("pcb", $"plan revision failed: {ex.Message} — keeping current plan");
+            return currentPlan;
+        }
+    }
+
+    /// <summary>Current plan JSON + a violation digest (refs grouped by class) for the revision call.</summary>
+    private static string BuildRevisePrompt(Project.Project project, PlacementPlan plan, IReadOnlyList<DrcViolation> violations)
+    {
+        var parts = BuildUserPrompt(project);
+        var planJson = PlanToJson(plan);
+
+        var byClass = (violations ?? Array.Empty<DrcViolation>())
+            .Where(v => !v.Excluded)
+            .GroupBy(v => v.Type, StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var refs = g.SelectMany(v => v.Items.Select(RefFromItem))
+                    .Where(r => r.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(r => r, StringComparer.OrdinalIgnoreCase);
+                var refList = string.Join(", ", refs);
+                return $"- {g.Key} ({g.Count()}): {(refList.Length > 0 ? refList : "(no specific refs)")}";
+            });
+        var digest = string.Join("\n", byClass);
+        if (digest.Length == 0) digest = "(no violations supplied)";
+
+        return $"{parts}\n\nCurrent placement plan (JSON):\n{planJson}\n\nDRC violations to relieve:\n{digest}";
+    }
+
+    /// <summary>Pull a component ref out of a DRC item description like "Pad 1 of C3" / "Footprint U1".</summary>
+    private static string RefFromItem(DrcItem item)
+    {
+        var desc = item.Description ?? "";
+        var tokens = desc.Split(new[] { ' ', ',', '(', ')', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        // a ref looks like one-or-more letters followed by one-or-more digits (R1, U12, ANT1, J2).
+        for (int i = tokens.Length - 1; i >= 0; i--)
+        {
+            var t = tokens[i];
+            if (t.Length >= 2 && char.IsLetter(t[0]) && char.IsDigit(t[^1]) &&
+                t.All(c => char.IsLetterOrDigit(c)))
+                return t;
+        }
+        return "";
+    }
+
+    /// <summary>Serialize a <see cref="PlacementPlan"/> back to the AI-facing JSON contract.</summary>
+    private static string PlanToJson(PlacementPlan plan)
+    {
+        string Edge(EdgeAffinity e) => e switch
+        {
+            EdgeAffinity.Left => "left", EdgeAffinity.Right => "right",
+            EdgeAffinity.Top => "top", EdgeAffinity.Bottom => "bottom", _ => "none",
+        };
+        var dto = new
+        {
+            groups = plan.Groups.Select(g => new { id = g.Id, members = g.Members, edge = Edge(g.Edge) }),
+            hints = plan.Hints.Select(h => new { @ref = h.Ref, group = h.Group, edge = Edge(h.Edge), near = h.NearRef, rotation = h.Rotation }),
+            regionOrder = plan.RegionOrder,
+        };
+        return System.Text.Json.JsonSerializer.Serialize(dto);
+    }
+
     /// <summary>
     /// Compact parts (ref, name, resolved footprint, pin count) + netlist (from -> to [net]) summary,
     /// reusing the <see cref="Generation.ProjectGenerator.EnrichFirmwareAsync"/> summarization shape so the

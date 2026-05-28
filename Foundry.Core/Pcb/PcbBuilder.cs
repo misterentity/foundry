@@ -24,6 +24,23 @@ public static class PcbBuilder
     public static async Task<PcbResult> BuildAsync(Project.Project project, string outputDir,
         Ai.IAnthropicClient? ai = null, string? model = null, CancellationToken ct = default)
     {
+        // AI placement is opt-in and never blocks the board: keyed → ask for a plan; otherwise (or on any
+        // failure) PlanAsync returns PlacementPlan.Empty and the placer falls back to the tidy grid.
+        PlacementPlan? plan = null;
+        if (ai is { HasKey: true })
+            plan = await new PcbPlanner(ai, model).PlanAsync(project, ct);
+
+        return await BuildAsync(project, outputDir, plan, ct: ct);
+    }
+
+    /// <summary>
+    /// Build with an EXPLICIT placement plan + placer knobs (no AI call) — used by the v2.5
+    /// <see cref="PcbDesigner"/> fix loop so it owns the plan + gap/margin across re-place iterations.
+    /// <paramref name="plan"/> null/Empty degrades to the tidy grid (= v2.2). NEVER throws.
+    /// </summary>
+    public static async Task<PcbResult> BuildAsync(Project.Project project, string outputDir,
+        PlacementPlan? plan, double marginMm = 5.0, double gapMm = 1.5, CancellationToken ct = default)
+    {
         var kicad = KiCadInstaller.Locate();
         if (kicad is null) return PcbResult.NotInstalled();
 
@@ -34,13 +51,7 @@ public static class PcbBuilder
             ? new[] { kicad.FootprintDir }
             : Array.Empty<string>();
 
-        // AI placement is opt-in and never blocks the board: keyed → ask for a plan; otherwise (or on any
-        // failure) PlanAsync returns PlacementPlan.Empty and the placer falls back to the tidy grid.
-        PlacementPlan? plan = null;
-        if (ai is { HasKey: true })
-            plan = await new PcbPlanner(ai, model).PlanAsync(project, ct);
-
-        var job = PcbJob.Build(project, outPath, footprintDirs, plan);
+        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm);
 
         // Surface job-time diagnostics (unresolved nodes, generic-footprint fallbacks) in the log up front.
         foreach (var d in job.Diagnostics)

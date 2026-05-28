@@ -27,6 +27,9 @@
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RoutePcbCommand}" Content="ROUTE"
                   ToolTip="Route copper tracks on the last-built PCB with FreeRouting (export DSN → headless route → import SES)"
                   AutomationProperties.Name="Route the last-built PCB"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding DesignPcbCommand}" Content="DESIGN (DRC)"
+                  ToolTip="Run the full build → route → DRC fix loop until the board passes DRC or the iteration budget is spent (the v2.5 credibility gate)"
+                  AutomationProperties.Name="Design a DRC-clean PCB via the build, route and DRC fix loop"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportSvgCommand}" Content="SVG"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPngCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PNG"/></StackPanel>

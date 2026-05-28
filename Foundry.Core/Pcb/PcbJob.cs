@@ -43,7 +43,7 @@ public sealed record PcbJob(
     /// Pure — no KiCad needed. <paramref name="footprintDirs"/> is the located KiCad footprint dir(s).
     /// </summary>
     public static PcbJob Build(Project.Project project, string outPath, IReadOnlyList<string> footprintDirs,
-        PlacementPlan? plan = null)
+        PlacementPlan? plan = null, double marginMm = 5.0, double gapMm = 1.5)
     {
         var diags = new List<PcbDiagnostic>();
         var nets = KiCadNetlist.Nets(project);
@@ -82,7 +82,7 @@ public sealed record PcbJob(
         // guarantees no overlap. A null/Empty plan degrades to a tidy grid (identical in spirit to v2.2).
         var items = refs.Select(alias => new PcbPlacer.PlacedItem(
             alias, choiceByRef[alias].LibId, FootprintMap.CourtyardOf(choiceByRef[alias].LibId))).ToList();
-        var placement = PcbPlacer.Place(items, plan ?? PlacementPlan.Empty);
+        var placement = PcbPlacer.Place(items, plan ?? PlacementPlan.Empty, marginMm, gapMm);
 
         var components = refs.Select(alias =>
         {

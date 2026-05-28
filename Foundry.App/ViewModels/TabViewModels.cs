@@ -343,7 +343,9 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         OnPropertyChanged(nameof(CanRoutePcb));
         RoutePcbCommand.NotifyCanExecuteChanged();
+        DesignPcbCommand.NotifyCanExecuteChanged();
     }
+    public bool CanDesignPcb => !IsExportingPcb;
 
     /// <summary>Live simulation state for this design (RUN/STOP lives by the SCHEMATIC|BREADBOARD toggle).</summary>
     public SimulationViewModel Sim { get; }
@@ -475,8 +477,103 @@ public sealed partial class WiringViewModel : TabViewModelBase
         if (route.Ok && route.RoutedPcbPath is not null)
         {
             Foundry.Core.Diagnostics.AppLog.Info("export", $"routed PCB → {route.RoutedPcbPath}");
+            // v2.5: gate the routed board with DRC before revealing it.
+            await DrcCore(route.RoutedPcbPath);
             Process.Start(new ProcessStartInfo { FileName = route.RoutedPcbPath, UseShellExecute = true });
         }
+    }
+
+    /// <summary>
+    /// Run the v2.5 DRC gate on a routed board and surface the verdict in the PCB status block: PASS (green)
+    /// or N violations (severity-colored). Degrades to clear install guidance when KiCad is absent. Never throws.
+    /// </summary>
+    private async Task DrcCore(string boardPath)
+    {
+        PcbSeverity = "info"; PcbStatus = "Running DRC on the routed board…";
+        var report = await Foundry.Core.Pcb.PcbDrc.CheckAsync(boardPath);
+
+        foreach (var n in report.Notes) PcbNotes.Add(n);
+
+        if (!report.Installed)
+        {
+            PcbSeverity = "info";
+            PcbStatus = report.Summary;  // "DRC needs KiCad — install it from … to run kicad-cli pcb drc."
+            return;
+        }
+
+        if (report.Clean)
+        {
+            PcbSeverity = "pass";
+            PcbStatus = $"DRC PASS — {report.Summary}";
+        }
+        else
+        {
+            // Errors fail the gate; warning-only with no unconnected nets is a softer "warn".
+            PcbSeverity = report.ErrorCount > 0 || report.UnconnectedCount > 0 ? "fail" : "warn";
+            PcbStatus = report.Summary;
+            // List the top few violations so the user sees what to fix.
+            foreach (var v in report.Violations.Where(v => !v.Excluded).Take(8))
+            {
+                var where = v.Location is { } p ? $" @ ({p.X:0.##}, {p.Y:0.##})" : "";
+                PcbNotes.Add($"· [{v.Severity}] {v.Type}: {v.Description}{where}");
+            }
+            foreach (var u in report.Unconnected.Where(u => !u.Excluded).Take(4))
+                PcbNotes.Add($"· [unconnected] {u.Description}");
+        }
+        Foundry.Core.Diagnostics.AppLog.Info("export", $"DRC {(report.Clean ? "pass" : "fail")} → {boardPath}");
+    }
+
+    /// <summary>
+    /// Run the full v2.5 build→route→DRC fix loop (<see cref="Foundry.Core.Pcb.PcbDesigner"/>): the
+    /// deterministic gate plus the bounded AI/clearance remediation loop. Reports the final verdict and
+    /// per-iteration progress ("iteration 2/3: …"). Uses the stored Anthropic key for AI placement advice when
+    /// present (geometry stays deterministic). Degrades to install guidance when KiCad is absent; never throws.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanDesignPcb))]
+    private async Task DesignPcb()
+    {
+        if (IsExportingPcb) return;
+        IsExportingPcb = true;
+        PcbNotes.Clear();
+        PcbSeverity = "info"; PcbStatus = "Designing the PCB — build → route → DRC fix loop…";
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+
+            // AI placement advice is opt-in: use the stored key when present (the placer/router own geometry).
+            var key = new Foundry.Core.Security.CredentialStore().Read(Foundry.Core.Security.CredentialStore.AnthropicTarget);
+            Foundry.Core.Ai.IAnthropicClient? ai =
+                string.IsNullOrWhiteSpace(key) ? null : new Foundry.Core.Ai.AnthropicClient(key!);
+            var model = ConfigStore.Load().ModelId;
+            var options = Foundry.Core.Pcb.DrcOptions.Default;
+
+            var result = await Foundry.Core.Pcb.PcbDesigner.DesignAsync(Project, dir, ai, model, options);
+
+            // Per-iteration progress: each trace line is "attempt N: …".
+            int n = 0;
+            foreach (var line in result.Trace)
+                PcbNotes.Add($"iteration {++n}/{options.MaxIterations}: {line}");
+            foreach (var note in result.Notes) PcbNotes.Add(note);
+
+            if (!result.Installed)
+            {
+                PcbSeverity = "info";
+                PcbStatus = $"KiCad isn't installed — install it from {Foundry.Core.Pcb.KiCadInstaller.DownloadUrl} to run the DRC fix loop.";
+                return;
+            }
+
+            PcbSeverity = result.Ok ? "pass" : "fail";
+            PcbStatus = result.Ok ? $"DRC PASS — {result.Summary}" : result.Summary;
+            if (result.KicadPcbPath is not null)
+            {
+                LastPcbPath = result.KicadPcbPath;
+                Foundry.Core.Diagnostics.AppLog.Info("export", $"PCB design {(result.Ok ? "passed" : "best-effort")} after {result.Iterations} iter → {result.KicadPcbPath}");
+                Process.Start(new ProcessStartInfo { FileName = result.KicadPcbPath, UseShellExecute = true });
+            }
+        }
+        catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB design failed: {ex.Message}"; }
+        finally { IsExportingPcb = false; }
     }
 
     /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>

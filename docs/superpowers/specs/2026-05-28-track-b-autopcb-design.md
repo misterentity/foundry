@@ -1049,3 +1049,241 @@ dependency is absent; one integration test guarded by
 - FreeRouting + KiCad DSN/SES workflow + Java requirement (21+, builds on 25):
   https://freerouting.org/freerouting/using-with-kicad ; https://github.com/freerouting/freerouting
 - FreeRouting license GPLv3 (subprocess only, never link/vendor): https://freerouting.org/freerouting/gpl-v3
+
+---
+
+## v2.5 DRC + Fix Loop (concrete)
+
+**Goal (v2.5 only):** run `kicad-cli pcb drc` on the v2.4 routed board as a **deterministic gate**. If it
+reports violations, run a **bounded fix loop** — deterministic parameter bumps first (clearance / board
+margin / router passes), AI placement revision (fenced to advice) only when a bump can't help — then
+re-place → re-route → re-DRC, up to ~3 iterations, returning the **best (fewest-violation)** board. No
+gerbers (v2.6). The deterministic placer/router still own every coordinate; the AI never sees or emits
+geometry. KiCad is absent here, so every piece below is pure + unit-testable and the runner degrades to
+`DrcReport.NotInstalled()` exactly like `PcbResult`/`RouteResult`.
+
+### A. The `kicad-cli pcb drc` invocation
+
+KiCad 8/9/10 expose DRC as `kicad-cli pcb drc` (it exists in all three — same flags). Exact command for
+**"DRC a standalone `.kicad_pcb` with NO schematic, report clearance/track/unconnected violations as JSON"**:
+
+```
+kicad-cli pcb drc --format json --output <report.json> --severity-error --exit-code-violations <board.kicad_pcb>
+```
+
+Flag-by-flag (verbatim from the CLI reference, KiCad 8.0):
+
+- `--format json` — "Report file format. Options are `report` (default) or `json`." We always pass `json`
+  so the report is machine-parseable (schema below). Without it we'd get a human `.rpt`.
+- `--output <file>` — "Output filename for the generated DRC report. When this argument is not used, the
+  output filename will be the same as the input file, with the `.rpt` or `.json` file extension." We write
+  to an explicit temp path (`board.drc.json`) and read that file — DRC does **not** stream the JSON to
+  stdout, so file output is the contract (mirrors how `export_dsn.py` writes a file, not the
+  `PcbResult` stdout-JSON idiom).
+- `--exit-code-violations` — "Return an exit code depending on whether or not DRC violations exist. The
+  exit code is **0 if no violations are found, and 5 if any violations are found**." This is the
+  deterministic GATE signal: **exit 0 ⇒ clean, exit 5 ⇒ violations, anything else ⇒ tool/IO error.** We
+  still parse the JSON for counts/types regardless of exit code (the JSON is authoritative for *what* the
+  violations are; the exit code is the fast clean/dirty bit).
+- `--severity-error` — "Report all error-level DRC violations." We gate on **errors only** by default;
+  warnings (e.g. silk-over-silk) are reported but do not fail the gate. `--severity-warning` /
+  `--severity-all` / `--severity-exclusions` are the other selectors and combine. (Pass `--severity-all`
+  in a "strict" mode if we later want warnings to count.)
+- **`--schematic-parity`: do NOT pass it.** It is opt-in ("Test for parity between PCB and schematic") and
+  defaults OFF. There is no schematic in this pipeline (Track B builds the board straight from the
+  in-memory netlist, no `.kicad_sch`), so enabling parity would false-fail with spurious
+  `schematic_parity` violations. Omitting the flag means the `schematic_parity[]` array comes back empty —
+  exactly what we want. (The router-applied netlist is what we DRC against; clearance + connectivity are
+  the real checks here.)
+- `--units mm` — report coordinates in mm (default; matches the placer's mm coordinate space). Optional.
+- `--all-track-errors` — "Report all errors for each track" (don't collapse multiple errors on one track).
+  Optional; useful for richer remediation but not required for the gate.
+- `--define-var KEY=VALUE` — project-var override; unused here.
+
+So the parse layer treats it as: **exit 0 = pass, exit 5 = fail-with-violations (read JSON), other =
+infra error (read stderr)** — directly analogous to FirmwareBuilder's compile exit handling.
+
+### B. The DRC JSON schema (model `DrcReport` / `DrcViolation`)
+
+Schema lives in KiCad source at `resources/schemas/drc.v1.json`. Top-level object:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `source` | string | input board path |
+| `date` | string | ISO 8601 |
+| `kicad_version` | string | e.g. `8.0.5` |
+| `coordinate_units` | string | `mm` \| `mils` \| `in` |
+| `violations` | array | the design-rule violations (clearance, courtyard, edge, dangling, …) |
+| `unconnected_items` | array | nets the router left open — **same object shape as a violation** |
+| `schematic_parity` | array | empty when `--schematic-parity` is omitted (our case) |
+
+Each **violation / unconnected_item / schematic_parity** entry:
+
+```json
+{
+  "type": "clearance",
+  "severity": "error",
+  "description": "Clearance violation (netclass 'Default' clearance 0.2 mm; actual 0.13 mm)",
+  "excluded": false,
+  "items": [
+    { "uuid": "…", "description": "Pad 1 of C3", "pos": { "x": 12.7, "y": 8.4 } },
+    { "uuid": "…", "description": "Track on F.Cu",  "pos": { "x": 12.9, "y": 8.5 } }
+  ]
+}
+```
+
+Item fields: `uuid` (string), `description` (string), `pos` `{x,y}` (numbers, in `coordinate_units`).
+`excluded` (bool, default false) + optional `comment` mark suppressed violations — we ignore excluded ones
+when counting the gate.
+
+**Model (new `Foundry.Core/Pcb/DrcReport.cs`, mirroring `RouteResult`):**
+
+```csharp
+public sealed record DrcItem(string Uuid, string Description, double X, double Y);
+public sealed record DrcViolation(string Type, string Severity, string Description,
+    bool Excluded, IReadOnlyList<DrcItem> Items);
+
+public sealed record DrcReport(
+    bool Installed, bool Ok, string Summary,
+    IReadOnlyList<DrcViolation> Violations,        // errors+warnings, excluded filtered out
+    IReadOnlyList<DrcViolation> Unconnected,        // from unconnected_items[]
+    int ErrorCount, int WarningCount, int UnconnectedCount,
+    IReadOnlyList<string> Notes)
+{
+    public bool Clean => Ok && ErrorCount == 0 && UnconnectedCount == 0;   // the gate
+    public static DrcReport NotInstalled() =>
+        new(false, false, $"DRC needs KiCad — install it from {KiCadInstaller.DownloadUrl}.",
+            Array.Empty<DrcViolation>(), Array.Empty<DrcViolation>(), 0, 0, 0, Array.Empty<string>());
+    public static DrcReport Failed(string summary, IEnumerable<string>? notes = null) => …;
+
+    // Parse the report FILE contents (not stdout) + the cli exit code, like RouteResult.Parse.
+    public static DrcReport Parse(string reportJson, int exitCode, string stderr) { … }
+}
+```
+
+`Parse` is pure (operates on the file text + exit code), tolerant in the `RouteResult.Parse` style:
+JsonDocument over the file; `severity == "error"` and not `excluded` ⇒ counts toward `ErrorCount`;
+`unconnected_items[]` entries (or `violations[]` of type `unconnected_items`) ⇒ `UnconnectedCount`;
+exit 5 with zero parsed errors is reconciled to the JSON (JSON wins for *what*, exit for clean/dirty);
+non-{0,5} exit ⇒ `Ok=false` with stderr folded into a note; missing/garbage file ⇒ `Failed(...)`. Never
+throws. Fully unit-testable against captured fixture JSON with no KiCad present.
+
+### C. The DRC runner — `PcbDrc.CheckAsync` (mirrors `PcbRouter.RouteAsync`)
+
+`Foundry.Core/Pcb/PcbDrc.cs`, `public static async Task<DrcReport> CheckAsync(string kicadPcbPath,
+DrcOptions? options = null, CancellationToken ct = default)`:
+
+1. `KiCadInstaller.Locate()` → null ⇒ `DrcReport.NotInstalled()`. (`kicad-cli` is *not* the bundled
+   python — DRC is a native CLI verb, so we invoke `kicad.KicadCliPath`, not `kicad.PythonPath`.)
+2. temp workdir; `report = work\board.drc.json`.
+3. run `kicad.KicadCliPath` with `pcb drc --format json --output "<report>" --severity-error
+   --exit-code-violations "<kicadPcbPath>"` via the same `RunAsync` (redirect stdout/stderr) helper used by
+   `PcbRouter`.
+4. read the `report` file; `DrcReport.Parse(reportText, exitCode, stderr)`; log + return; delete workdir.
+
+A pure **command builder** (`PcbDrc.BuildArgs(cli, board, reportPath, DrcOptions)`) emits exactly
+`pcb drc --format json --output "<report>" --severity-error --exit-code-violations "<board>"` so it's
+unit-asserted without KiCad (the v2.4 FreeRouting-command-builder test precedent). `DrcOptions` carries
+`Strict` (adds `--severity-warning` so warnings gate too) and `Units` (default mm).
+
+### D. Per-class fix strategy (what's deterministic vs. needs the AI)
+
+The placer/router own geometry, so most fixes are a **parameter bump + re-run** — no AI. The AI is only
+pulled in when *where things sit* is the problem and a bump can't resolve it (and even then it's fenced to
+the `PlacementPlan` advice contract). The placer already exposes the two knobs that matter:
+`PcbPlacer.Place(items, plan, marginMm = 5.0, gapMm = 1.5)` and the router exposes `RouteOptions.Passes`.
+
+| Violation `type` | Root cause in THIS pipeline | Remediation | Kind |
+|---|---|---|---|
+| `clearance`, `hole_clearance` | traces/pads too close after routing | **bump `gapMm`** (more courtyard spacing → more routing channel) and/or widen netclass clearance; re-place→re-route | deterministic |
+| `courtyards_overlap` | two parts packed too tight (rare — placer guarantees non-overlap of *inflated* boxes, but a tiny `gapMm` can still trip the courtyard rule) | **bump `gapMm`** and re-place | deterministic |
+| `copper_edge_clearance` | a part/track sits too near the board outline | **bump `marginMm`** (placer sizes the outline from margin) and re-place | deterministic |
+| `track_dangling`, `via_dangling`, `unconnected_items` | the router left a net open / a stub | **bump `RouteOptions.Passes`** and re-route the *same* placement first; if still unrouted after the pass bump, it's a routability/density problem → **AI placement revision** (loosen grouping / spread the dense block) then re-place→re-route | deterministic first, then AI |
+| `silk_over_copper`, `silk_overlap` (warning) | cosmetic silkscreen | not gated by default (`--severity-error`); reported only | none (report) |
+| persistent `clearance` after max gap bump | genuinely congested layout the placer can't relieve by spacing alone | **AI placement revision** — feed the violating refs back, ask for a revised `PlacementPlan` (more spread / different region order); placer still owns coordinates | AI |
+
+**Bump schedule** (deterministic, monotonic so each iteration strictly loosens):
+`gapMm: 1.5 → 2.5 → 4.0`, `marginMm: 5.0 → 7.0 → 10.0`, `Passes: 10 → 20 → 40`. Which knob bumps is
+chosen from the dominant violation class that iteration (edge → margin, clearance/courtyard → gap,
+unconnected/dangling → passes; bump all relevant if mixed).
+
+**AI fence (unchanged contract):** the fix-AI is given the violating refs + their classes and asked for a
+**revised `PlacementPlan`** (same JSON contract `PcbPlanner` already uses — groups/edge/near/regionOrder,
+NEVER coordinates). It is invoked through a `RevisePlanAsync(project, currentPlan, violations)` method on
+`PcbPlanner` that appends a "these parts had clearance/unconnected violations — spread them / revise
+grouping" instruction to the existing system prompt. Unparseable / no-key ⇒ keep the current plan
+(degrade to deterministic-only), exactly like `PlanAsync` → `PlacementPlan.Empty`.
+
+### E. The fix loop — `PcbDesigner.DesignAsync` (mirrors `FixFirmwareAsync`)
+
+New orchestrator `Foundry.Core/Pcb/PcbDesigner.cs` chains build → route → drc, then the bounded remediation
+loop. Returns the **best** board seen (fewest errors, then fewest unconnected), so a partial improvement is
+never thrown away. Loop is pure control-flow over injectable gate/router/placer delegates → unit-testable
+with fakes (a fake DRC that returns scripted reports, a fake router/placer), no KiCad needed.
+
+```
+DesignAsync(project, outputDir, ai, opts, ct) -> PcbDesignResult:
+    plan      = ai.PlanAsync(project)            // PlacementPlan (Empty if no key)
+    gapMm     = 1.5;  marginMm = 5.0;  passes = 10
+    best      = null                              // (board, DrcReport)
+
+    for attempt in 1..MaxIterations (=3):
+        placed  = PcbPlacer.Place(items, plan, marginMm, gapMm)   // deterministic coords
+        built   = PcbBuilder.BuildAsync(project, outputDir, plan) // .kicad_pcb
+        if not built.Ok: return PcbDesignResult.From(built)        // build failure is terminal
+        routed  = PcbRouter.RouteAsync(built.KicadPcbPath, new RouteOptions(passes))
+        if not routed.Installed: return PcbDesignResult.NotInstalled()
+        report  = PcbDrc.CheckAsync(routed.RoutedPcbPath ?? built.KicadPcbPath)
+        if not report.Installed: return PcbDesignResult.NotInstalled()
+
+        best = Better(best, (routed, report))     // keep fewest-violation board
+
+        if report.Clean:                          // GATE PASSED — exit 0, no errors, no unconnected
+            return PcbDesignResult.Passed(routed, report, attempt)
+
+        // ---- remediate for next iteration ----
+        classes = report.DominantClasses()
+        bumped  = false
+        if classes has edge:                  marginMm = NextMargin(marginMm); bumped = true
+        if classes has clearance|courtyard:   gapMm    = NextGap(gapMm);       bumped = true
+        if classes has unconnected|dangling:  passes   = NextPasses(passes);   bumped = true
+
+        // if a bump can't help (already maxed, or congestion persists) revise the PLAN via AI (fenced)
+        if (not bumped) or (attempt >= 2 and StillClearanceBound(report)):
+            plan = ai.RevisePlanAsync(project, plan, report.Violations)   // advice only; Empty-safe
+
+    // loop exhausted — return the best board with a "DRC not clean after N tries" summary
+    return PcbDesignResult.Exhausted(best, MaxIterations)
+```
+
+`PcbDesignResult` (mirrors `RouteResult`): `Installed`, `Ok` (== gate passed), `Summary`
+("DRC clean on attempt 2 — 0 errors, fully connected" / "Best of 3: 2 clearance errors remain"),
+`KicadPcbPath` (the best board), `Report` (final `DrcReport`), `Iterations`, `Notes`, plus
+`NotInstalled()`/`Passed`/`Exhausted` factories. Bound `MaxIterations` defaults to 3 (a `DrcOptions`/
+`DesignOptions` knob) — same "small bounded loop, return last/best" shape as `ProjectGenerator`'s 2-attempt
+parse and `FixFirmwareAsync`'s single re-compile.
+
+### F. New code (v2.5 only)
+
+- `Foundry.Core/Pcb/DrcReport.cs` — DTO + `DrcItem`/`DrcViolation` + tolerant `Parse(reportJson, exit, stderr)` + `NotInstalled()`/`Failed()` (mirror `RouteResult`).
+- `Foundry.Core/Pcb/DrcOptions.cs` — `Strict` (warnings gate), `Units` (mm), `MaxIterations` (=3).
+- `Foundry.Core/Pcb/PcbDrc.cs` — `CheckAsync` (invokes `kicad-cli pcb drc`) + pure `BuildArgs(...)`.
+- `Foundry.Core/Pcb/PcbDesigner.cs` — `DesignAsync` build→route→drc fix loop (control flow over injectable steps).
+- `PcbPlanner.RevisePlanAsync(project, currentPlan, violations)` — fenced AI plan revision (advice-only, Empty-safe).
+- UI: a **DRC / Check** badge on the Wiring tab next to v2.4's ROUTE — "DRC clean" / "2 errors", off the UI thread with cancel.
+
+Tests (`Foundry.Tests`, all KiCad/AI-free):
+- `PcbDrc.BuildArgs` emits exactly `pcb drc --format json --output "<r>" --severity-error --exit-code-violations "<b>"` (and `--severity-warning` added in strict mode).
+- `DrcReport.Parse` over fixture JSON: clean report (empty arrays, exit 0) ⇒ `Clean`; a report with 2 `clearance` errors + 1 `unconnected_items` (exit 5) ⇒ correct counts; `excluded:true` violation not counted; garbage/missing file ⇒ `Failed`; non-{0,5} exit ⇒ `Ok=false` with stderr note.
+- Fix-loop control flow with a **fake gate/router/placer**: clean-on-first-try returns `Passed(attempt:1)`; dirty-then-clean returns `Passed(attempt:2)` and shows the bumped `gapMm`/`passes`; always-dirty returns `Exhausted` with the **fewest-violation** board (verify "best" selection keeps the better of two dirty attempts).
+- AI remediation against a fixture: `RevisePlanAsync` parse of a revised-plan JSON; no-key/garbage ⇒ unchanged plan.
+- `NotInstalled()` when `KiCadInstaller.Locate()` is null; one integration test guarded by `if (KiCadInstaller.Locate() is null) return;`.
+
+### G. Sources (v2.5)
+
+- `kicad-cli pcb drc` reference — flags `--format json`, `--output`, `--severity-error/-warning/-all/-exclusions`, `--exit-code-violations` (exit 0 = clean, 5 = violations), `--schematic-parity` (opt-in, omit it), `--all-track-errors`, `--units`:
+  KiCad 8.0: https://docs.kicad.org/8.0/en/cli/cli.html ; KiCad 9.0: https://docs.kicad.org/9.0/en/cli/cli.html ; master: https://docs.kicad.org/master/en/cli/cli.html
+- DRC JSON report schema (`source`/`date`/`kicad_version`/`coordinate_units`/`violations[]`/`unconnected_items[]`/`schematic_parity[]`; violation `type`/`severity`/`description`/`excluded`/`items[]`{`uuid`,`description`,`pos`{`x`,`y`}}):
+  https://gitlab.com/kicad/code/kicad/-/raw/master/resources/schemas/drc.v1.json
+- DRC violation `type` strings (`clearance`, `hole_clearance`, `courtyards_overlap`, `copper_edge_clearance`, `track_dangling`, `via_dangling`, `silk_over_copper`, `unconnected_items`):
+  https://docs.kicad.org/doxygen/drc__item_8cpp_source.html
