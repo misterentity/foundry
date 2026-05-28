@@ -529,3 +529,315 @@ Tests (`Foundry.Tests`, all KiCad-free): `FootprintMap` keyword→id asserts inc
 fallback; `PcbJob` builder (net set, `padNets`, grid coords, outline) from a sample `Project`; `padNets`
 validation flags an unresolved node; `PcbResult.Parse` for ok/error/not-installed; an integration test
 that actually invokes `build_board.py` guarded by `if (KiCadInstaller.Locate() is null) return;`.
+
+---
+
+## v2.3 LLM Placement (concrete)
+
+Scope for v2.3 **only**: replace v2.2's naive grid with **AI-informed placement that still produces a
+guaranteed-valid, non-overlapping board**, while keeping the `PcbJob`/`PcbJobComponent` output contract
+byte-for-byte unchanged (so `build_board.py` + `PcbBuilder` consume it exactly as today). The LLM is
+**fenced to placement intent only**: it proposes functional groups + relative/edge intent; the
+deterministic `PcbPlacer` owns every coordinate and can never emit an overlapping or off-board layout.
+Same posture as the rest of Foundry: **AI proposes, deterministic geometry disposes.** KiCad is NOT
+required for any of this — placement math is pure C#, fully unit-tested against a fixture
+`PlacementPlan` JSON (mirroring how `ProjectGenerator` is tested on a fixture design).
+
+Three new pure files + two touched files:
+- `Foundry.Core/Pcb/PlacementPlan.cs` — the LLM-facing DTO + tolerant JSON parser (new).
+- `Foundry.Core/Pcb/PcbPlacer.cs` — deterministic plan → coordinates + outline (new, pure).
+- `Foundry.Core/Pcb/PcbPlanner.cs` — the structured Claude call mirroring `ProjectGenerator` (new).
+- `Foundry.Core/Pcb/FootprintMap.cs` — add `CourtyardOf(libId)` approximate-size table (touched).
+- `Foundry.Core/Pcb/PcbJob.cs` — `Build` takes an optional `PlacementPlan` and delegates placement to
+  `PcbPlacer`; the grid path becomes `PcbPlacer`'s empty-plan default (touched).
+
+### 1. The `PlacementPlan` contract
+
+Minimal, every field optional, sane defaults — a sparse or garbled AI reply still yields a valid board
+because the placer treats a missing plan as "tidy grid" (= v2.2 behavior). The plan is **advice keyed
+by component ref/alias**, never coordinates.
+
+```csharp
+namespace Foundry.Core.Pcb;
+
+public enum EdgeAffinity { None, Left, Right, Top, Bottom }
+
+/// <summary>One functional cluster the AI proposes (e.g. "power", "mcu", "sensor-i2c", "connectors").</summary>
+public sealed record PlacementGroup(
+    string Id,                       // "power" | "mcu" | "sensor-i2c" | "connectors" | "rf" | ...
+    IReadOnlyList<string> Members,   // component refs/aliases ("U1","C1","J1") — matched case-insensitively
+    EdgeAffinity Edge = EdgeAffinity.None);  // whole-group edge intent (e.g. connectors group → Left)
+
+/// <summary>Per-component placement intent. All fields optional; defaults make a sparse hint safe.</summary>
+public sealed record PlacementHint(
+    string Ref,                      // the component this hint targets ("C3")
+    string? Group = null,            // group id it belongs to (redundant with PlacementGroup.Members; either works)
+    EdgeAffinity Edge = EdgeAffinity.None,  // connector/antenna edge pin (overrides its group's edge)
+    string? NearRef = null,          // "keep adjacent to <ref>" — decoupling cap next to its IC power pin
+    double Rotation = 0);            // coarse rotation hint in degrees (snapped to 0/90/180/270 by the placer)
+
+/// <summary>
+/// The AI's placement proposal — functional grouping + relative/edge intent + a coarse region order.
+/// Pure advice; <see cref="PcbPlacer"/> turns it into collision-free mm coordinates. Empty = tidy grid.
+/// </summary>
+public sealed record PlacementPlan(
+    IReadOnlyList<PlacementGroup> Groups,
+    IReadOnlyList<PlacementHint> Hints,
+    IReadOnlyList<string> RegionOrder)   // left→right order of group ids, e.g. ["power","mcu","sensor-i2c","connectors"]
+{
+    public static PlacementPlan Empty { get; } = new(
+        Array.Empty<PlacementGroup>(), Array.Empty<PlacementHint>(), Array.Empty<string>());
+
+    /// <summary>
+    /// Tolerant parse of the AI's JSON (same defensive style as ProjectGenerator.ExtractJson + Map).
+    /// Unknown enum strings → None; missing arrays → empty; any exception → <see cref="Empty"/>.
+    /// NEVER throws — a malformed plan degrades to the tidy-grid default, never a broken board.
+    /// </summary>
+    public static PlacementPlan Parse(string? json) { /* JsonDocument, defensive readers, try/catch → Empty */ }
+}
+```
+
+**The JSON the AI returns** (the contract in the system prompt; note it carries NO coordinates):
+
+```json
+{
+  "groups": [
+    {"id": "power",        "members": ["U2","C1","C2","D1"], "edge": "none"},
+    {"id": "mcu",          "members": ["U1","C3","C4"],      "edge": "none"},
+    {"id": "sensor-i2c",   "members": ["U3","R1","R2"],      "edge": "none"},
+    {"id": "connectors",   "members": ["J1","J2"],           "edge": "left"},
+    {"id": "rf",           "members": ["ANT1"],              "edge": "top"}
+  ],
+  "hints": [
+    {"ref": "C3",  "near": "U1"},
+    {"ref": "C4",  "near": "U1"},
+    {"ref": "C1",  "near": "U2"},
+    {"ref": "J1",  "edge": "left"},
+    {"ref": "ANT1","edge": "top", "rotation": 0}
+  ],
+  "regionOrder": ["power", "mcu", "sensor-i2c", "connectors"]
+}
+```
+
+Robustness rules baked into `Parse`:
+- Any missing top-level key → empty list. Unknown `edge` value → `None`. Non-numeric `rotation` → 0.
+- A ref in a group/hint that doesn't exist in the project is silently ignored at placement time.
+- A ref omitted from every group/hint is still placed (the placer assigns it to a synthetic
+  `"_unassigned"` group). **No component is ever dropped.**
+
+### 2. The deterministic `PcbPlacer` algorithm
+
+Input: the project's `PcbJobComponent` list **without positions** (ref + footprint + padNets), the
+`PlacementPlan`, and `FootprintMap.CourtyardOf(libId)` sizes. Output: the same components **with**
+`XMm/YMm/Rot` set, plus the rectangular `OutlineSegmentsMm` sized to fit. Guaranteed non-overlapping
+even when the plan is `Empty`.
+
+```
+PlaceResult Place(IReadOnlyList<PlacedItem> items, PlacementPlan plan, double marginMm = 5, double gapMm = 1.5)
+  PlacedItem = { Ref, LibId, Wmm, Hmm (from CourtyardOf), Rot }
+```
+
+Algorithm (all units mm, all coordinates deterministic — sort everything by ref for stable output):
+
+1. **Resolve courtyard size per item.** `(w,h) = FootprintMap.CourtyardOf(libId)`; if rotation hint is
+   90/270, swap w/h. Pad each footprint's effective box by `gapMm` on every side so packing leaves
+   clearance → guaranteed courtyard separation without any collision-resolution pass.
+
+2. **Assign each item to a group.** Build ref→group from `plan.Groups[].Members` and `plan.Hints[].Group`
+   (hint wins on conflict). Unassigned refs → group `"_unassigned"`. If the plan is empty, ALL items
+   land in one `"_unassigned"` group → step 6 degrades to a single tidy grid = exact v2.2 behavior.
+
+3. **Order the groups into regions (left→right).** Use `plan.RegionOrder` first, then any remaining
+   group ids alphabetically, with `"_unassigned"` last. Edge-affinity groups (connectors/RF) are pulled
+   out of the region flow and handled in step 5.
+
+4. **Pack each non-edge group into a shelf/row bin** (classic shelf bin-packing, deterministic):
+   - Target each group's internal width to a square-ish aspect: `groupW ≈ sqrt(Σ area) * 1.3`.
+   - Lay items left→right on the current shelf; when the next item would exceed `groupW`, start a new
+     shelf at `y += currentShelfHeight + gap`. Shelf height = max item height on that shelf.
+   - **Decoupling "near <ref>" override:** before shelf-packing, items with `NearRef` set are pulled
+     out and queued to be placed immediately adjacent (right side, then top) of their target's final
+     box, inside the target's group — so a cap sits against its IC. If the target is in another group,
+     the cap is moved into the target's group first. Adjacency is collision-checked against already
+     placed boxes in that group; if the preferred slot is occupied, try the other three sides, else
+     fall back to the group's normal shelf flow (never overlap).
+   - Result per group: a local bounding box `(gw, gh)` and each member's local `(x,y)`.
+
+5. **Lay out regions + pin edge groups.**
+   - Non-edge group boxes are placed left→right in region order, each at `x = cursorX`, vertically
+     centered in the board band; `cursorX += gw + regionGap`.
+   - Compute the provisional board extent from the packed regions.
+   - Edge-affinity groups/items are then pinned to the named board edge: Left/Right → packed into a
+     vertical strip flush to that edge (x just inside the margin); Top/Bottom → a horizontal strip.
+     Per-item `Edge` (hint) overrides its group's edge. Antennas/RF with `Top` go to the top strip.
+     The board extent is grown if an edge strip needs more room — edge items are always reachable and
+     never overlap interior regions (the strip reserves its own band).
+
+6. **Empty-plan fast path (tidy grid).** When every item is `"_unassigned"` and no edge/near hints
+   exist, skip region logic and lay items on a single shelf grid of `cols = ceil(sqrt(n))` using the
+   same packing primitive — identical visual result to v2.2's grid, but now courtyard-aware (no two
+   parts can touch). This guarantees the degrade path is a strict superset of v2.2.
+
+7. **Size the outline.** `boardW = maxX + margin`, `boardH = maxY + margin` over all placed boxes
+   (including edge strips); emit the 4-segment closed rectangle exactly like v2.2
+   (`[0,0,w,0],[w,0,w,h],[w,h,0,h],[0,h,0,0]`). Snap all coordinates to 0.05 mm so output is stable.
+
+**Non-overlap proof sketch (why it's always valid):** every item is packed as a `gap`-inflated box, and
+the only placement primitives are (a) shelf packing, which never reuses x-ranges on a shelf and advances
+y past the tallest box, and (b) edge strips, which occupy reserved bands the interior regions are pushed
+clear of. "near" items are explicitly collision-checked against placed boxes before commit. There is no
+code path that places two inflated boxes with overlapping rectangles, so courtyards (the un-inflated
+inner boxes) are always strictly separated by ≥ `2*gap`.
+
+`CourtyardOf` table to add to `FootprintMap` (approximate W×H mm, courtyard-ish; reasonable estimates,
+keyed by a coarse match on the lib id so it covers the ids `Resolve` actually produces):
+
+| Footprint class (lib id contains) | Approx W×H (mm) | Notes |
+|---|---|---|
+| `R_0402`/`C_0402`/`LED_0402` | 1.0 × 0.5 | imperial-size passive bodies |
+| `R_0603`/`C_0603`/`LED_0603` | 1.6 × 0.8 | |
+| `R_0805`/`C_0805`/`LED_0805` (default passive) | 2.0 × 1.25 | |
+| `R_1206`/`C_1206` | 3.2 × 1.6 | |
+| `R_Axial`/`CP_Radial`/`D_DO-41`/`LED_D5.0mm`/`LED_D3.0mm` | 7.0 × 3.0 | THT passives/LEDs |
+| `D_SOD-123` | 2.7 × 1.6 | |
+| `SOT-23` | 3.0 × 3.0 | |
+| `SOT-223` | 7.0 × 7.0 | tab regulator |
+| `TO-220` | 10.0 × 4.5 | vertical reg footprint |
+| `TO-92` | 5.0 × 5.0 | |
+| `SOIC-N` | (N/2)*1.27 + 2 × 6.0 | scale length by pad count |
+| `DIP-N` | (N/2)*2.54 + 3 × 9.0 | |
+| `LQFP-N` / QFP | side ≈ sqrt(N)*1.6 + 8 (square) | coarse |
+| `PinHeader_1xN` | N*2.54 × 2.54 | the generic fallback + headers |
+| `PinHeader_2xN` | N*2.54 × 5.08 | |
+| `TerminalBlock` | 10.0 × 8.0 | |
+| `ESP32-WROOM` | 18.0 × 25.5 | |
+| `ESP-12E` | 16.0 × 24.0 | |
+| `RPi_Pico` | 21.0 × 51.0 | |
+| **unmatched** | 10.0 × 10.0 | safe generous default (never 0) |
+
+`CourtyardOf` is pure + table-driven, parses the `1xNN`/`SOIC-N`/`DIP-N`/`LQFP-N` count out of the id
+with the same regex idiom `FootprintMap` already uses, and returns a `(double WMm, double HMm)` tuple
+— **fully unit-testable with string asserts, no KiCad.**
+
+### 3. The AI call — `PcbPlanner` (mirrors `ProjectGenerator`)
+
+A new `PcbPlanner` class taking `IAnthropicClient` + model id in its ctor (identical shape to
+`ProjectGenerator`). One method, one structured call, defensive parse, offline fallback:
+
+```csharp
+public sealed class PcbPlanner
+{
+    private readonly IAnthropicClient _ai;
+    private readonly string _model;
+    public PcbPlanner(IAnthropicClient ai, string? model = null) { ... }   // same as ProjectGenerator
+
+    /// <summary>
+    /// Ask the model for a PlacementPlan for this design. No key / any failure / unparseable reply →
+    /// <see cref="PlacementPlan.Empty"/> (deterministic tidy-grid default). NEVER throws.
+    /// </summary>
+    public async Task<PlacementPlan> PlanAsync(Project.Project project, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey) return PlacementPlan.Empty;               // offline fallback — same gate idiom
+        try
+        {
+            var user = BuildUserPrompt(project);                   // parts + nets summary, like EnrichFirmwareAsync
+            var raw  = await _ai.CompleteAsync(SystemPrompt, user, _model, ct);
+            return PlacementPlan.Parse(ExtractJson(raw));          // Parse already degrades to Empty on garbage
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Warn("pcb", $"placement plan failed: {ex.Message} — using tidy-grid default");
+            return PlacementPlan.Empty;
+        }
+    }
+}
+```
+
+The user prompt reuses the `EnrichFirmwareAsync` summarization shape — a compact parts list (ref, name,
+resolved footprint, pin count) and the netlist (`from -> to [net]`), so the model reasons about real
+groupings and which caps decouple which ICs.
+
+**System prompt (senior PCB-layout-engineer, fenced to intent):**
+
+```
+You are a senior PCB layout engineer. You are given a parts list and a netlist. Propose a PLACEMENT
+PLAN as ONE JSON object — functional groups and relative/edge INTENT only. You do NOT output
+coordinates; a deterministic placer turns your plan into exact positions and guarantees no overlaps.
+
+Apply these layout principles:
+- Group parts by FUNCTION: power/regulation, the MCU and its support, each sensor/peripheral block
+  (name I2C/SPI blocks by bus), and connectors. One group per function.
+- Put every decoupling/bypass capacitor in the SAME group as the IC it serves and set its
+  "near" to that IC's ref — caps must sit directly against their IC's power pin.
+- Put CONNECTORS, USB, power input, and ANTENNAS/RF at a BOARD EDGE (set "edge"): connectors on a
+  side edge, antenna/RF on the nearest edge (prefer top), pointing outward.
+- Keep high-speed / bus nets (I2C, SPI, crystal) short: place those parts adjacent within one group.
+- Keep noisy power/switching away from sensitive analog/RF: order regions so power is at one end and
+  RF/analog at the other.
+- Every component ref in the parts list must appear in exactly one group.
+
+Return ONLY this JSON (no prose, no fences). All fields optional except group "id" and "members":
+{"groups":[{"id":"power","members":["U2","C1"],"edge":"none"}],
+ "hints":[{"ref":"C3","near":"U1"},{"ref":"J1","edge":"left"}],
+ "regionOrder":["power","mcu","sensor-i2c","connectors"]}
+edge ∈ none|left|right|top|bottom. rotation ∈ 0|90|180|270 (optional).
+```
+
+**Offline fallback is the heart of testability:** no key → `PlacementPlan.Empty` → `PcbPlacer` tidy
+grid → v2.2 board. Tests never need a live key; they exercise (a) `PlacementPlan.Parse` on fixture
+JSON (well-formed, sparse, and garbage cases), and (b) `PcbPlacer.Place` against fixture plans, asserting
+non-overlap + edge pinning + near-adjacency + correct degrade-to-grid — exactly mirroring how
+`GenerationTests` feed `ProjectGenerator` a fixture via `FakeAi`.
+
+### 4. How `PcbJob.Build` switches grid → placer WITHOUT changing the `PcbJobComponent` contract
+
+`PcbJobComponent` (ref, footprint, x_mm, y_mm, rot, padNets) and the whole `PcbJob` shape are
+**unchanged** — only the source of the x/y/rot numbers changes. `Build` gains an optional plan param
+(defaulted, so every existing call site and test compiles untouched):
+
+```csharp
+public static PcbJob Build(Project.Project project, string outPath,
+                           IReadOnlyList<string> footprintDirs,
+                           PlacementPlan? plan = null)
+{
+    // ... identical net/ref/footprint/padNets resolution as v2.2 (unchanged) ...
+    // Build placer items from the same resolved (ref, libId) pairs:
+    var items = refs.Select(alias => new PcbPlacer.PlacedItem(
+        alias, choiceByRef[alias].LibId, FootprintMap.CourtyardOf(choiceByRef[alias].LibId), rotHint: 0)).ToList();
+
+    var placement = PcbPlacer.Place(items, plan ?? PlacementPlan.Empty);   // pure, deterministic
+
+    var components = refs.Select(alias =>
+    {
+        var pos = placement[alias];                       // (XMm, YMm, Rot)
+        return new PcbJobComponent(alias, choiceByRef[alias].LibId, pos.XMm, pos.YMm, pos.Rot,
+                                   FootprintMap.PadNets(alias, endpointNets));
+    }).ToList();
+
+    var outline = placement.OutlineSegmentsMm;            // sized by the placer, same 4-segment shape
+    // ... same net-node validation + diagnostics + return as v2.2 ...
+}
+```
+
+- `plan == null` (or `Empty`) → placer's tidy-grid path → **identical output to v2.2**, so the existing
+  `PcbJobTests` (distinct grid positions, rectangular outline, net/padNets asserts) keep passing.
+- `PcbBuilder.BuildAsync` gains an optional `IAnthropicClient`: if supplied and keyed, it calls
+  `await new PcbPlanner(ai, model).PlanAsync(project, ct)` and passes the plan into `PcbJob.Build`;
+  otherwise it passes `null`. The python script + result parsing are **completely untouched** — they
+  still read `x_mm/y_mm/rot/padNets` exactly as before. `build_board.py` requires NO changes.
+
+### 5. Tests (all KiCad-free, mirror `GenerationTests`)
+
+- `PlacementPlanTests`: `Parse` of the well-formed fixture (groups/hints/regionOrder populated);
+  `Parse` of a sparse plan (only groups); `Parse` of garbage/empty/null → `PlacementPlan.Empty`;
+  unknown `edge` → `None`.
+- `PcbPlacerTests`: non-overlap over a fixture plan (assert every pair of inflated boxes is disjoint);
+  empty plan → grid with distinct positions (matches v2.2 invariant); edge-affinity item lands flush to
+  the named edge; "near" cap is adjacent (centre-distance ≤ courtyard half-sum + gap + ε) to its IC;
+  every input ref appears exactly once in the output (nothing dropped); outline contains all boxes.
+- `PcbPlannerTests`: `FakeAi` returning a fixture plan JSON → expected `PlacementPlan`; no-key stub →
+  `PlacementPlan.Empty`; garbage reply → `PlacementPlan.Empty`.
+- `PcbJobTests` (existing) stay green: `Build` with no plan == v2.2 grid; add one asserting `Build` with
+  a fixture plan still serializes the identical `PcbJobComponent` shape (same keys, just different x/y).
+- `FootprintMapTests`: `CourtyardOf` returns sane sizes per class incl. `1xNN`/`SOIC-N`/`DIP-N` count
+  scaling and the generous unmatched default (never 0×0).

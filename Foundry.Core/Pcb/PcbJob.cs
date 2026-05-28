@@ -32,9 +32,6 @@ public sealed record PcbJob(
     /// <summary>Diagnostics surfaced while building the job (unresolved nodes, generic-footprint fallbacks).</summary>
     [JsonIgnore] public IReadOnlyList<PcbDiagnostic> Diagnostics { get; init; } = Array.Empty<PcbDiagnostic>();
 
-    private const double GridPitchMm = 15.0;
-    private const double MarginMm = 10.0;
-
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
 
     public string ToJson() => JsonSerializer.Serialize(this, JsonOpts);
@@ -45,7 +42,8 @@ public sealed record PcbJob(
     /// resolves to a pad in its component, emitting a <see cref="PcbDiagnostic"/> rather than mis-wiring.
     /// Pure — no KiCad needed. <paramref name="footprintDirs"/> is the located KiCad footprint dir(s).
     /// </summary>
-    public static PcbJob Build(Project.Project project, string outPath, IReadOnlyList<string> footprintDirs)
+    public static PcbJob Build(Project.Project project, string outPath, IReadOnlyList<string> footprintDirs,
+        PlacementPlan? plan = null)
     {
         var diags = new List<PcbDiagnostic>();
         var nets = KiCadNetlist.Nets(project);
@@ -63,13 +61,10 @@ public sealed record PcbJob(
             .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var components = new List<PcbJobComponent>();
-        int cols = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(refs.Count)));
-        double maxX = 0, maxY = 0;
-
-        for (int i = 0; i < refs.Count; i++)
+        // Resolve footprint + padNets per ref (identical to v2.2); positions come from the placer.
+        var choiceByRef = new Dictionary<string, FootprintMap.FootprintChoice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var alias in refs)
         {
-            var alias = refs[i];
             var spec = SpecFor(project, alias);
             var padNets = FootprintMap.PadNets(alias, endpointNets);
 
@@ -80,14 +75,21 @@ public sealed record PcbJob(
             var choice = FootprintMap.Resolve(spec, pinCount);
             if (choice.IsFallback)
                 diags.Add(PcbDiagnostic.Warn(choice.Reason));
-
-            double x = MarginMm + (i % cols) * GridPitchMm;
-            double y = MarginMm + (i / cols) * GridPitchMm;
-            maxX = Math.Max(maxX, x);
-            maxY = Math.Max(maxY, y);
-
-            components.Add(new PcbJobComponent(alias, choice.LibId, x, y, 0, padNets));
+            choiceByRef[alias] = choice;
         }
+
+        // Deterministic placement: the AI plan (if any) is advice; PcbPlacer owns the coordinates and
+        // guarantees no overlap. A null/Empty plan degrades to a tidy grid (identical in spirit to v2.2).
+        var items = refs.Select(alias => new PcbPlacer.PlacedItem(
+            alias, choiceByRef[alias].LibId, FootprintMap.CourtyardOf(choiceByRef[alias].LibId))).ToList();
+        var placement = PcbPlacer.Place(items, plan ?? PlacementPlan.Empty);
+
+        var components = refs.Select(alias =>
+        {
+            var pos = placement[alias];
+            return new PcbJobComponent(alias, choiceByRef[alias].LibId, pos.XMm, pos.YMm, pos.Rot,
+                FootprintMap.PadNets(alias, endpointNets));
+        }).ToList();
 
         // Validate every net node resolves to a pad in its component.
         var padNetsByRef = components.ToDictionary(c => c.Ref, c => c.PadNets, StringComparer.OrdinalIgnoreCase);
@@ -99,18 +101,8 @@ public sealed record PcbJob(
                 diags.Add(PcbDiagnostic.Error($"net {netName} node {ep}: no pad '{pad}' on {r}."));
         }
 
-        double w = maxX + GridPitchMm + MarginMm;
-        double h = maxY + GridPitchMm + MarginMm;
-        var outline = new List<double[]>
-        {
-            new[] { 0.0, 0.0, w, 0.0 },
-            new[] { w, 0.0, w, h },
-            new[] { w, h, 0.0, h },
-            new[] { 0.0, h, 0.0, 0.0 },
-        };
-
         var jobNets = nets.Select(n => new PcbJobNet(n.Name)).ToList();
-        return new PcbJob(outPath, footprintDirs, outline, jobNets, components) { Diagnostics = diags };
+        return new PcbJob(outPath, footprintDirs, placement.OutlineSegmentsMm, jobNets, components) { Diagnostics = diags };
     }
 
     /// <summary>

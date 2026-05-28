@@ -21,7 +21,8 @@ public static class PcbBuilder
     /// Build a <c>.kicad_pcb</c> under <paramref name="outputDir"/> (owned by the caller — NOT deleted).
     /// Reuses the existing netlist nets and assigns a footprint per component, placed on a simple grid.
     /// </summary>
-    public static async Task<PcbResult> BuildAsync(Project.Project project, string outputDir, CancellationToken ct = default)
+    public static async Task<PcbResult> BuildAsync(Project.Project project, string outputDir,
+        Ai.IAnthropicClient? ai = null, string? model = null, CancellationToken ct = default)
     {
         var kicad = KiCadInstaller.Locate();
         if (kicad is null) return PcbResult.NotInstalled();
@@ -32,7 +33,14 @@ public static class PcbBuilder
         var footprintDirs = System.IO.Directory.Exists(kicad.FootprintDir)
             ? new[] { kicad.FootprintDir }
             : Array.Empty<string>();
-        var job = PcbJob.Build(project, outPath, footprintDirs);
+
+        // AI placement is opt-in and never blocks the board: keyed → ask for a plan; otherwise (or on any
+        // failure) PlanAsync returns PlacementPlan.Empty and the placer falls back to the tidy grid.
+        PlacementPlan? plan = null;
+        if (ai is { HasKey: true })
+            plan = await new PcbPlanner(ai, model).PlanAsync(project, ct);
+
+        var job = PcbJob.Build(project, outPath, footprintDirs, plan);
 
         // Surface job-time diagnostics (unresolved nodes, generic-footprint fallbacks) in the log up front.
         foreach (var d in job.Diagnostics)

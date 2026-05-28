@@ -112,6 +112,86 @@ public static class FootprintMap
     private static string Header(int n) =>
         $"Connector_PinHeader_2.54mm:PinHeader_1x{n:00}_P2.54mm_Vertical";
 
+    private static readonly Regex CountToken = new(@"(\d{1,3})", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Approximate courtyard size (W×H mm) for a footprint lib id — the placer uses this to keep parts
+    /// from overlapping WITHOUT KiCad. Coarse, table-driven match on the lib id (covering the ids
+    /// <see cref="Resolve"/> actually produces), with count-scaled sizes for SOIC/DIP/QFP/PinHeader and a
+    /// generous 10×10 default for anything unmatched (never 0). Pure and string-assert testable.
+    /// </summary>
+    public static (double WMm, double HMm) CourtyardOf(string libId)
+    {
+        var id = libId ?? "";
+        bool Has(string token) => id.Contains(token, StringComparison.OrdinalIgnoreCase);
+
+        // ---- modules / dev boards (check before generic package matches) ----
+        if (Has("ESP32-WROOM")) return (18.0, 25.5);
+        if (Has("ESP-12")) return (16.0, 24.0);
+        if (Has("RPi_Pico") || Has("Pico")) return (21.0, 51.0);
+
+        // ---- imperial-size passive bodies (R_/C_/LED_) ----
+        if (Has("_0402")) return (1.0, 0.5);
+        if (Has("_0603")) return (1.6, 0.8);
+        if (Has("_0805")) return (2.0, 1.25);
+        if (Has("_1206")) return (3.2, 1.6);
+
+        // ---- THT passives / discrete LEDs ----
+        if (Has("R_Axial") || Has("CP_Radial") || Has("D_DO-41") || Has("LED_D5.0mm") || Has("LED_D3.0mm"))
+            return (7.0, 3.0);
+
+        // ---- discrete packages ----
+        if (Has("SOD-123")) return (2.7, 1.6);
+        if (Has("SOT-223")) return (7.0, 7.0);
+        if (Has("SOT-23")) return (3.0, 3.0);
+        if (Has("TO-220")) return (10.0, 4.5);
+        if (Has("TO-92")) return (5.0, 5.0);
+
+        // ---- count-scaled ICs (parse the pin/row count out of the id) ----
+        if (Has("SOIC-"))
+        {
+            int n = CountAfter(id, "SOIC-", 8);
+            return ((n / 2) * 1.27 + 2, 6.0);
+        }
+        if (Has("DIP-"))
+        {
+            int n = CountAfter(id, "DIP-", 8);
+            return ((n / 2) * 2.54 + 3, 9.0);
+        }
+        if (Has("LQFP-") || Has("TQFP-") || Has("QFP-"))
+        {
+            int n = CountAfter(id, "QFP-", 32);
+            double side = Math.Sqrt(n) * 1.6 + 8;
+            return (side, side);
+        }
+
+        // ---- pin headers (generic fallback + explicit headers) ----
+        if (Has("PinHeader_2x"))
+        {
+            int n = CountAfter(id, "2x", 2);
+            return (n * 2.54, 5.08);
+        }
+        if (Has("PinHeader_1x"))
+        {
+            int n = CountAfter(id, "1x", 2);
+            return (n * 2.54, 2.54);
+        }
+
+        if (Has("TerminalBlock")) return (10.0, 8.0);
+
+        // ---- generous safe default (never 0) ----
+        return (10.0, 10.0);
+    }
+
+    /// <summary>Parse the first integer appearing after <paramref name="marker"/> in the lib id.</summary>
+    private static int CountAfter(string id, string marker, int fallback)
+    {
+        var i = id.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (i < 0) return fallback;
+        var m = CountToken.Match(id, i + marker.Length);
+        return m.Success && int.TryParse(m.Value, out var n) && n > 0 ? n : fallback;
+    }
+
     /// <summary>Swap the metric body token in an R_/C_/LED_ id to match an imperial size hint (no-op if none).</summary>
     private static string SwapSize(string defaultId, string defaultToken, string? metric) =>
         metric is null || metric == defaultToken ? defaultId : defaultId.Replace(defaultToken, metric);
