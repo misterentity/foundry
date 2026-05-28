@@ -1287,3 +1287,186 @@ Tests (`Foundry.Tests`, all KiCad/AI-free):
   https://gitlab.com/kicad/code/kicad/-/raw/master/resources/schemas/drc.v1.json
 - DRC violation `type` strings (`clearance`, `hole_clearance`, `courtyards_overlap`, `copper_edge_clearance`, `track_dangling`, `via_dangling`, `silk_over_copper`, `unconnected_items`):
   https://docs.kicad.org/doxygen/drc__item_8cpp_source.html
+
+---
+
+## v2.6 Gerber + Drill Export (concrete)
+
+The capstone: take v2.5's DRC-clean `.kicad_pcb` (`PcbDesignResult.KicadPcbPath`) and produce a single
+fab-ready ZIP (Gerbers + Excellon drill) a board house (JLCPCB / PCBWay) accepts for a standard 2-layer
+board. Two native `kicad-cli` verbs (`pcb export gerbers`, `pcb export drill`) write into one temp dir,
+then `System.IO.Compression.ZipFile` bundles that dir. NO ordering/upload (v2.7). Mirrors `PcbDrc`'s
+exact pattern: pure `BuildArgs(...)`, process invocation of `KiCadInstaller.Locate().KicadCliPath`,
+`FabResult.NotInstalled()` when KiCad is absent, never throws.
+
+### A. Layer set (standard 2-layer fab)
+
+Nine layers — the JLCPCB/PCBWay 2-layer set. Use the canonical KiCad-9 layer tokens (KiCad 9 renamed
+`F.SilkS`→`F.Silkscreen`, `B.SilkS`→`B.Silkscreen`; the old names still parse in 8.0 but the new ones are
+accepted by both 8 and 9, so emit the new names):
+
+```
+F.Cu,B.Cu,F.Paste,B.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts
+```
+
+The board outline lives on **Edge.Cuts** (it MUST be present and closed — that is the fab's board
+profile). Paste layers are not strictly needed by the fab to make the board (they drive a stencil), but
+including them matches the KiCad/JLCPCB default set and is harmless. Define this as
+`FabOptions.Default.Layers` (a single comma-joined string) so it is one unit-testable constant.
+
+### B. Command 1 — `kicad-cli pcb export gerbers` (exact)
+
+```
+kicad-cli pcb export gerbers \
+  --output "<outdir>" \
+  --layers "F.Cu,B.Cu,F.Paste,B.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts" \
+  --subtract-soldermask \
+  --use-drill-file-origin \
+  "<board.kicad_pcb>"
+```
+
+- `--output` is a **directory** ("The output folder for the exported files. One file is output for each
+  layer."). One `.g*` file is written per layer.
+- `--layers` = the comma-separated set above.
+- **Protel extensions are KEPT (do NOT pass `--no-protel-ext`)**: JLCPCB's own KiCad-9 guide says "Select
+  Use Protel filename extensions … JLCPCB prefers Protel filename extensions." So we want the default
+  (`.gtl/.gbl/.gtp/.gbp/.gto/.gbo/.gts/.gbs/.gm1`), which is what omitting `--no-protel-ext` gives.
+- **X2 is KEPT (do NOT pass `--no-x2`)**: JLCPCB's guide says "Select Use extended X2 format." Default X2
+  is fine; the netlist/X2 attributes JLCPCB tolerates.
+- `--subtract-soldermask` removes silk from un-masked areas (matches the standard fab plot config).
+- `--use-drill-file-origin` makes the gerber origin match the drill origin — keep gerbers and drill on the
+  **same** origin. (Pair this with `--drill-origin plot` below, OR drop both and use absolute on both; the
+  invariant is *gerbers and drill share one origin*. We use the drill/place origin on both.)
+- `INPUT_FILE` (the board) is the last positional, quoted.
+
+### C. Command 2 — `kicad-cli pcb export drill` (exact)
+
+```
+kicad-cli pcb export drill \
+  --output "<outdir>/" \
+  --format excellon \
+  --drill-origin plot \
+  --excellon-units mm \
+  --excellon-zeros-format decimal \
+  --excellon-separate-th \
+  --generate-map \
+  --map-format gerberx2 \
+  "<board.kicad_pcb>"
+```
+
+- `--output` is the drill **directory** (KiCad is picky: pass a trailing separator, e.g. `"<outdir>\"`,
+  or the literal dir — same `<outdir>` as the gerbers so everything lands together for the zip).
+- `--format excellon` (default, but explicit) — Excellon NC drill, the universal fab format.
+- `--drill-origin plot` = use the drill/place origin (pairs with gerbers' `--use-drill-file-origin` so
+  drill and copper align). Absolute also works if gerbers also use absolute; do not mix.
+- `--excellon-units mm` + `--excellon-zeros-format decimal` — JLCPCB's guide: Units = Millimeters,
+  Zeros = Decimal.
+- `--excellon-separate-th` — separate plated-through vs non-plated-through files (`-PTH.drl` / `-NPTH.drl`),
+  which fabs prefer for correct processing.
+- `--generate-map --map-format gerberx2` — a drill map (a gerber-format map travels in the zip with the
+  rest; `pdf` is the default but a gerber map keeps the package single-format). Optional — fabs ignore the
+  map; include it for human/QA inspection.
+
+### D. Expected file set in the ZIP (2-layer, Protel ext)
+
+With Protel extensions + `--excellon-separate-th`, the output dir (and thus the ZIP) contains:
+
+| File (suffix on `<board>`) | Layer / content |
+|---|---|
+| `<b>-F_Cu.gtl` | F.Cu (top copper) |
+| `<b>-B_Cu.gbl` | B.Cu (bottom copper) |
+| `<b>-F_Paste.gtp` | F.Paste |
+| `<b>-B_Paste.gbp` | B.Paste |
+| `<b>-F_Silkscreen.gto` | F.Silkscreen |
+| `<b>-B_Silkscreen.gbo` | B.Silkscreen |
+| `<b>-F_Mask.gts` | F.Mask |
+| `<b>-B_Mask.gbs` | B.Mask |
+| `<b>-Edge_Cuts.gm1` | Edge.Cuts (board outline) |
+| `<b>-PTH.drl` | Excellon plated through-holes |
+| `<b>-NPTH.drl` | Excellon non-plated through-holes |
+| `<b>-PTH-drl_map.gbr` / `*-NPTH-drl_map.gbr` | drill maps (optional) |
+
+Gotchas:
+- **A single ZIP of the whole output dir is exactly what JLCPCB/PCBWay want** ("zip the out folder and
+  place the order"). No per-file renaming, no manifest. We zip the temp `<outdir>` to
+  `<projectName>-fab.zip`.
+- **Edge.Cuts is mandatory** — no `.gm1`/outline ⇒ fab rejects (no board profile). Treat a missing
+  `Edge.Cuts` gerber as a failure in `Parse`.
+- The exact suffix casing (`-F_Cu` etc.) and Protel extensions are KiCad's defaults — don't hardcode the
+  filenames as the success test; test on *count/extension presence* + the required PTH/Edge files (see E),
+  since a renamed board or KiCad minor differences shift the stem.
+- If `--excellon-separate-th` is omitted you get one merged `<b>.drl` instead of `-PTH`/`-NPTH`; JLCPCB
+  accepts both, but separate is the recommended default.
+
+### E. Success detection (`FabResult.Parse`)
+
+Mirror `DrcReport.Parse` / `RouteResult.Parse` — exit code is the fast bit, the produced file set is
+authoritative; never throw:
+
+1. **Two runs, both must succeed.** Run gerbers then drill; if either is cancelled, propagate. Capture
+   each `(stdout, stderr, exitCode)`.
+2. **Exit code**: `kicad-cli` returns **0 on success, non-zero on failure** for both verbs. `exit != 0` on
+   either run ⇒ `Failed` with the trimmed stderr as a note. (Unlike `pcb drc`, export has no special
+   "violations" exit code — 0 = wrote files, anything else = error.)
+3. **File-set check (the real gate)**: enumerate `<outdir>` and require, at minimum:
+   - at least one copper gerber (`.gtl` AND `.gbl`, or `.gbr` if `--no-protel-ext` were ever used),
+   - the **Edge.Cuts** outline gerber (`*-Edge_Cuts.gm1` / `*.gm1`),
+   - at least one drill file (`*.drl`) — and, when `--excellon-separate-th`, the `*-PTH.drl`.
+   Build this as a pure helper `FabFileSet.Validate(IEnumerable<string> producedFiles)` over filenames so
+   it is unit-testable with **fake** file lists (no KiCad). Returns the missing-required list.
+4. **ZIP**: only after both exits are 0 AND the file-set validates, `ZipFile.CreateFromDirectory(outdir,
+   zipPath)`. Then assert `File.Exists(zipPath)` and a non-trivial entry count. `Ok` ⇔ all of the above.
+5. `FabResult` shape: `(bool Installed, bool Ok, string Summary, string? ZipPath, int GerberCount, int
+   DrillCount, IReadOnlyList<string> Files, IReadOnlyList<string> Notes)` with `NotInstalled()` /
+   `Failed(summary, notes)` factories — `Summary` like "Exported 9 gerbers + 2 drill files → board-fab.zip"
+   or "Couldn't export fab files: <reason>".
+
+### F. New code (v2.6 only)
+
+- `Foundry.Core/Pcb/Fab/FabOptions.cs` — `Layers` (the 9-token string), `Units` (mm), `SeparatePlated`
+  (true), `GenerateMap` (true), `MapFormat` (gerberx2), `UseDrillOrigin` (true). One `Default`.
+- `Foundry.Core/Pcb/Fab/FabResult.cs` — DTO + tolerant `Parse(...)` + `NotInstalled()`/`Failed()` (mirror
+  `RouteResult`/`DrcReport`).
+- `Foundry.Core/Pcb/Fab/FabFileSet.cs` — pure `Validate(producedFiles)` (required-file gate, fake-able).
+- `Foundry.Core/Pcb/Fab/PcbFab.cs` — `ExportAsync(kicadPcbPath, options)` (two `kicad-cli` runs into a
+  temp dir, validate, zip) + pure `BuildGerberArgs(...)` / `BuildDrillArgs(...)` mirroring `PcbDrc.BuildArgs`.
+- `PcbDesigner.DesignAsync` end-to-end tie-in OR a thin `PcbDesigner.DesignAndExportAsync` that chains
+  clean-board → `PcbFab.ExportAsync` (keep the export decoupled so it can run on any clean board).
+- UI: a **Fab / Export** affordance on the Wiring tab next to v2.5's DRC badge — "Export fab ZIP" →
+  surfaces `ZipPath` (open-folder), off the UI thread with cancel; greyed/guidance when KiCad absent.
+
+Tests (`Foundry.Tests`, all KiCad-free):
+- `PcbFab.BuildGerberArgs` emits exactly `pcb export gerbers --output "<d>" --layers "F.Cu,...,Edge.Cuts"
+  --subtract-soldermask --use-drill-file-origin "<b>"` (and that `--no-protel-ext` is NOT present — Protel
+  kept for JLCPCB).
+- `PcbFab.BuildDrillArgs` emits `pcb export drill --output "<d>" --format excellon --drill-origin plot
+  --excellon-units mm --excellon-zeros-format decimal --excellon-separate-th --generate-map --map-format
+  gerberx2 "<b>"`.
+- `FabFileSet.Validate` over fake filename lists: full Protel set + `-PTH.drl` + `.gm1` ⇒ no missing;
+  missing `Edge.Cuts` ⇒ reports it; missing all `.drl` ⇒ reports it; `--no-protel-ext` `.gbr` set still
+  validates copper.
+- `FabResult.Parse`: both exits 0 + valid file list + zip present ⇒ `Ok` with right counts/summary; gerber
+  exit≠0 ⇒ `Failed` w/ stderr note; exits 0 but Edge.Cuts missing ⇒ `Failed`; zip-missing ⇒ `Failed`.
+- `FabResult.NotInstalled()` when `KiCadInstaller.Locate()` is null; one integration test guarded by
+  `if (KiCadInstaller.Locate() is null) return;` that actually exports + asserts the zip.
+
+### G. Sources (v2.6)
+
+- `kicad-cli pcb export gerbers` reference — `--output` (output folder, one file per layer), `--layers`
+  ("comma-separated list of layer names … such as `F.Cu,B.Cu`"), `--no-protel-ext` ("Use .gbr file
+  extension instead of Protel file extensions"), `--subtract-soldermask`, `--use-drill-file-origin`,
+  `--no-x2`, `--no-netlist`, `--common-layers`, `--precision`; valid layer tokens (`F.Cu`,`B.Cu`,
+  `F.Paste`,`B.Paste`,`F.Silkscreen`,`B.Silkscreen`,`F.Mask`,`B.Mask`,`Edge.Cuts`,…):
+  KiCad 9.0: https://docs.kicad.org/9.0/en/cli/cli.html ; KiCad 8.0: https://docs.kicad.org/8.0/en/cli/cli.html ; master: https://docs.kicad.org/master/en/cli/cli.html
+- `kicad-cli pcb export drill` reference — `--output` (drill output dir), `--format` (`excellon` default /
+  `gerber`), `--drill-origin` (`absolute` default / `plot`), `--excellon-units` (`mm` default / `in`),
+  `--excellon-zeros-format` (`decimal`/`suppressleading`/`suppresstrailing`/`keep`),
+  `--excellon-separate-th` (separate plated / non-plated), `--generate-map`, `--map-format`
+  (`pdf` default / `gerberx2`/`ps`/`dxf`/`svg`), `--excellon-mirror-y`, `--excellon-min-header`:
+  https://docs.kicad.org/9.0/en/cli/cli.html ; https://docs.kicad.org/8.0/en/cli/cli.html
+- JLCPCB Gerber/drill requirements for KiCad 9 — required 2-layer layer set; "use Protel filename
+  extensions (JLCPCB prefers Protel)"; "use extended X2 format"; drill Excellon / mm / decimal zeros;
+  "zip the out folder and place the order":
+  https://jlcpcb.com/help/article/how-to-generate-gerber-and-drill-files-in-kicad-9
+- PCB Export overview (kicad-cli source/behavior — exit-code-on-success, one-file-per-layer):
+  https://deepwiki.com/KiCad/kicad-source-mirror/2.6-pcb-export

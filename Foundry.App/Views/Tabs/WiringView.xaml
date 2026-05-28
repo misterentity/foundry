@@ -30,6 +30,12 @@
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding DesignPcbCommand}" Content="DESIGN (DRC)"
                   ToolTip="Run the full build → route → DRC fix loop until the board passes DRC or the iteration budget is spent (the v2.5 credibility gate)"
                   AutomationProperties.Name="Design a DRC-clean PCB via the build, route and DRC fix loop"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportFabCommand}" Content="EXPORT GERBERS"
+                  ToolTip="Export the standard 2-layer fab file set (Gerbers + Excellon drill) from the last DRC-clean board and bundle it into a single board-house-ready ZIP"
+                  AutomationProperties.Name="Export Gerbers and drill as a fab ZIP from the last DRC-clean board"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding DesignAndExportFabCommand}" Content="DESIGN + GERBERS"
+                  ToolTip="One-shot: build → place → route → DRC fix loop → Gerbers + drill ZIP — a fab-ready package from the netlist (the v2.6 capstone)"
+                  AutomationProperties.Name="Design a DRC-clean PCB and export a fab ZIP in one action"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportSvgCommand}" Content="SVG"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPngCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PNG"/></StackPanel>
@@ -47,6 +53,11 @@
           </StackPanel>
           <ProgressBar IsIndeterminate="True" Height="3" Margin="0,10,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
                        Visibility="{Binding IsExportingPcb, Converter={StaticResource BoolVis}}"/>
+          <Button Style="{StaticResource BtnGhost}" HorizontalAlignment="Left" Padding="12,5" FontSize="10" Margin="0,12,0,0"
+                  Command="{Binding RevealFabZipCommand}" Content="REVEAL FAB ZIP"
+                  ToolTip="Show the fab-ready Gerber + drill ZIP in Explorer"
+                  AutomationProperties.Name="Reveal the fab ZIP in Explorer"
+                  Visibility="{Binding HasFabZip, Converter={StaticResource BoolVis}}"/>
           <ItemsControl ItemsSource="{Binding PcbNotes}" Margin="0,10,0,0">
             <ItemsControl.ItemTemplate>
               <DataTemplate>

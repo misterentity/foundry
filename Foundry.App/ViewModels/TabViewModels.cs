@@ -336,16 +336,29 @@ public sealed partial class WiringViewModel : TabViewModelBase
     // The last-built board is remembered so ROUTE can run on it without rebuilding.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRoutePcb))]
+    [NotifyPropertyChangedFor(nameof(CanExportFab))]
     [NotifyCanExecuteChangedFor(nameof(RoutePcbCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ExportFabCommand))]
     private string? _lastPcbPath;
     public bool CanRoutePcb => !IsExportingPcb && !string.IsNullOrEmpty(LastPcbPath);
     partial void OnIsExportingPcbChanged(bool value)
     {
         OnPropertyChanged(nameof(CanRoutePcb));
+        OnPropertyChanged(nameof(CanExportFab));
         RoutePcbCommand.NotifyCanExecuteChanged();
         DesignPcbCommand.NotifyCanExecuteChanged();
+        ExportFabCommand.NotifyCanExecuteChanged();
+        DesignAndExportFabCommand.NotifyCanExecuteChanged();
     }
     public bool CanDesignPcb => !IsExportingPcb;
+
+    // Track B v2.6 capstone: export the standard 2-layer fab file set (Gerbers + Excellon drill) from the
+    // last DRC-clean board and bundle it into a single board-house-ready ZIP. Mirrors the not-installed UX.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFabZip))]
+    private string? _lastFabZipPath;
+    public bool HasFabZip => !string.IsNullOrEmpty(LastFabZipPath);
+    public bool CanExportFab => !IsExportingPcb && !string.IsNullOrEmpty(LastPcbPath);
 
     /// <summary>Live simulation state for this design (RUN/STOP lives by the SCHEMATIC|BREADBOARD toggle).</summary>
     public SimulationViewModel Sim { get; }
@@ -575,6 +588,125 @@ public sealed partial class WiringViewModel : TabViewModelBase
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB design failed: {ex.Message}"; }
         finally { IsExportingPcb = false; }
     }
+
+    /// <summary>
+    /// v2.6 capstone: export the standard 2-layer fab file set (Gerbers + Excellon drill) from the last
+    /// DRC-clean board and bundle it into a single <c>&lt;name&gt;-fab.zip</c> a board house (JLCPCB/PCBWay)
+    /// accepts as-is. Reveals the ZIP and reports the file set on success. Degrades to clear install guidance
+    /// when KiCad is absent (mirrors the not-installed UX). Never throws.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanExportFab))]
+    private async Task ExportFab()
+    {
+        if (IsExportingPcb || string.IsNullOrEmpty(LastPcbPath)) return;
+        IsExportingPcb = true;
+        PcbNotes.Clear();
+        try { await ExportFabCore(LastPcbPath); }
+        catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"Fab export failed: {ex.Message}"; }
+        finally { IsExportingPcb = false; }
+    }
+
+    /// <summary>Shared fab-export step used by EXPORT GERBERS and the one-shot DESIGN + GERBERS path.</summary>
+    private async Task ExportFabCore(string boardPath)
+    {
+        PcbSeverity = "info"; PcbStatus = "Exporting Gerbers + drill and packaging the fab ZIP…";
+        var dir = ConfigStore.Load().OutputFolder;
+        Directory.CreateDirectory(dir);
+
+        var fab = await Foundry.Core.Pcb.Fab.GerberExporter.ExportAsync(boardPath, dir);
+
+        foreach (var n in fab.Notes) PcbNotes.Add(n);
+
+        if (!fab.Installed)
+        {
+            PcbSeverity = "info";
+            PcbStatus = fab.Summary;  // "Fab export needs KiCad — install it from … to run kicad-cli pcb export."
+            return;
+        }
+
+        PcbSeverity = fab.Ok ? "pass" : "fail";
+        PcbStatus = fab.Summary;
+        if (fab.Ok && fab.ZipPath is not null)
+        {
+            LastFabZipPath = fab.ZipPath;
+            foreach (var f in fab.Files) PcbNotes.Add($"· {f}");
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"fab ZIP → {fab.ZipPath}");
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+    }
+
+    /// <summary>
+    /// The v2.6 one-shot path: build → place → route → DRC-fix loop → Gerbers + drill ZIP in a single action
+    /// (<see cref="Foundry.Core.Pcb.PcbDesigner.DesignAndExportFabAsync"/>). Reports per-iteration progress, the
+    /// DRC verdict, then the fab package. Degrades to install guidance when KiCad is absent; never throws.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanDesignPcb))]
+    private async Task DesignAndExportFab()
+    {
+        if (IsExportingPcb) return;
+        IsExportingPcb = true;
+        PcbNotes.Clear();
+        PcbSeverity = "info"; PcbStatus = "Designing the PCB and exporting fab files — build → route → DRC → Gerbers…";
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+
+            var key = new Foundry.Core.Security.CredentialStore().Read(Foundry.Core.Security.CredentialStore.AnthropicTarget);
+            Foundry.Core.Ai.IAnthropicClient? ai =
+                string.IsNullOrWhiteSpace(key) ? null : new Foundry.Core.Ai.AnthropicClient(key!);
+            var model = ConfigStore.Load().ModelId;
+            var options = Foundry.Core.Pcb.DrcOptions.Default;
+
+            var (design, fab) = await Foundry.Core.Pcb.PcbDesigner.DesignAndExportFabAsync(Project, dir, ai, model, options);
+
+            int n = 0;
+            foreach (var line in design.Trace)
+                PcbNotes.Add($"iteration {++n}/{options.MaxIterations}: {line}");
+            foreach (var note in design.Notes) PcbNotes.Add(note);
+
+            if (!design.Installed)
+            {
+                PcbSeverity = "info";
+                PcbStatus = $"KiCad isn't installed — install it from {Foundry.Core.Pcb.KiCadInstaller.DownloadUrl} to design + export fab files.";
+                return;
+            }
+
+            if (design.KicadPcbPath is not null) LastPcbPath = design.KicadPcbPath;
+
+            // The DRC gate must pass before there's a board worth fabbing.
+            if (!design.Ok)
+            {
+                PcbSeverity = "fail";
+                PcbStatus = design.Summary;
+                return;
+            }
+
+            foreach (var fn in fab.Notes) PcbNotes.Add(fn);
+            PcbSeverity = fab.Ok ? "pass" : "fail";
+            PcbStatus = fab.Summary;
+            if (fab.Ok && fab.ZipPath is not null)
+            {
+                LastFabZipPath = fab.ZipPath;
+                foreach (var f in fab.Files) PcbNotes.Add($"· {f}");
+                Foundry.Core.Diagnostics.AppLog.Info("export", $"design + fab ZIP after {design.Iterations} iter → {fab.ZipPath}");
+                Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            }
+        }
+        catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"Design + fab export failed: {ex.Message}"; }
+        finally { IsExportingPcb = false; }
+    }
+
+    /// <summary>Reveal the last-produced fab ZIP in Explorer (selects the file).</summary>
+    [RelayCommand(CanExecute = nameof(HasFabZip))]
+    private void RevealFabZip()
+    {
+        if (string.IsNullOrEmpty(LastFabZipPath) || !File.Exists(LastFabZipPath)) return;
+        try { Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = $"/select,\"{LastFabZipPath}\"", UseShellExecute = true }); }
+        catch (Exception ex) { Status = $"Couldn't reveal the fab ZIP: {ex.Message}"; }
+    }
+
+    partial void OnLastFabZipPathChanged(string? value) => RevealFabZipCommand.NotifyCanExecuteChanged();
 
     /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>
     [RelayCommand]

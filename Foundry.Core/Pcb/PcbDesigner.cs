@@ -1,5 +1,6 @@
 using Foundry.Core.Ai;
 using Foundry.Core.Diagnostics;
+using Foundry.Core.Pcb.Fab;
 
 namespace Foundry.Core.Pcb;
 
@@ -98,6 +99,31 @@ public static class PcbDesigner
             : (plan, _, _) => Task.FromResult(plan);
 
         return await RunLoopAsync(initialPlan, build, route, drc, revise, options.MaxIterations, ct);
+    }
+
+    /// <summary>
+    /// End-to-end v2.6 capstone: run the v2.5 fix loop to a DRC-clean board, then export the fab file set and
+    /// bundle it into a single <c>&lt;name&gt;-fab.zip</c> under <paramref name="outputDir"/>. Returns the
+    /// <see cref="PcbDesignResult"/> plus the <see cref="FabExportResult"/>. The export only runs when the
+    /// design passed (a DRC-clean board is the contract for fab); when the design didn't pass, the fab result
+    /// mirrors the design's degrade (NotInstalled vs Failed) so callers see one consistent story. Prior entry
+    /// points (<see cref="DesignAsync"/>/<see cref="RunLoopAsync"/>) are left intact.
+    /// </summary>
+    public static async Task<(PcbDesignResult Design, FabExportResult Fab)> DesignAndExportFabAsync(
+        Project.Project project, string outputDir, IAnthropicClient? ai = null, string? model = null,
+        DrcOptions? options = null, FabOptions? fabOptions = null, CancellationToken ct = default)
+    {
+        var design = await DesignAsync(project, outputDir, ai, model, options, ct);
+        if (!design.Ok || string.IsNullOrEmpty(design.KicadPcbPath))
+        {
+            var fab = design.Installed
+                ? FabExportResult.Failed($"No DRC-clean board to export — {design.Summary}")
+                : FabExportResult.NotInstalled();
+            return (design, fab);
+        }
+
+        var fabResult = await GerberExporter.ExportAsync(design.KicadPcbPath!, outputDir, fabOptions, ct);
+        return (design, fabResult);
     }
 
     /// <summary>
