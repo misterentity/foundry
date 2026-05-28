@@ -161,6 +161,37 @@
             </StackPanel>
           </Border>
 
+          <!-- BOARD HOUSE (FAB ORDER · v2.7) -->
+          <Border Style="{StaticResource Card}" Margin="0,18,0,0">
+            <StackPanel>
+              <Grid>
+                <TextBlock Style="{StaticResource Serif}" FontSize="24" Text="Board house keys"/>
+                <TextBlock Style="{StaticResource Kicker}" HorizontalAlignment="Right" VerticalAlignment="Center" Text="optional · live PCB quotes"/>
+              </Grid>
+              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,8,0,0"
+                         Text="Keys unlock live PCB quotes and a pre-filled order on the Wiring tab's ORDER PCB step. Foundry never submits or pays — you always finish the order on the fab's own site. Without a key you still get an estimate + assisted handoff."/>
+              <Grid Margin="0,16,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                  <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Margin="0,0,0,8" Text="{Binding PcbWaySummary, StringFormat='PCBWAY · {0}'}"/>
+                  <TextBox Style="{StaticResource FieldInput}" Text="{Binding PcbWayKeyInput, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,16,0">
+                  <Button Style="{StaticResource Btn}" Margin="0,0,6,0" Command="{Binding SavePcbWayKeyCommand}" Content="SAVE"/>
+                  <Button Style="{StaticResource BtnGhost}" Command="{Binding RemovePcbWayKeyCommand}" Content="✕"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Margin="0,0,8,0">
+                  <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Margin="0,0,0,8" Text="{Binding JlcpcbSummary, StringFormat='JLCPCB · {0}'}"/>
+                  <TextBox Style="{StaticResource FieldInput}" Text="{Binding JlcpcbKeyInput, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Bottom">
+                  <Button Style="{StaticResource Btn}" Margin="0,0,6,0" Command="{Binding SaveJlcpcbKeyCommand}" Content="SAVE"/>
+                  <Button Style="{StaticResource BtnGhost}" Command="{Binding RemoveJlcpcbKeyCommand}" Content="✕"/>
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </Border>
+
           <!-- UPDATES -->
           <Border Style="{StaticResource Card}" Margin="0,18,0,0">
             <StackPanel>

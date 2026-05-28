@@ -69,6 +69,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _digiKeySummary = "—";
     [ObservableProperty] private string _mouserKeyInput = "";
     [ObservableProperty] private string _mouserSummary = "—";
+    [ObservableProperty] private string _pcbWayKeyInput = "";
+    [ObservableProperty] private string _pcbWaySummary = "—";
+    [ObservableProperty] private string _jlcpcbKeyInput = "";
+    [ObservableProperty] private string _jlcpcbSummary = "—";
 
     [ObservableProperty] private string _testResult = "";
     [ObservableProperty] private bool _isTesting;
@@ -83,6 +87,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         NexarSummary = CredentialStore.Mask(_credentials.Read(CredentialStore.NexarTarget));
         DigiKeySummary = CredentialStore.Mask(_credentials.Read(CredentialStore.DigiKeyTarget));
         MouserSummary = CredentialStore.Mask(_credentials.Read(CredentialStore.MouserTarget));
+        PcbWaySummary = CredentialStore.Mask(_credentials.Read(CredentialStore.PcbWayTarget));
+        JlcpcbSummary = CredentialStore.Mask(_credentials.Read(CredentialStore.JlcpcbTarget));
     }
 
     private async Task LoadModelsAsync()
@@ -127,6 +133,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand] private void RemoveDigiKey() { _credentials.Delete(CredentialStore.DigiKeyTarget); RefreshSummaries(); }
     [RelayCommand] private void SaveMouserKey() { Persist(CredentialStore.MouserTarget, MouserKeyInput); MouserKeyInput = ""; }
     [RelayCommand] private void RemoveMouserKey() { _credentials.Delete(CredentialStore.MouserTarget); RefreshSummaries(); }
+    [RelayCommand] private void SavePcbWayKey() { Persist(CredentialStore.PcbWayTarget, PcbWayKeyInput); PcbWayKeyInput = ""; }
+    [RelayCommand] private void RemovePcbWayKey() { _credentials.Delete(CredentialStore.PcbWayTarget); RefreshSummaries(); }
+    [RelayCommand] private void SaveJlcpcbKey() { Persist(CredentialStore.JlcpcbTarget, JlcpcbKeyInput); JlcpcbKeyInput = ""; }
+    [RelayCommand] private void RemoveJlcpcbKey() { _credentials.Delete(CredentialStore.JlcpcbTarget); RefreshSummaries(); }
 
     private void Persist(string target, string value)
     {

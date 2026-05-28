@@ -53,11 +53,20 @@
           </StackPanel>
           <ProgressBar IsIndeterminate="True" Height="3" Margin="0,10,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
                        Visibility="{Binding IsExportingPcb, Converter={StaticResource BoolVis}}"/>
-          <Button Style="{StaticResource BtnGhost}" HorizontalAlignment="Left" Padding="12,5" FontSize="10" Margin="0,12,0,0"
-                  Command="{Binding RevealFabZipCommand}" Content="REVEAL FAB ZIP"
-                  ToolTip="Show the fab-ready Gerber + drill ZIP in Explorer"
-                  AutomationProperties.Name="Reveal the fab ZIP in Explorer"
-                  Visibility="{Binding HasFabZip, Converter={StaticResource BoolVis}}"/>
+          <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding HasFabZip, Converter={StaticResource BoolVis}}">
+            <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,8,0"
+                    Command="{Binding RevealFabZipCommand}" Content="REVEAL FAB ZIP"
+                    ToolTip="Show the fab-ready Gerber + drill ZIP in Explorer"
+                    AutomationProperties.Name="Reveal the fab ZIP in Explorer"/>
+            <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,8,0"
+                    Command="{Binding QuoteFabCommand}" Content="QUOTE"
+                    ToolTip="Get a price + lead-time quote for this board from the configured board house (clearly labelled Estimate vs Live — no order is placed)"
+                    AutomationProperties.Name="Get a PCB quote from the board house"/>
+            <Button Style="{StaticResource BtnPrimary}" Padding="12,5" FontSize="10"
+                    Command="{Binding PlaceFabOrderCommand}" Content="ORDER PCB…"
+                    ToolTip="Prepare the order: opens the board house's upload page with the params copied and the ZIP ready. Foundry never submits or pays — you place the order yourself on the fab's site."
+                    AutomationProperties.Name="Prepare a PCB order with the board house"/>
+          </StackPanel>
           <ItemsControl ItemsSource="{Binding PcbNotes}" Margin="0,10,0,0">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
@@ -66,6 +75,31 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- FAB ORDER (Track B v2.7) — quote + assisted handoff; opt-in, user-keyed, explicit-confirm, never auto-orders -->
+      <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="16,12" Margin="0,0,0,20"
+              Background="{StaticResource Brush.Surface1}" Visibility="{Binding HasFabOrderStatus, Converter={StaticResource BoolVis}}">
+        <StackPanel>
+          <Grid>
+            <TextBlock Style="{StaticResource Kicker}" VerticalAlignment="Center" Text="{Binding FabProviderLabel, StringFormat='BOARD HOUSE · {0}'}"/>
+            <TextBlock Style="{StaticResource Mono}" HorizontalAlignment="Right" FontSize="12.5" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Brush.Accent}" Text="{Binding FabQuoteText}"/>
+          </Grid>
+          <TextBlock Style="{StaticResource Mono}" FontSize="12.5" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" Margin="0,8,0,0" Text="{Binding FabOrderStatus}"/>
+          <ProgressBar IsIndeterminate="True" Height="3" Margin="0,10,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
+                       Visibility="{Binding IsFabbing, Converter={StaticResource BoolVis}}"/>
+          <ItemsControl ItemsSource="{Binding FabOrderNotes}" Margin="0,8,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="11" TextWrapping="Wrap" Margin="14,2,0,0"
+                           Foreground="{StaticResource Brush.InkMute}" Text="{Binding}"/>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkFaint}" TextWrapping="Wrap" Margin="0,10,0,0"
+                     Text="Foundry never submits an order and never pays — ORDER PCB only opens the fab's page with your params + ZIP ready so you can finish the order yourself."/>
         </StackPanel>
       </Border>
 

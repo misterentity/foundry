@@ -706,7 +706,126 @@ public sealed partial class WiringViewModel : TabViewModelBase
         catch (Exception ex) { Status = $"Couldn't reveal the fab ZIP: {ex.Message}"; }
     }
 
-    partial void OnLastFabZipPathChanged(string? value) => RevealFabZipCommand.NotifyCanExecuteChanged();
+    partial void OnLastFabZipPathChanged(string? value)
+    {
+        RevealFabZipCommand.NotifyCanExecuteChanged();
+        QuoteFabCommand.NotifyCanExecuteChanged();
+        PlaceFabOrderCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanOrderFab));
+    }
+
+    // ---- Track B v2.7: get a quote / prepare an order with a board house ----
+    // Opt-in, user-keyed, explicit-confirm. Quoting and order-prep NEVER submit or pay — PLACE ORDER only
+    // opens the fab's upload page (http(s) via OpenUrl) with the params copied and the ZIP ready; the user
+    // finishes on the fab's site. Mirrors the PCB status block's not-installed / degrade-gracefully UX.
+    [ObservableProperty] private bool _isFabbing;
+    [ObservableProperty] private string _fabOrderStatus = "";
+    [ObservableProperty] private string _fabQuoteText = "";
+    public ObservableCollection<string> FabOrderNotes { get; } = new();
+    public bool HasFabOrderStatus => !string.IsNullOrEmpty(FabOrderStatus);
+    partial void OnFabOrderStatusChanged(string value) => OnPropertyChanged(nameof(HasFabOrderStatus));
+
+    /// <summary>Which house we'll quote/order with (e.g. "PCBWAY · live quotes" or "offline · estimate + handoff").</summary>
+    public string FabProviderLabel
+    {
+        get
+        {
+            var svc = Foundry.Core.Pcb.Fab.FabService.Shared;
+            return svc.IsLive ? $"{svc.ProviderName} · live quotes"
+                 : svc.NeedsApiKey ? $"{svc.ProviderName} · estimate + handoff"
+                 : "no API key — estimate + assisted handoff (add a key in Settings)";
+        }
+    }
+
+    public bool CanOrderFab => !IsFabbing && HasFabZip;
+
+    partial void OnIsFabbingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanOrderFab));
+        QuoteFabCommand.NotifyCanExecuteChanged();
+        PlaceFabOrderCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Fetch a price/lead-time quote for the last fab ZIP (clearly labelled Estimate vs Live). Never orders.</summary>
+    [RelayCommand(CanExecute = nameof(CanOrderFab))]
+    private async Task QuoteFab()
+    {
+        if (IsFabbing || string.IsNullOrEmpty(LastFabZipPath)) return;
+        IsFabbing = true;
+        FabOrderNotes.Clear();
+        FabOrderStatus = $"Getting a quote from {Foundry.Core.Pcb.Fab.FabService.Shared.ProviderName}…";
+        FabQuoteText = "";
+        try
+        {
+            var svc = Foundry.Core.Pcb.Fab.FabService.Shared;
+            var spec = Foundry.Core.Pcb.Fab.FabService.BuildSpec(LastFabZipPath, LastPcbPath);
+            var quote = await svc.QuoteAsync(spec);
+            var tag = quote.Source == Foundry.Core.Pcb.Fab.FabQuoteSource.Live ? "LIVE" : "ESTIMATE";
+            var price = quote.Price is { } p ? $"{p:0.00} {quote.Currency}" : "price n/a";
+            var lead = quote.LeadTimeDays is { } d ? $" · ~{d} day lead" : "";
+            FabQuoteText = $"[{tag}] {quote.Provider} · {price}{lead}";
+            FabOrderStatus = quote.Summary;
+            foreach (var n in quote.Notes) FabOrderNotes.Add($"· {n}");
+            Foundry.Core.Diagnostics.AppLog.Info("fab", $"quote ({tag}) · {FabQuoteText}");
+        }
+        catch (Exception ex) { FabOrderStatus = $"Quote failed: {ex.Message}"; }
+        finally { IsFabbing = false; }
+    }
+
+    /// <summary>
+    /// Explicit-confirm order prep: prepares an assisted handoff (never auto-submits), copies the order params,
+    /// reveals the ZIP, and opens the fab's upload page so the user finishes the order themselves on the fab's site.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanOrderFab))]
+    private async Task PlaceFabOrder()
+    {
+        if (IsFabbing || string.IsNullOrEmpty(LastFabZipPath)) return;
+
+        var confirm = System.Windows.MessageBox.Show(
+            "Foundry will open the board house's order page in your browser with the order details copied to your " +
+            "clipboard and the fab ZIP ready to upload.\n\nFoundry does NOT submit the order and does NOT pay — you " +
+            "review the price and place the order yourself on the fab's site.\n\nContinue?",
+            "Foundry — prepare PCB order",
+            System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Information);
+        if (confirm != System.Windows.MessageBoxResult.OK) return;
+
+        IsFabbing = true;
+        FabOrderNotes.Clear();
+        FabOrderStatus = "Preparing the order handoff…";
+        try
+        {
+            var svc = Foundry.Core.Pcb.Fab.FabService.Shared;
+            var spec = Foundry.Core.Pcb.Fab.FabService.BuildSpec(LastFabZipPath, LastPcbPath);
+            var handoff = await svc.PrepareOrderAsync(spec);
+
+            foreach (var n in handoff.Notes) FabOrderNotes.Add($"· {n}");
+            FabOrderNotes.Add($"· order params copied to clipboard: {handoff.ClipboardParams}");
+            try { System.Windows.Clipboard.SetText(handoff.ClipboardParams); } catch { /* clipboard best effort */ }
+
+            // Reveal the ZIP so the user can drag-drop it on the fab's upload page.
+            if (File.Exists(handoff.ZipPath))
+                try { Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = $"/select,\"{handoff.ZipPath}\"", UseShellExecute = true }); }
+                catch { /* best effort */ }
+
+            // Open the fab portal — http(s) only via the safe OpenUrl. This is the only outward action, and the
+            // user explicitly confirmed it; nothing is submitted or paid.
+            OpenUrl(handoff.PortalUrl);
+
+            FabOrderStatus = handoff.Summary;
+            Foundry.Core.Diagnostics.AppLog.Info("fab", $"order handoff opened · {handoff.Provider} · {handoff.PortalUrl} (not submitted)");
+        }
+        catch (Exception ex) { FabOrderStatus = $"Order prep failed: {ex.Message}"; }
+        finally { IsFabbing = false; }
+    }
+
+    /// <summary>Open a URL in the default browser — http(s) only (defends against shell-handler abuse).</summary>
+    private static void OpenUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return;
+        try { Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true }); }
+        catch { /* best effort */ }
+    }
 
     /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>
     [RelayCommand]

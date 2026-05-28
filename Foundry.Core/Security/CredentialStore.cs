@@ -14,6 +14,8 @@ public sealed class CredentialStore : ICredentialStore
     public const string NexarTarget     = "Foundry:Nexar";
     public const string DigiKeyTarget   = "Foundry:DigiKey";
     public const string MouserTarget    = "Foundry:Mouser";
+    public const string PcbWayTarget     = "Foundry:PcbWay";
+    public const string JlcpcbTarget     = "Foundry:Jlcpcb";
 
     public void Save(string target, string secret)
     {

@@ -1470,3 +1470,190 @@ Tests (`Foundry.Tests`, all KiCad-free):
   https://jlcpcb.com/help/article/how-to-generate-gerber-and-drill-files-in-kicad-9
 - PCB Export overview (kicad-cli source/behavior — exit-code-on-success, one-file-per-layer):
   https://deepwiki.com/KiCad/kicad-source-mirror/2.6-pcb-export
+
+## v2.7 Fab Order (concrete)
+
+The last Track B rung. Take v2.6's fab ZIP (`FabExportResult.ZipPath`) and let the user get a **quote**
+(price / lead-time estimate) and **prepare an order** with a board house — JLCPCB (primary), PCBWay
+(secondary). Mirrors the `Sourcing/` provider shape: an `IFabProvider` abstraction with a real provider per
+house + a `Null`/assisted-handoff fallback, selected once at startup from which keys are configured. New
+code lives in `Foundry.Core/Pcb/Fab/` next to the exporter.
+
+**HARD GUARDRAILS (non-negotiable, baked into the contract):** the code STOPS at "ready to order / quote".
+It NEVER auto-submits, NEVER places a real order, NEVER uploads to a real fab during build/test/verify. The
+real "place order" is an explicit user action in the UI, gated on user-provided credentials. Tests use a
+FAKE `HttpMessageHandler` / mock provider — zero real endpoints. Where a true headless order needs partner
+status (it does — see verdict), we DEGRADE to an assisted handoff (open the fab's portal with the ZIP ready
++ order params on the clipboard), never a faked order.
+
+### A. API availability verdict (researched on official docs only — no API calls)
+
+**JLCPCB API (api.jlcpcb.com): APPROVAL-GATED. Not openly available to individuals.**
+- There is a real PCB API ("PCB-related operations from file upload to order tracking … upload Gerber
+  files, perform automated pricing, create PCB orders, and track production progress" — real-time
+  quotation, ordering, lifecycle/status tracking). It is genuinely capable, including Gerber upload + quote
+  + order, which is exactly what we'd want.
+- BUT access requires a formal application on the developer portal, and **"each application undergoes a
+  review based on the partner's previous orders at JLCPCB, company and business situation"** and **"not all
+  applications will be approved."** It is positioned as a partner integration, not self-service.
+- Auth scheme is **not published openly** (it's behind the approved-partner docs), so we cannot implement a
+  concrete JLCPCB client against a documented contract today. **Verdict: treat JLCPCB as
+  ESTIMATE-QUOTE + ASSISTED-HANDOFF only** until/unless the user is an approved partner with their own
+  docs/key.
+
+**PCBWay API (api-partner.pcbway.com / "OpenAPL"): ALSO PARTNER-GATED, but the contract IS published.**
+- Access requires emailing `anson@pcbway.com` for approval; **"All application need to be reviewed by
+  PCBWay team"** and it is **"for partner who have the ability to develop their own websites."** So no
+  self-service key for a typical individual either.
+- Unlike JLCPCB, PCBWay publishes the endpoint contract openly at `api-partner.pcbway.com/Help`:
+  - Base URL `https://api-partner.pcbway.com`, JSON, auth via an **`api-key` request header** (+
+    `Content-Type: application/json`).
+  - `POST /api/Pcb/PcbQuotation` → price quote. Body fields seen in the official example include board
+    `length`/`width` (mm), `layers`, `qty`, `thickness` (1.6), material `FR-4`, `MinTrackSpacing`,
+    `MinHoleSize`, `SolderMask`, `Silkscreen`, surface finish / via process, `buildDays`, plus a
+    **`pcbFileUrl` + `PcbFileName`** (the fab file is referenced by URL, not multipart-uploaded), and notes.
+  - Order workflow endpoints also documented: `POST /api/Pcb/PlaceOrder` (add to cart),
+    `POST /api/Pcb/GetFeightByOrder` (shipping), `POST /api/Pcb/ConfirmOrder` (**payment** — the live-money
+    step we never call), `POST /api/Pcb/QueryOrder` / `QueryOrderProcess` (status), `POST /api/Pcb/CancelOrder`.
+- **Verdict: PCBWay has a concrete, documented contract we CAN code a real client against** (gated behind
+  `NeedsApiKey` + an opt-in key), but it still requires partner approval to actually work, the file must be
+  exposed as a URL, and `ConfirmOrder` is real money. So PCBWay's live path is implementable but the realistic
+  default for most users is again ESTIMATE-QUOTE + ASSISTED-HANDOFF.
+
+**Bottom line:** neither house offers an open, individual, self-service ordering API. Both are
+partner/approval-gated. PCBWay additionally publishes its contract, so a `PcbWayProvider` can implement a
+*real* `QuoteAsync` (and stop at `PrepareOrderAsync`/cart, never `ConfirmOrder`) IF the user supplies an
+approved key; JLCPCB stays estimate + handoff because its contract isn't openly published.
+
+### B. Recommended safe MVP — hybrid: local estimate + assisted handoff (+ optional live PCBWay quote)
+
+Every provider always supports two no-key things, and one optional keyed thing:
+
+1. **Local QUOTE ESTIMATE (no key, always available).** Derive board params from the fab artifacts (§D),
+   then price from a small table of published price tiers per house (`source = estimate`). This is a rough
+   ballpark with a clear "estimate, not a live quote" label — never presented as a binding price.
+2. **ASSISTED HANDOFF (no key, always available).** `PrepareOrderAsync` returns a `FabOrderHandoff` =
+   the fab's instant-quote/upload URL + the order params + the ZIP path. The UI opens that URL in the
+   browser, puts the params on the clipboard, and reveals the ZIP in Explorer so the user drag-drops it
+   and finishes ON THE FAB'S SITE. This is the realistic ordering path and it is inherently
+   explicit-confirm (the user completes it themselves). NEVER an auto-submit.
+3. **Optional LIVE QUOTE (opt-in, keyed — PCBWay only for now).** If the user has supplied an approved
+   PCBWay `api-key`, `PcbWayProvider.QuoteAsync` calls `POST /api/Pcb/PcbQuotation` and returns a live
+   price/lead-time (`source = live`). It still does NOT place an order; `PrepareOrderAsync` may at most
+   reach the cart/`PlaceOrder` step behind an explicit user confirm, and NEVER calls `ConfirmOrder`
+   (payment). JLCPCB has no live path → its provider's `QuoteAsync` is estimate-only.
+
+Per provider, concretely:
+
+| Provider | NeedsApiKey | QuoteAsync | PrepareOrderAsync |
+|---|---|---|---|
+| `JlcpcbProvider` | true (but no live path published) | estimate only (`source=estimate`) | assisted handoff → JLCPCB upload/quote page + params + ZIP |
+| `PcbWayProvider` | true | live `PcbQuotation` if keyed, else estimate | assisted handoff → PCBWay quote page + params + ZIP; live `PlaceOrder` (cart) only behind explicit confirm; NEVER `ConfirmOrder` |
+| `NullFabProvider` (fallback) | false | estimate only | assisted handoff (default to JLCPCB instant-quote page) |
+
+The HTTP provider mirrors `AnthropicClient`/`NexarSourcingProvider`: a static shared `HttpClient` with an
+**injectable `HttpMessageHandler`** so tests pass a fake handler (no real calls). Key stored in Windows
+Credential Manager via `CredentialStore` (`Foundry:Jlcpcb`, `Foundry:PcbWay`), entered + tested in
+`SettingsView` exactly like the Nexar/Anthropic keys; never in tracked files.
+
+### C. The `IFabProvider` contract + models (mirrors `ISourcingProvider`)
+
+```csharp
+namespace Foundry.Core.Pcb.Fab;
+
+/// <summary>Board + run parameters fed to a fab provider, derived from the fab ZIP / .kicad_pcb (§D).</summary>
+public sealed record FabOrderSpec(
+    string ZipPath,            // the v2.6 fab ZIP a house accepts as-is
+    double WidthMm,            // from Edge.Cuts bbox
+    double HeightMm,           // from Edge.Cuts bbox
+    int Layers = 2,            // v2.7 is 2-layer
+    int Quantity = 5,          // user-chosen; small default
+    double ThicknessMm = 1.6,
+    string Material = "FR-4",
+    string? BoardName = null);
+
+/// <summary>Where the quote came from — a rough local estimate vs. a live API price.</summary>
+public enum FabQuoteSource { Estimate, Live }
+
+/// <summary>A price / lead-time quote for a board from a house. Nullable price/lead = "couldn't price".</summary>
+public sealed record FabQuote(
+    string Provider,
+    decimal? Price,
+    string Currency,           // "USD"
+    int? LeadTimeDays,
+    FabQuoteSource Source,
+    string Summary,            // human line, e.g. "≈ $7 (estimate), ~5 business days"
+    IReadOnlyList<string> Notes);
+
+/// <summary>
+/// A prepared, NOT-submitted order. The UI opens <see cref="PortalUrl"/> in the browser, copies
+/// <see cref="ClipboardParams"/>, and reveals <see cref="ZipPath"/> so the user finishes on the fab's site.
+/// This is the explicit-confirm boundary — Foundry never auto-submits or pays.
+/// </summary>
+public sealed record FabOrderHandoff(
+    string Provider,
+    string PortalUrl,                              // fab instant-quote / upload page
+    string ZipPath,                                // the fab ZIP to drag-drop / select
+    IReadOnlyDictionary<string, string> Params,    // size, layers, qty, thickness…
+    string ClipboardParams,                        // params pre-formatted for paste
+    string Summary,
+    IReadOnlyList<string> Notes);
+
+/// <summary>A board house that can quote a board and prepare (NEVER submit) an order.</summary>
+public interface IFabProvider
+{
+    string Name { get; }
+    /// <summary>True if a live API path needs a user key; estimate + handoff work regardless.</summary>
+    bool NeedsApiKey { get; }
+    /// <summary>True when configured with a key AND able to return a LIVE quote.</summary>
+    bool IsLive { get; }
+
+    Task<FabQuote> QuoteAsync(FabOrderSpec spec, CancellationToken ct = default);
+
+    /// <summary>Prepare an assisted handoff. NEVER auto-submits, NEVER pays. Always returns a handoff.</summary>
+    Task<FabOrderHandoff> PrepareOrderAsync(FabOrderSpec spec, CancellationToken ct = default);
+}
+```
+
+`NullFabProvider` (no key, default fallback): `NeedsApiKey=false`, `IsLive=false`, `QuoteAsync` →
+`Estimate`, `PrepareOrderAsync` → JLCPCB instant-quote handoff. Like `NullSourcingProvider`, it never
+throws and degrades gracefully so the UI always has *something* (estimate + a place to upload).
+A `FabService.Shared` (mirrors `SourcingService.Shared`) holds the selected provider, defaulting to
+`NullFabProvider` until App wires keys.
+
+### D. Deriving board params from the fab ZIP / `.kicad_pcb`
+
+We need `WidthMm`/`HeightMm` (and confirm `Layers=2`); everything else is user-chosen (qty) or fixed
+(thickness 1.6, FR-4) for v2.7.
+
+- **Best source: the `.kicad_pcb` (`PcbDesignResult.KicadPcbPath`).** The board outline is the rectangular
+  set of `Edge.Cuts` segments the builder wrote (`build_board.py` writes `gr_line`/segments on
+  `pcbnew.Edge_Cuts`). Parse the board text for shapes on layer `Edge.Cuts` (`(gr_line … (layer "Edge.Cuts"))`
+  /`(gr_rect …)`), collect their `(start …)/(end …)` points, and take the bounding box → `Width/Height`.
+  This is a **pure text parse — no KiCad process needed and fully fake-able** (tests feed a synthetic board
+  string), exactly the testability bar the rest of v2.x holds. Pass it the same way `FabOptions` is passed.
+- **Fallback from the fab ZIP:** if only the ZIP is at hand, parse the **`.gm1`** board-outline gerber's
+  coordinate extents for the bbox (the outline gerber is the board profile). Coarser than the `.kicad_pcb`
+  parse; use only when the source board isn't available.
+- **Layers = 2** is known from the pipeline (v2.7 is the standard 2-layer set, `FabOptions.DefaultLayers`),
+  not derived. Keep it a field on `FabOrderSpec` so a later N-layer rung just sets it.
+- A tiny `BoardDimensions.FromKicadPcb(string boardText)` helper (pure, returns `(WidthMm, HeightMm)`)
+  feeds `FabOrderSpec`, mirroring how `FabFileSet.Validate` is a pure name-list check.
+
+### E. Sources (v2.7, official docs only — researched, no API calls)
+
+- JLCPCB API platform overview (PCB / Parts / 3D / Stencil APIs; "apply for free API access"):
+  https://api.jlcpcb.com/
+- JLCPCB "Online API available now" — approval-gated, **"each application undergoes a review based on the
+  partner's previous orders … company and business situation"**, **"not all applications will be approved"**;
+  PCB API does Gerber upload + automated pricing + order create + production tracking:
+  https://jlcpcb.com/help/article/jlcpcb-online-api-available-now
+- PCBWay API Cooperation — partner-gated, email `anson@pcbway.com` for approval, **"for partner who have
+  the ability to develop their own websites"**, functions = quotation/status/order/tracking:
+  https://www.pcbway.com/api_cooperation.html
+- PCBWay partner API docs (base URL `https://api-partner.pcbway.com`, `api-key` header,
+  `POST /api/Pcb/PcbQuotation`, `PlaceOrder`, `ConfirmOrder`, `QueryOrder`/`QueryOrderProcess`,
+  `GetFeightByOrder`, `CancelOrder`; quote body = length/width/layers/qty/thickness/material/finish +
+  `pcbFileUrl`/`PcbFileName`):
+  https://api-partner.pcbway.com/Help ; example: https://api-partner.pcbway.com/Help/Example ;
+  quote endpoint: https://api-partner.pcbway.com/Help/Api/POST-api-Pcb-PcbQuotation

@@ -80,7 +80,14 @@ public sealed partial class MainViewModel : ObservableObject
         SourcingService.Shared = new SourcingService(
             string.IsNullOrWhiteSpace(nexarKey) ? new NullSourcingProvider() : new NexarSourcingProvider(nexarKey));
 
-        AppLog.Info("services", $"rebuilt · model {modelId} · key {(hasKey ? "connected" : "none")} · sourcing {(string.IsNullOrWhiteSpace(nexarKey) ? "offline" : "Nexar")}");
+        // Fab order (v2.7): prefer a keyed PCBWay (live quotes), then a keyed JLCPCB (estimate + handoff),
+        // else the offline fallback. Keys are user-provided; the order path always stops at an assisted handoff.
+        var pcbWayKey = _credentials.Read(CredentialStore.PcbWayTarget);
+        var jlcpcbConfigured = _credentials.Exists(CredentialStore.JlcpcbTarget);
+        Foundry.Core.Pcb.Fab.FabService.Shared = new Foundry.Core.Pcb.Fab.FabService(
+            Foundry.Core.Pcb.Fab.FabService.Select(pcbWayKey, jlcpcbConfigured));
+
+        AppLog.Info("services", $"rebuilt · model {modelId} · key {(hasKey ? "connected" : "none")} · sourcing {(string.IsNullOrWhiteSpace(nexarKey) ? "offline" : "Nexar")} · fab {Foundry.Core.Pcb.Fab.FabService.Shared.ProviderName}");
         ModelLabel = FormatModel(modelId);
         KeyLabel = hasKey ? "KEY CONNECTED" : "NO KEY · OFFLINE";
         KeyDotSeverity = hasKey ? "ok" : "warn";
