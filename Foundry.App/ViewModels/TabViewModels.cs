@@ -7,6 +7,7 @@ using Foundry.Core.Config;
 using Foundry.Core.Export;
 using Foundry.Core.Firmware;
 using Foundry.Core.Project;
+using Foundry.Core.Simulation;
 using Foundry.Core.Sourcing;
 using Foundry.Core.Validation;
 using Microsoft.Win32;
@@ -314,9 +315,17 @@ public sealed partial class BomViewModel : TabViewModelBase
 // ---------------- Wiring ----------------
 public sealed partial class WiringViewModel : TabViewModelBase
 {
-    public WiringViewModel(Project project) : base(project) { }
+    public WiringViewModel(Project project) : base(project)
+    {
+        Sim = new SimulationViewModel(project);
+        // Running the simulation only makes sense on the breadboard (it's the live pin-state renderer).
+        Sim.RunStarting += () => Breadboard = true;
+    }
     public int NetCount => Project.Connections.Count;
     [ObservableProperty] private string _status = "";
+
+    /// <summary>Live simulation state for this design (RUN/STOP lives by the SCHEMATIC|BREADBOARD toggle).</summary>
+    public SimulationViewModel Sim { get; }
 
     // v2 G5: schematic ⇄ breadboard view
     [ObservableProperty] private bool _breadboard;
@@ -377,6 +386,143 @@ public sealed partial class WiringViewModel : TabViewModelBase
             Status = $"Exported to {path}";
         }
         catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
+    }
+}
+
+/// <summary>
+/// Live-simulation control for the Wiring tab (Track A step 3/4). Asks <see cref="SimulatorFactory"/> for the
+/// right engine for this board — avr8js for Arduino AVR (Uno/Nano/Mega), Renode for STM32/RP2040 — then
+/// compiles/loads the firmware, starts the session, and streams per-GPIO edges into <see cref="LivePinState"/>,
+/// which the breadboard binds to and renders as glowing pins/wires. Engine-agnostic: the same one
+/// <c>pin=level</c> contract drives the UI regardless of which engine produced the edges, so the install
+/// affordance (INSTALL RENODE) only surfaces for the Renode engine when it's the chosen one and missing.
+/// </summary>
+public sealed partial class SimulationViewModel : ObservableObject
+{
+    private readonly Project _project;
+    private readonly ISimulator _simulator;
+    private SimSession? _session;
+    private CancellationTokenSource? _cts;
+
+    [ObservableProperty] private bool _isRunning;
+    [ObservableProperty] private bool _isStarting;
+    [ObservableProperty] private string _status = "";
+    [ObservableProperty] private double _speed = 1.0;
+    [ObservableProperty] private PinStateSnapshot? _livePinState;
+    [ObservableProperty] private bool _renodeInstalled;
+
+    /// <summary>True when the chosen engine is Renode (which has an on-demand install step).</summary>
+    private readonly bool _usesRenode;
+
+    /// <summary>Raised just before a run starts so the Wiring view can flip to the breadboard renderer.</summary>
+    public event Action? RunStarting;
+
+    public SimulationViewModel(Project project, ISimulator? simulator = null)
+    {
+        _project = project;
+        _simulator = simulator ?? SimulatorFactory.For(project);
+        _usesRenode = _simulator.Engine == SimEngine.Renode;
+        RenodeInstalled = RenodeInstaller.IsInstalled;
+        var cap = _simulator.CanSimulate(project);
+        CanSimulate = cap.Supported;
+        Status = cap.Supported
+            ? (NeedsRenode ? cap.Reason : "Ready to simulate — press RUN.")
+            : cap.Reason;
+    }
+
+    /// <summary>Whether this board has any live-simulation model at all (false ⇒ "flash to run").</summary>
+    public bool CanSimulate { get; }
+
+    /// <summary>Only the Renode engine needs a one-time install; avr8js runs in-process.</summary>
+    public bool NeedsRenode => CanSimulate && _usesRenode && !RenodeInstalled;
+
+    partial void OnRenodeInstalledChanged(bool value) => OnPropertyChanged(nameof(NeedsRenode));
+
+    partial void OnSpeedChanged(double value) => _session?.SetSpeed(value);
+
+    /// <summary>Compile → start the engine → subscribe to pin edges (marshalled to the UI thread).</summary>
+    [RelayCommand]
+    private async Task Run()
+    {
+        if (IsRunning || IsStarting || !CanSimulate) return;
+        if (_usesRenode && !RenodeInstaller.IsInstalled) { Status = "Renode isn't installed — click INSTALL RENODE."; return; }
+
+        IsStarting = true;
+        RunStarting?.Invoke();
+        Status = "Starting simulation…";
+        _cts = new CancellationTokenSource();
+        try
+        {
+            var session = await _simulator.StartAsync(_project, _cts.Token);
+            _session = session;
+            LivePinState = session.Current;
+            Status = session.StatusMessage;
+
+            if (!session.IsRunning)
+            {
+                // The simulator degrades gracefully (compile/engine failure) — it returns a stopped session.
+                session.Dispose();
+                _session = null;
+                return;
+            }
+
+            session.Updated += OnSessionUpdated;
+            session.Stopped += OnSessionStopped;
+            session.SetSpeed(Speed);
+            IsRunning = true;
+            Foundry.Core.Diagnostics.AppLog.Info("sim", $"UI sim started · {session.Pins.Count} pin(s)");
+        }
+        catch (OperationCanceledException) { Status = "Start cancelled."; }
+        catch (Exception ex) { Status = $"Couldn't start simulation: {ex.Message}"; }
+        finally { IsStarting = false; }
+    }
+
+    private void OnSessionUpdated(PinStateSnapshot snapshot) =>
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            LivePinState = snapshot;
+            if (_session is not null) Status = _session.StatusMessage;
+        }));
+
+    private void OnSessionStopped(string final) =>
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            IsRunning = false;
+            Status = final;
+        }));
+
+    [RelayCommand]
+    private void Stop()
+    {
+        _cts?.Cancel();
+        var s = _session;
+        _session = null;
+        if (s is not null)
+        {
+            s.Updated -= OnSessionUpdated;
+            s.Stopped -= OnSessionStopped;
+            s.Dispose();
+        }
+        IsRunning = false;
+        LivePinState = null;
+        Status = "Stopped.";
+    }
+
+    /// <summary>Download a portable Renode to the app tools folder on demand (one-time).</summary>
+    [RelayCommand]
+    private async Task InstallRenode()
+    {
+        if (IsStarting || !_usesRenode) return;
+        IsStarting = true;
+        Status = "Downloading Renode (~120 MB, one-time)…";
+        try
+        {
+            await RenodeInstaller.DownloadAsync();
+            RenodeInstalled = RenodeInstaller.IsInstalled;
+            Status = RenodeInstalled ? "Renode installed — press RUN to simulate." : "Renode install didn't complete.";
+        }
+        catch (Exception ex) { Status = $"Install failed: {ex.Message}"; }
+        finally { IsStarting = false; }
     }
 }
 
@@ -664,6 +810,16 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
     public bool HasBuildStatus => !string.IsNullOrEmpty(BuildStatus);
     partial void OnBuildStatusChanged(string value) => OnPropertyChanged(nameof(HasBuildStatus));
 
+    // Track A step 4/4: one-click flash to a USB-connected board.
+    [ObservableProperty] private bool _isFlashing;
+    [ObservableProperty] private string _flashStatus = "";
+    [ObservableProperty] private string _flashSeverity = "info";  // pass | fail | info
+    [ObservableProperty] private DetectedBoard? _selectedBoard;
+    public ObservableCollection<DetectedBoard> Boards { get; } = new();
+    public bool HasFlashStatus => !string.IsNullOrEmpty(FlashStatus);
+    public bool HasBoardChoices => Boards.Count > 1;
+    partial void OnFlashStatusChanged(string value) => OnPropertyChanged(nameof(HasFlashStatus));
+
     public FirmwareViewModel(Project project, Foundry.Core.Generation.ProjectGenerator? fixer = null) : base(project)
     {
         _fixer = fixer;
@@ -739,6 +895,55 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
         }
         catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Install failed: {ex.Message}"; }
         finally { IsBuilding = false; }
+    }
+
+    /// <summary>Scan for USB-connected boards so the user can pick one when the choice is ambiguous (PRD Track A).</summary>
+    [RelayCommand]
+    private async Task DetectBoards()
+    {
+        if (IsFlashing) return;
+        IsFlashing = true;
+        FlashSeverity = "info"; FlashStatus = "Scanning for connected boards…";
+        try
+        {
+            var boards = await Foundry.Core.Firmware.FirmwareBuilder.DetectPortsAsync(Project);
+            Boards.Clear();
+            foreach (var b in boards) Boards.Add(b);
+            OnPropertyChanged(nameof(HasBoardChoices));
+            SelectedBoard = Boards.FirstOrDefault();
+            FlashStatus = Boards.Count switch
+            {
+                0 => "No board detected — plug in your board over USB and scan again.",
+                1 => $"Found {Boards[0].Label} on {Boards[0].Port}. Click FLASH to upload.",
+                _ => $"Found {Boards.Count} ports — pick the right one, then click FLASH.",
+            };
+        }
+        catch (Exception ex) { FlashSeverity = "fail"; FlashStatus = $"Board scan failed: {ex.Message}"; }
+        finally { IsFlashing = false; }
+    }
+
+    /// <summary>One-click flash: compile to an image and upload it with arduino-cli (PRD Track A).</summary>
+    [RelayCommand]
+    private async Task Flash()
+    {
+        if (IsFlashing) return;
+        IsFlashing = true;
+        FlashSeverity = "info"; FlashStatus = "Compiling and flashing…";
+        try
+        {
+            var result = await Foundry.Core.Firmware.FirmwareBuilder.UploadAsync(Project, SelectedBoard);
+            if (!result.Installed)
+            {
+                FlashSeverity = "info"; FlashStatus = result.Summary;   // "install arduino-cli…"
+                return;
+            }
+            FlashSeverity = result.Ok ? "pass" : "fail";
+            FlashStatus = string.IsNullOrEmpty(result.Detail) ? result.Summary : $"{result.Summary}\n{result.Detail}";
+            if (result.Ok) Foundry.Core.Diagnostics.AppLog.Info("flash", result.Summary);
+            else Foundry.Core.Diagnostics.AppLog.Warn("flash", result.Summary);
+        }
+        catch (Exception ex) { FlashSeverity = "fail"; FlashStatus = $"Flash failed: {ex.Message}"; }
+        finally { IsFlashing = false; }
     }
 
     /// <summary>Copy the active file's source to the clipboard.</summary>

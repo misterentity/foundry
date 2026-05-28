@@ -1,0 +1,14 @@
+{
+  "name": "foundry-avr8js-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build-time bundle of avr8js for Foundry's in-process ClearScript V8 AVR simulator. Produces a single runtime-free IIFE (dist/avr8js-runtime.js) that the C# host loads and drives. node/npm never ship at runtime.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "esbuild index.js --bundle --format=iife --global-name=Avr8Module --target=es2020 --outfile=dist/avr8js-runtime.js"
+  },
+  "devDependencies": {
+    "avr8js": "0.21.0",
+    "esbuild": "^0.21.0"
+  }
+}

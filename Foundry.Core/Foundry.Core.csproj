@@ -9,6 +9,20 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="QuestPDF" Version="2026.5.0" />
+    <PackageReference Include="Microsoft.ClearScript.V8" Version="7.4.5" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.4.5" />
+  </ItemGroup>
+
+  <!-- avr8js runtime bundle (build-time esbuild output) — shipped beside the assembly under Assets/
+       and loaded at runtime by Avr8jsSimulator from AppContext.BaseDirectory. -->
+  <ItemGroup>
+    <None Include="..\sidecar-avr\dist\avr8js-runtime.js" Link="Assets\avr8js-runtime.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Foundry.Tests" />
   </ItemGroup>
 
 </Project>

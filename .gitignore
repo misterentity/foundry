@@ -20,6 +20,9 @@ sidecar/dist/
 sidecar/build/
 *.pyc
 
+# AVR JS sidecar — node_modules is build-time only; the built bundle (dist/) is committed as source
+sidecar-avr/node_modules/
+
 # Packaging
 build/AppPackages/
 *.msix

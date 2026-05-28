@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using Foundry.Core.Simulation;
 using FProject = Foundry.Core.Project.Project;
 
 namespace Foundry.App.Rendering;
@@ -18,6 +19,17 @@ public sealed class BreadboardControl : FrameworkElement
             new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
 
     public FProject? Project { get => (FProject?)GetValue(ProjectProperty); set => SetValue(ProjectProperty, value); }
+
+    /// <summary>
+    /// Live pin-state overlay produced by the simulator. When non-null, MCU output pins and the wires they
+    /// drive light up according to their level (HIGH = bright net colour + glow, LOW = dim). When null the
+    /// control renders exactly the static breadboard as before — the overlay is the only thing this adds.
+    /// </summary>
+    public static readonly DependencyProperty LivePinStateProperty =
+        DependencyProperty.Register(nameof(LivePinState), typeof(PinStateSnapshot), typeof(BreadboardControl),
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public PinStateSnapshot? LivePinState { get => (PinStateSnapshot?)GetValue(LivePinStateProperty); set => SetValue(LivePinStateProperty, value); }
 
     // palette
     private static readonly Color CBg = Color.FromRgb(0x07, 0x07, 0x0A);
@@ -39,12 +51,12 @@ public sealed class BreadboardControl : FrameworkElement
     private static FontFamily Mono => (FontFamily)(Application.Current?.TryFindResource("Font.Mono") ?? new FontFamily("Consolas"));
     private static FontFamily Serif => (FontFamily)(Application.Current?.TryFindResource("Font.Serif") ?? new FontFamily("Georgia"));
 
-    private sealed class Chip { public required string Title; public double X, Y, W, H; public readonly List<(string pin, double x, double y, string net)> Pins = new(); }
+    private sealed class Chip { public required string Title; public double X, Y, W, H; public readonly List<(string pin, double x, double y, string net, string endpoint)> Pins = new(); }
 
     private const double Margin = 50, ChipW = 150, ChipGap = 56, ChipH = 96, BoardTop = 96;
     private double _w = 1000, _h = 520;
     private readonly List<Chip> _chips = new();
-    private readonly List<(Point a, Point b, Color c)> _jumpers = new();
+    private readonly List<(Point a, Point b, Color c, string epA, string epB)> _jumpers = new();
     private FProject? _built;
 
     protected override Size MeasureOverride(Size available) { Build(); return new Size(_w, _h); }
@@ -90,7 +102,7 @@ public sealed class BreadboardControl : FrameworkElement
             {
                 double px = chip.X + 14 + (chip.W - 28) * (pins.Count == 1 ? 0.5 : (double)p / (pins.Count - 1));
                 double py = chip.Y + chip.H;
-                chip.Pins.Add((pins[p].pin, px, py, pins[p].Net));
+                chip.Pins.Add((pins[p].pin, px, py, pins[p].Net, $"{alias}.{pins[p].pin}"));
                 pinAnchor[$"{alias}.{pins[p].pin}"] = new Point(px, py + 20);   // a hole just below the pin
             }
             _chips.Add(chip);
@@ -99,7 +111,7 @@ public sealed class BreadboardControl : FrameworkElement
         foreach (var c in Project.Connections)
         {
             if (!pinAnchor.TryGetValue(c.From, out var a) || !pinAnchor.TryGetValue(c.To, out var b)) continue;
-            _jumpers.Add((a, b, NetColor(c.Net)));
+            _jumpers.Add((a, b, NetColor(c.Net), c.From, c.To));
         }
     }
 
@@ -129,7 +141,8 @@ public sealed class BreadboardControl : FrameworkElement
             }
 
         // jumper wires (under the chips) — colored by net, gentle bezier
-        foreach (var (a, b, c) in _jumpers)
+        var live = LivePinState;
+        foreach (var (a, b, c, epA, epB) in _jumpers)
         {
             var geo = new StreamGeometry();
             using (var g = geo.Open())
@@ -139,37 +152,66 @@ public sealed class BreadboardControl : FrameworkElement
                 g.BezierTo(new Point(a.X, a.Y + lift), new Point(b.X, b.Y + lift), b, true, false);
             }
             geo.Freeze();
-            dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(0x33, c.R, c.G, c.B)), 5) { LineJoin = PenLineJoin.Round }, geo);
-            dc.DrawGeometry(null, new Pen(new SolidColorBrush(c), 2.4) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, geo);
+            // Live overlay: if either endpoint of this wire is being driven HIGH, energize it (bright + glow).
+            var drive = live is null ? (bool?)null : (Driven(live, epA) ?? Driven(live, epB));
+            if (drive == true)
+            {
+                dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(0x55, c.R, c.G, c.B)), 9) { LineJoin = PenLineJoin.Round }, geo);
+                dc.DrawGeometry(null, new Pen(new SolidColorBrush(c), 3.2) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, geo);
+            }
+            else
+            {
+                byte fill = drive == false ? (byte)0x18 : (byte)0x33;
+                double core = drive == false ? 1.8 : 2.4;
+                dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(fill, c.R, c.G, c.B)), 5) { LineJoin = PenLineJoin.Round }, geo);
+                dc.DrawGeometry(null, new Pen(new SolidColorBrush(drive == false ? Dim(c) : c), core) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, geo);
+            }
             dc.DrawEllipse(new SolidColorBrush(c), null, a, 3, 3);
             dc.DrawEllipse(new SolidColorBrush(c), null, b, 3, 3);
         }
 
         // chips
-        foreach (var chip in _chips) DrawChip(dc, chip);
+        foreach (var chip in _chips) DrawChip(dc, chip, live);
 
         // title
         Text(dc, "FOUNDRY · BREADBOARD", bx + 4, by - 30, 9, CInkMute, Mono);
         Text(dc, Project!.Title, bx + 4, by - 10, 15, CInk, Serif);
     }
 
-    private void DrawChip(DrawingContext dc, Chip chip)
+    private void DrawChip(DrawingContext dc, Chip chip, PinStateSnapshot? live)
     {
         dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromArgb(0x55, 0, 0, 0)), null, new Rect(chip.X + 3, chip.Y + 3, chip.W, chip.H), 6, 6);
         dc.DrawRoundedRectangle(new SolidColorBrush(CChip), new Pen(new SolidColorBrush(CChipEdge), 1), new Rect(chip.X, chip.Y, chip.W, chip.H), 6, 6);
         Text(dc, Truncate(chip.Title, 20), chip.X + 12, chip.Y + 22, 11, CInk, Mono);
         // pin legs + labels
-        foreach (var (pin, x, y, net) in chip.Pins)
+        foreach (var (pin, x, y, net, endpoint) in chip.Pins)
         {
             var c = NetColor(net);
+            var drive = live is null ? (bool?)null : Driven(live, endpoint);
             dc.DrawLine(new Pen(new SolidColorBrush(Color.FromRgb(0xC9, 0xC9, 0xC9)), 2), new Point(x, y), new Point(x, y + 20));
-            dc.DrawEllipse(new SolidColorBrush(c), null, new Point(x, y + 20), 3, 3);
+            var dot = new Point(x, y + 20);
+            if (drive == true)
+            {
+                // energized pin: soft halo + bright dot (the LED "on")
+                dc.DrawEllipse(new SolidColorBrush(Color.FromArgb(0x66, c.R, c.G, c.B)), null, dot, 8, 8);
+                dc.DrawEllipse(new SolidColorBrush(c), null, dot, 4, 4);
+            }
+            else
+            {
+                dc.DrawEllipse(new SolidColorBrush(drive == false ? Dim(c) : c), null, dot, 3, 3);
+            }
             var ft = Format(pin, 7.5, CInkMute, Mono);
             dc.PushTransform(new RotateTransform(-90, x, y - 4));
             dc.DrawText(ft, new Point(x - ft.Width, y - 4 - ft.Baseline));
             dc.Pop();
         }
     }
+
+    /// <summary>True/false if the snapshot knows this endpoint's level; null when the endpoint isn't simulated.</summary>
+    private static bool? Driven(PinStateSnapshot live, string endpoint)
+        => live.TryGetEndpoint(endpoint, out var lvl) ? lvl.High : (bool?)null;
+
+    private static Color Dim(Color c) => Color.FromRgb((byte)(c.R * 0.45), (byte)(c.G * 0.45), (byte)(c.B * 0.45));
 
     private void DrawRail(DrawingContext dc, double x, double y, double w, Color c, string sign)
     {

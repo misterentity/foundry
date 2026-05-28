@@ -238,6 +238,7 @@ public partial class App : Application
     private void Quit()
     {
         Foundry.Core.Sidecar.SidecarHost.Shared.Dispose();
+        Foundry.Core.Simulation.RenodeHost.Shared.Dispose();
         _tray?.Dispose();
         _window?.ForceClose();
         Shutdown();
@@ -261,6 +262,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Foundry.Core.Sidecar.SidecarHost.Shared.Dispose();
+        Foundry.Core.Simulation.RenodeHost.Shared.Dispose();
         _tray?.Dispose();
         base.OnExit(e);
     }

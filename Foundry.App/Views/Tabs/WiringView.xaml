@@ -27,11 +27,36 @@
         </StackPanel>
       </Grid>
 
-      <!-- VIEW TOGGLE -->
-      <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-        <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,6,0" Command="{Binding ShowSchematicCommand}" Content="SCHEMATIC"/>
-        <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Command="{Binding ShowBreadboardCommand}" Content="BREADBOARD"/>
-      </StackPanel>
+      <!-- VIEW TOGGLE + LIVE SIMULATION -->
+      <Grid Margin="0,0,0,12">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Grid.Column="0" Orientation="Horizontal">
+          <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,6,0" Command="{Binding ShowSchematicCommand}" Content="SCHEMATIC"/>
+          <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Command="{Binding ShowBreadboardCommand}" Content="BREADBOARD"/>
+        </StackPanel>
+
+        <!-- live sim run control — drives the breadboard's live pin-state overlay -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" DataContext="{Binding Sim}">
+          <Rectangle Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{StaticResource Brush.Ok}"
+                     Visibility="{Binding IsRunning, Converter={StaticResource BoolVis}}"/>
+          <TextBlock Style="{StaticResource Mono}" FontSize="10.5" VerticalAlignment="Center" Margin="0,0,12,0" MaxWidth="420" TextTrimming="CharacterEllipsis"
+                     Foreground="{StaticResource Brush.InkMute}" Text="{Binding Status}"/>
+          <ProgressBar IsIndeterminate="True" Width="60" Height="3" Margin="0,0,12,0" Background="Transparent" BorderThickness="0"
+                       Foreground="{DynamicResource Brush.Accent}" Visibility="{Binding IsStarting, Converter={StaticResource BoolVis}}"/>
+          <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,6,0" Command="{Binding InstallRenodeCommand}" Content="INSTALL RENODE"
+                  ToolTip="Download a portable Renode emulator to run live simulation" AutomationProperties.Name="Install Renode"
+                  Visibility="{Binding NeedsRenode, Converter={StaticResource BoolVis}}"/>
+          <Button Style="{StaticResource BtnPrimary}" Padding="12,5" FontSize="10" Command="{Binding RunCommand}"
+                  ToolTip="Compile and run the firmware in an emulator — pins light up live on the breadboard"
+                  AutomationProperties.Name="Run simulation"
+                  IsEnabled="{Binding CanSimulate}"
+                  Visibility="{Binding IsRunning, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+            <StackPanel Orientation="Horizontal"><c:IconControl Glyph="bolt" IconSize="11" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,6,0"/><TextBlock Text="RUN SIM"/></StackPanel>
+          </Button>
+          <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Command="{Binding StopCommand}" Content="STOP" AutomationProperties.Name="Stop simulation"
+                  Visibility="{Binding IsRunning, Converter={StaticResource BoolVis}}"/>
+        </StackPanel>
+      </Grid>
 
       <!-- WIRING STAGE -->
       <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="24" Margin="0,0,0,28">
@@ -40,7 +65,7 @@
             <r:WiringDiagramControl Project="{Binding Project}"/>
           </Viewbox>
           <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}}">
-            <r:BreadboardControl Project="{Binding Project}"/>
+            <r:BreadboardControl Project="{Binding Project}" LivePinState="{Binding Sim.LivePinState}"/>
           </Viewbox>
         </Grid>
       </Border>
