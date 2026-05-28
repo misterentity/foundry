@@ -1,0 +1,125 @@
+"""Foundry Track B v2.2 — build a .kicad_pcb from a JSON job document.
+
+Run against KiCad's bundled Python (the only interpreter where `import pcbnew` works):
+    <kicad>\\bin\\python.exe build_board.py job.json
+
+Reads the job (spec §C): footprint dirs, nets, components (footprint lib id + grid xy + padNets),
+and a rectangular Edge.Cuts outline. Creates the board, loads each footprint, assigns every pad to
+its net, places parts on the grid, draws the outline, and Save()s. Prints one JSON result line.
+
+No routing, no DRC, no gerbers — the ratsnest is implicit (rendered by KiCad from pad→net membership).
+"""
+
+import json
+import os
+import sys
+
+import pcbnew
+
+
+def resolve_lib_dir(lib, fp_dirs):
+    """Map a lib nickname to its <dir>\\<lib>.pretty directory across the given footprint roots."""
+    for d in fp_dirs:
+        cand = os.path.join(d, lib + ".pretty")
+        if os.path.isdir(cand):
+            return cand
+    # fall back to the first root so the loader raises a clear, locatable error
+    return os.path.join(fp_dirs[0], lib + ".pretty") if fp_dirs else lib + ".pretty"
+
+
+def footprint_loader():
+    """KiCad 9 uses PCB_IO_MGR; KiCad 8 uses IO_MGR. Same FootprintLoad(libDir, name) signature."""
+    mgr = getattr(pcbnew, "PCB_IO_MGR", None) or getattr(pcbnew, "IO_MGR", None)
+    if mgr is None:
+        raise RuntimeError("pcbnew has neither PCB_IO_MGR nor IO_MGR — unsupported KiCad version.")
+    return mgr.FootprintLoad
+
+
+def build(job):
+    notes = []
+    fp_dirs = job.get("footprintDirs") or []
+    load_fp = footprint_loader()
+
+    board = pcbnew.BOARD()
+
+    # 1. one NETINFO_ITEM per Foundry net
+    nets = {}
+    for net in job["nets"]:
+        name = net["name"]
+        ni = pcbnew.NETINFO_ITEM(board, name)
+        board.Add(ni)
+        nets[name] = ni
+
+    # 2. components: load footprint, set ref, assign pads, place
+    placed = 0
+    for comp in job["components"]:
+        lib_id = comp["footprint"]
+        if ":" not in lib_id:
+            notes.append("component %s: bad footprint id '%s'" % (comp["ref"], lib_id))
+            continue
+        lib, name = lib_id.split(":", 1)
+        lib_dir = resolve_lib_dir(lib, fp_dirs)
+        try:
+            fp = load_fp(lib_dir, name)
+        except Exception as ex:  # noqa: BLE001 — surfaced as a note, not a crash
+            notes.append("footprint %s not found (%s): %s" % (lib_id, lib_dir, ex))
+            continue
+        if fp is None:
+            notes.append("footprint %s not found in %s" % (lib_id, lib_dir))
+            continue
+
+        fp.SetReference(comp["ref"])
+        board.Add(fp)
+
+        pad_nets = comp.get("padNets") or {}
+        for pad in fp.Pads():
+            pad_name = pad.GetName()
+            net_name = pad_nets.get(pad_name)
+            if net_name and net_name in nets:
+                pad.SetNet(nets[net_name])
+            elif pad_name in pad_nets:
+                notes.append("component %s pad %s: net '%s' not declared" % (comp["ref"], pad_name, net_name))
+        # report net nodes that found no matching pad on the real footprint
+        real_pads = set(p.GetName() for p in fp.Pads())
+        for pad_name in pad_nets:
+            if pad_name not in real_pads:
+                notes.append("component %s: net node pad '%s' not present on %s" % (comp["ref"], pad_name, lib_id))
+
+        fp.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(comp["x_mm"]), pcbnew.FromMM(comp["y_mm"])))
+        if comp.get("rot"):
+            fp.SetOrientationDegrees(comp["rot"])
+        placed += 1
+
+    # 3. rectangular Edge.Cuts outline
+    for seg_pts in job.get("outlineSegments_mm", []):
+        x1, y1, x2, y2 = seg_pts
+        seg = pcbnew.PCB_SHAPE(board)
+        seg.SetShape(pcbnew.SHAPE_T_SEGMENT)
+        seg.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(x1), pcbnew.FromMM(y1)))
+        seg.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(x2), pcbnew.FromMM(y2)))
+        seg.SetLayer(pcbnew.Edge_Cuts)
+        seg.SetWidth(pcbnew.FromMM(0.15))
+        board.Add(seg)
+
+    out_path = job["outPath"]
+    board.Save(out_path)
+    return {"ok": True, "out": out_path, "components": placed, "nets": len(nets), "notes": notes}
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(json.dumps({"ok": False, "error": "usage: build_board.py <job.json>"}))
+        return 2
+    try:
+        with open(sys.argv[1], "r", encoding="utf-8") as fh:
+            job = json.load(fh)
+        result = build(job)
+        print(json.dumps(result))
+        return 0
+    except Exception as ex:  # noqa: BLE001 — report as JSON, never crash the caller's parse
+        print(json.dumps({"ok": False, "error": str(ex)}))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

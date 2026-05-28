@@ -10,6 +10,46 @@ namespace Foundry.Core.Fabrication;
 /// </summary>
 public static class KiCadNetlist
 {
+    /// <summary>One computed electrical net: its canonical name and the endpoints ("REF.PIN") on it.</summary>
+    public sealed record Net(string Name, IReadOnlyList<string> Nodes);
+
+    /// <summary>
+    /// The union-find net model the netlist is built from — exposed so the PCB build path can reuse the
+    /// exact same nets (power/ground/I²C naming) instead of recomputing them. Deterministic order.
+    /// </summary>
+    public static IReadOnlyList<Net> Nets(Project.Project project)
+    {
+        var conns = project.Connections
+            .Where(c => !string.IsNullOrWhiteSpace(c.From) && !string.IsNullOrWhiteSpace(c.To))
+            .ToList();
+
+        var parent = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string Find(string x)
+        {
+            parent.TryAdd(x, x);
+            var root = x;
+            while (!string.Equals(parent[root], root, StringComparison.OrdinalIgnoreCase)) root = parent[root];
+            while (!string.Equals(parent[x], root, StringComparison.OrdinalIgnoreCase)) { var n = parent[x]; parent[x] = root; x = n; }
+            return root;
+        }
+        void Union(string a, string b) { parent[Find(a)] = Find(b); }
+        foreach (var c in conns) Union(c.From, c.To);
+
+        var endpointNet = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in conns) { endpointNet[c.From] = c.Net; endpointNet[c.To] = c.Net; }
+
+        var result = new List<Net>();
+        int code = 1;
+        foreach (var g in parent.Keys.GroupBy(Find, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var nodes = g.OrderBy(e => e, StringComparer.OrdinalIgnoreCase).ToList();
+            result.Add(new Net(NetName(nodes, endpointNet, code), nodes));
+            code++;
+        }
+        return result;
+    }
+
     public static string Export(Project.Project project)
     {
         var conns = project.Connections
@@ -57,6 +97,15 @@ public static class KiCadNetlist
         string MpnOf(string alias) =>
             project.Components.FirstOrDefault(c => c.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase))?.Ref
             ?? "";
+        // KiCad footprint lib id for the alias, so the exported netlist carries footprints (Track B v2.2).
+        string FootprintOf(string alias)
+        {
+            var spec = project.Components.FirstOrDefault(c => c.Alias.Equals(alias, StringComparison.OrdinalIgnoreCase));
+            if (spec is null) return "";
+            var pins = Math.Max(spec.Pins.Count,
+                groups.SelectMany(g => g).Count(ep => RefOf(ep).Equals(alias, StringComparison.OrdinalIgnoreCase)));
+            return Pcb.FootprintMap.Resolve(spec, pins).LibId;
+        }
 
         var sb = new StringBuilder();
         sb.AppendLine("(export (version \"D\")");
@@ -70,7 +119,7 @@ public static class KiCadNetlist
         {
             sb.AppendLine($"    (comp (ref \"{Esc(r)}\")");
             sb.AppendLine($"      (value \"{Esc(NameOf(r))}\")");
-            sb.AppendLine("      (footprint \"\")");
+            sb.AppendLine($"      (footprint \"{Esc(FootprintOf(r))}\")");
             var mpn = MpnOf(r);
             if (mpn.Length > 0)
                 sb.AppendLine($"      (fields (field (name \"MPN\") \"{Esc(mpn)}\"))");

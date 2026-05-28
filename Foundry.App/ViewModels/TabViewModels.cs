@@ -324,6 +324,14 @@ public sealed partial class WiringViewModel : TabViewModelBase
     public int NetCount => Project.Connections.Count;
     [ObservableProperty] private string _status = "";
 
+    // Track B v2.2: netlist → .kicad_pcb export (mirrors the firmware VERIFY-BUILD not-installed UX).
+    [ObservableProperty] private bool _isExportingPcb;
+    [ObservableProperty] private string _pcbStatus = "";
+    [ObservableProperty] private string _pcbSeverity = "info";  // pass | fail | info
+    public ObservableCollection<string> PcbNotes { get; } = new();
+    public bool HasPcbStatus => !string.IsNullOrEmpty(PcbStatus);
+    partial void OnPcbStatusChanged(string value) => OnPropertyChanged(nameof(HasPcbStatus));
+
     /// <summary>Live simulation state for this design (RUN/STOP lives by the SCHEMATIC|BREADBOARD toggle).</summary>
     public SimulationViewModel Sim { get; }
 
@@ -367,6 +375,44 @@ public sealed partial class WiringViewModel : TabViewModelBase
             Status = $"KiCad netlist + pinout exported to {dir}";
         }
         catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
+    }
+
+    /// <summary>
+    /// Build a <c>.kicad_pcb</c> from the netlist (footprints + grid placement + ratsnest) and reveal it.
+    /// Degrades gracefully when KiCad isn't installed — surfaces install guidance, never throws (PRD Track B v2.2).
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportPcb()
+    {
+        if (IsExportingPcb) return;
+        IsExportingPcb = true;
+        PcbNotes.Clear();
+        PcbSeverity = "info"; PcbStatus = "Building the PCB from the netlist…";
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var result = await Foundry.Core.Pcb.PcbBuilder.BuildAsync(Project, dir);
+
+            foreach (var n in result.Notes) PcbNotes.Add(n);
+
+            if (!result.Installed)
+            {
+                PcbSeverity = "info";
+                PcbStatus = $"KiCad isn't installed — install it from {Foundry.Core.Pcb.KiCadInstaller.DownloadUrl} to export a PCB.";
+                return;
+            }
+
+            PcbSeverity = result.Ok ? "pass" : "fail";
+            PcbStatus = result.Summary;
+            if (result.Ok && result.KicadPcbPath is not null)
+            {
+                Foundry.Core.Diagnostics.AppLog.Info("export", $"KiCad PCB → {result.KicadPcbPath}");
+                Process.Start(new ProcessStartInfo { FileName = result.KicadPcbPath, UseShellExecute = true });
+            }
+        }
+        catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB export failed: {ex.Message}"; }
+        finally { IsExportingPcb = false; }
     }
 
     /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>

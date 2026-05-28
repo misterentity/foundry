@@ -292,3 +292,240 @@ flourish.
 - [JLCPCB API platform](https://api.jlcpcb.com/) ·
   [JLCPCB API: how to place an order](https://api.jlcpcb.com/help/article/how-do-i-place-an-order) ·
   [JLCPCB: generate Gerber/drill in KiCad 9](https://jlcpcb.com/help/article/how-to-generate-gerber-and-drill-files-in-kicad-9)
+
+---
+
+## v2.2 Build Recipe (concrete)
+
+Scope for v2.2 **only**: netlist → `.kicad_pcb` with a footprint per component, every pad assigned to
+the correct net, parts laid out on a simple grid, and a default rectangular `Edge.Cuts` outline. Open
+it in KiCad → all parts present, ratsnest correct. **No autorouting, no DRC, no gerbers, no fab API.**
+
+Home for all new code: `Foundry.Core/Pcb/`.
+
+### A. Environment reality & the NotInstalled posture
+
+KiCad is **not** installed on the dev machine, so nothing here runs pcbnew end-to-end locally. Two
+hard rules (mirroring `FirmwareBuilder`):
+
+1. Every external call degrades gracefully. `PcbBuilder.ExportAsync` returns
+   `PcbResult.NotInstalled()` (same shape as `BuildResult.NotInstalled()`) when KiCad can't be located —
+   the UI shows install guidance, never throws.
+2. All real logic is **pure and unit-testable** without KiCad: the footprint map, the pin→pad map, the
+   JSON job document we hand to the python script, and the parser for the script's JSON result are all
+   string/object transforms with xUnit asserts. Only the actual pcbnew invocation is gated behind
+   `KiCadInstaller.Locate() != null`; an integration test that builds a real board is guarded by that
+   same check so the suite stays green here.
+
+### B. The pcbnew Python API sequence (KiCad 8/9, SWIG `pcbnew` module)
+
+This is what `KiCadScripts/build_board.py` (shipped as an embedded resource) does. The SWIG bindings
+are deprecated-but-present through KiCad 9 (removal targeted ~KiCad 11) and remain the **only**
+first-party way to programmatically build a board with footprints + nets + coordinates — `kicad-cli`
+cannot synthesize a board from a netlist. Pin the recipe to KiCad 9 names; KiCad 8 differs only in the
+plugin-manager class name (see note).
+
+```python
+import json, sys, pcbnew
+
+job = json.load(open(sys.argv[1]))          # the JSON job document (see §C)
+fp_dirs = job["footprintDirs"]               # e.g. ["C:/Program Files/KiCad/9.0/share/kicad/footprints"]
+
+# 1. New empty board
+board = pcbnew.BOARD()                        # in-memory board; or pcbnew.NewBoard(path) to back it with a file
+# (LoadBoard/SaveBoard are the file equivalents; BOARD() + board.Save(path) at the end is cleanest.)
+
+# 2. Create one NETINFO_ITEM per Foundry net, keep a name->net map.
+nets = {}
+for net in job["nets"]:                       # net["name"] is the Foundry net name (GND, +3V3, SDA, Net-(003)…)
+    ni = pcbnew.NETINFO_ITEM(board, net["name"])
+    board.Add(ni)
+    nets[net["name"]] = ni
+
+# 3. For each component: resolve its lib id "Lib:Footprint", load it, add it, set its reference.
+for comp in job["components"]:
+    lib, name = comp["footprint"].split(":", 1)      # "Resistor_SMD:R_0805_2012Metric"
+    lib_dir = resolve_lib_dir(lib, fp_dirs)          # join a fp dir with lib + ".pretty"
+    # KiCad 9: pcbnew.PCB_IO_MGR ; KiCad 8: pcbnew.IO_MGR  (FootprintLoad signature is identical)
+    fp = pcbnew.PCB_IO_MGR.FootprintLoad(lib_dir, name)   # FOOTPRINT
+    fp.SetReference(comp["ref"])                          # "U1", "R1", "J1" — = Foundry alias
+    board.Add(fp)
+
+    # 4. Assign each pad to its net using the precomputed pin-name -> pad mapping.
+    for pad in fp.Pads():                                 # iterable of PAD
+        padname = pad.GetName()                           # KiCad pad number/name, e.g. "1", "2", "VCC"
+        netname = comp["padNets"].get(padname)            # padNets: {padName -> Foundry net name}
+        if netname and netname in nets:
+            pad.SetNet(nets[netname])                     # preferred; or pad.SetNetCode(nets[netname].GetNetCode())
+
+    # 5. Grid placement (deterministic; no intelligence in v2.2).
+    fp.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(comp["x_mm"]), pcbnew.FromMM(comp["y_mm"])))
+    if comp.get("rot"):
+        fp.SetOrientationDegrees(comp["rot"])
+
+# 6. Default rectangular board outline on Edge.Cuts (PCB_SHAPE in KiCad 8/9; was DRAWSEGMENT pre-7).
+edge = pcbnew.Edge_Cuts                                   # layer id
+for (x1, y1, x2, y2) in job["outlineSegments_mm"]:        # 4 segments of the rectangle
+    seg = pcbnew.PCB_SHAPE(board)
+    seg.SetShape(pcbnew.SHAPE_T_SEGMENT)
+    seg.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(x1), pcbnew.FromMM(y1)))
+    seg.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(x2), pcbnew.FromMM(y2)))
+    seg.SetLayer(edge)
+    seg.SetWidth(pcbnew.FromMM(0.15))
+    board.Add(seg)
+
+# 7. Save.
+board.Save(job["outPath"])                                # writes the .kicad_pcb
+print(json.dumps({"ok": True, "out": job["outPath"],
+                  "components": len(job["components"]), "nets": len(nets)}))
+```
+
+**API name cheat-sheet (verified KiCad 9 SWIG):**
+| Action | Call |
+|---|---|
+| New board | `pcbnew.BOARD()` (or `pcbnew.NewBoard(path)`) |
+| Save / load file | `board.Save(path)` / `pcbnew.LoadBoard(path)` (also `pcbnew.SaveBoard(path, board)`) |
+| Load footprint from lib dir | KiCad 9 `pcbnew.PCB_IO_MGR.FootprintLoad(libDir, name)`; KiCad 8 `pcbnew.IO_MGR.FootprintLoad(...)` |
+| Add item to board | `board.Add(item)` (footprint, net, shape) |
+| Create a net | `pcbnew.NETINFO_ITEM(board, name)` then `board.Add(ni)` |
+| Assign pad → net | `pad.SetNet(netinfo)` (or `pad.SetNetCode(netinfo.GetNetCode())`) |
+| Iterate pads | `footprint.Pads()`; pad id via `pad.GetName()` |
+| Set reference | `footprint.SetReference("U1")` |
+| Position | `footprint.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))` |
+| Rotation | `footprint.SetOrientationDegrees(deg)` |
+| Units | `pcbnew.FromMM(mm)` → internal nm int; `pcbnew.ToMM(...)` back |
+| Edge.Cuts segment | `s = pcbnew.PCB_SHAPE(board); s.SetShape(pcbnew.SHAPE_T_SEGMENT); s.SetLayer(pcbnew.Edge_Cuts)` |
+
+**Ratsnest:** confirmed implicit. The ratsnest is *rendered from connectivity*, not stored in the file.
+It is derived entirely from pad→net membership when KiCad loads/computes connectivity
+(`board.BuildConnectivity()` is available but not required for the saved file). So for v2.2 we only need
+correct `pad.SetNet(...)` membership; opening the saved `.kicad_pcb` in KiCad shows the right ratsnest
+automatically. No tracks are created — that is v2.4.
+
+### C. Headless invocation (PcbBuilder)
+
+`kicad-cli` **cannot** build a board from a netlist, so we run our `.py` against **KiCad's bundled
+Python**, not via `kicad-cli`. That interpreter has `pcbnew` importable; a stock system Python does not.
+
+- **Locate the interpreter (`KiCadInstaller.Locate`)** — mirror `FirmwareBuilder.Locate()`/`OpenScadInstaller`:
+  1. PATH probe for `kicad-cli.exe` (confirms a KiCad install) and derive its `bin/` dir.
+  2. Standard dir probe: `C:\Program Files\KiCad\<ver>\bin\` (e.g. `9.0`, `8.0`), newest first.
+  3. The bundled python is `<kicad>\bin\python.exe` (verified: `C:\Program Files\KiCad\9.0\bin\python.exe`).
+  Return `null` if none found. **Do NOT auto-download** — KiCad is a ~1 GB MSI, not a portable zip
+  (unlike OpenSCAD). Surface clear install guidance + the documented URL
+  (`https://www.kicad.org/download/windows/`); `KiCadInstaller` only *locates*.
+- **Default footprint dir** (passed in the job as `footprintDirs`): `<kicad>\share\kicad\footprints`
+  (verified default: `C:\Program Files\KiCad\9.0\share\kicad\footprints`), with the env var
+  `KICAD9_FOOTPRINT_DIR` / `KICAD8_FOOTPRINT_DIR` as an override if set. Each library is a subdir
+  `<Lib>.pretty`, so a lib id `Resistor_SMD:R_0805_2012Metric` resolves to
+  `<dir>\Resistor_SMD.pretty` + footprint `R_0805_2012Metric`.
+- **Run it (mirror `FirmwareBuilder.RunAsync`)**: write the job JSON + the embedded `build_board.py` to a
+  temp dir, then
+  `ProcessStartInfo { FileName = "<kicad>\bin\python.exe", Arguments = "\"build_board.py\" \"job.json\"" }`
+  with `UseShellExecute=false, CreateNoWindow=true, RedirectStandardOutput/Error=true`, async
+  `WaitForExitAsync(ct)`. Pass the netlist + footprint assignments **as a JSON job document** (path as
+  argv[1]; large payloads via a temp file rather than stdin to dodge Windows arg/stdin limits).
+- **Parse** the script's single-line JSON stdout into `PcbResult` exactly like `FirmwareBuilder.Parse()`
+  (try-JSON, fall back to stderr scrape). Non-zero exit or `"ok": false` → diagnostics list
+  (`PcbDiagnostic`, mirror `BuildDiagnostic`): "footprint X not found", "pad P unmapped", etc.
+
+**Job document shape** (pure C# builds this from the `Project`; fully unit-testable):
+```json
+{
+  "outPath": "C:/.../board.kicad_pcb",
+  "footprintDirs": ["C:/Program Files/KiCad/9.0/share/kicad/footprints"],
+  "outlineSegments_mm": [[0,0,80,0],[80,0,80,60],[80,60,0,60],[0,60,0,0]],
+  "nets": [{"name":"GND"},{"name":"+3V3"},{"name":"SDA"},{"name":"Net-(003)"}],
+  "components": [
+    {"ref":"U1","footprint":"Package_QFP:LQFP-48_7x7mm_P0.5mm","x_mm":20,"y_mm":20,"rot":0,
+     "padNets":{"1":"GND","2":"+3V3","15":"SDA"}},
+    {"ref":"R1","footprint":"Resistor_SMD:R_0805_2012Metric","x_mm":40,"y_mm":20,"rot":0,
+     "padNets":{"1":"SDA","2":"+3V3"}}
+  ]
+}
+```
+Net names come straight from `KiCadNetlist`'s existing union-find net model (GND/power/I²C naming) —
+**reuse it; do not recompute nets.** Grid placement for v2.2: order components, lay them out left→right
+on a fixed pitch (e.g. 12–15 mm), wrap into rows of N (e.g. ceil(sqrt(count))); size the rectangular
+`Edge.Cuts` to the grid extent + margin. No collision logic yet (that's v2.3 `PcbPlacer`).
+
+### D. Footprint library id map (`FootprintMap.cs`) — keyword heuristics
+
+The EE analogue of `FirmwareBuilder.Fqbn()`: deterministic, keyword-driven, with a safe generic
+fallback. Priority: (1) explicit `Footprint` field on the component/KB record; (2) this keyword map;
+(3) [later phases] LLM-proposed, validate-then-accept. All names below are real KiCad standard-library
+lib ids (`Lib:Footprint`), verified against the KiCad footprint libraries / KLC naming conventions.
+
+| Part class | Keyword hints (in name/specs, case-insensitive) | Default lib id | Notes |
+|---|---|---|---|
+| Resistor (SMD) | "resistor", "res", "ohm", "0603"/"0805"/"1206" | `Resistor_SMD:R_0805_2012Metric` | swap size token if package given (0603→`R_0603_1608Metric`) |
+| Resistor (THT) | "resistor" + "through-hole"/"axial"/"thru" | `Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal` | |
+| Capacitor (SMD) | "cap", "capacitor", "uF"/"nF"/"pF", size token | `Capacitor_SMD:C_0603_1608Metric` | size-token swap as above |
+| Capacitor (electrolytic) | "electrolytic", "elec cap" | `Capacitor_THT:CP_Radial_D5.0mm_P2.50mm` | |
+| LED (THT) | "led" (no SMD hint) | `LED_THT:LED_D5.0mm` | 3mm → `LED_D3.0mm` |
+| LED (SMD) | "led" + "smd"/"0805"/"0603" | `LED_SMD:LED_0805_2012Metric` | |
+| Diode (THT) | "diode", "1n400", "rectifier" | `Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal` | |
+| Diode (SMD) | "diode" + "smd"/"sod" | `Diode_SMD:D_SOD-123` | |
+| Transistor (SMD) | "transistor", "bjt", "mosfet", "sot-23" | `Package_TO_SOT_SMD:SOT-23` | |
+| Transistor (THT) | "transistor" + "to-92"/"thru" | `Package_TO_SOT_THT:TO-92_Inline` | |
+| Regulator (THT) | "regulator", "7805", "ldo", "to-220" | `Package_TO_SOT_THT:TO-220-3_Vertical` | |
+| Regulator (SMD) | "regulator"/"ldo" + "sot-223"/"sot-23" | `Package_TO_SOT_SMD:SOT-223-3_TabPin2` | |
+| Pin header | "header", "connector", "pins" + pin count N | `Connector_PinHeader_2.54mm:PinHeader_1x{N:00}_P2.54mm_Vertical` | N from pin count; 2-row → `PinHeader_2x{N}` |
+| Screw terminal | "terminal block", "screw terminal" | `TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2_1x02_P5.00mm_Horizontal` | |
+| ESP32 module | "esp32", "wroom" | `RF_Module:ESP32-WROOM-32` | |
+| ESP8266 | "esp8266", "esp-12", "nodemcu" | `RF_Module:ESP-12E` | dev board: generic header strip fallback |
+| Arduino Uno-class | "uno", "atmega328p" + DIP | `Package_DIP:DIP-28_W7.62mm` | bare MCU; the *board* is headers, see fallback |
+| Raspberry Pi Pico | "pico", "rp2040" | `RPi_Pico:RPi_Pico_SMD_TH` | (Module lib; if absent, 2x20 header) |
+| IC, SOIC | "soic", "so-8" | `Package_SO:SOIC-8_3.9x4.9mm_P1.27mm` | pin count from KB |
+| IC, DIP | "dip", "pdip" | `Package_DIP:DIP-8_W7.62mm` | pin count from KB |
+| IC, QFP | "qfp", "lqfp", "tqfp" | `Package_QFP:LQFP-48_7x7mm_P0.5mm` | pin count/pitch from KB |
+| **Generic fallback** | anything unmatched | `Connector_PinHeader_2.54mm:PinHeader_1x{N}_P2.54mm_Vertical` (N = pin count, ≥1) | a board is always *producible*: an unknown part becomes a pin-count-correct header so every net node still resolves to a pad. Emit a `PcbDiagnostic` warning so the fix loop can upgrade it later. |
+
+Size-token rule: if the part name/specs contain an imperial passive size (`0402/0603/0805/1206`), swap
+the size token in the chosen `R_/C_/LED_` id to the matching `*_{imperial}_{metric}Metric` name
+(0402→1005, 0603→1608, 0805→2012, 1206→3216). Header pin count `N` comes from the component's pin
+table (`ComponentSpec` pins / KB). This map lives in `FootprintMap.cs` next to where `Fqbn()` lives in
+spirit — pure, table-driven, unit-tested with string asserts (no KiCad needed).
+
+### E. Pin-name → pad-number mapping (`padNets`)
+
+Foundry nets address endpoints as `alias.pinname` (e.g. `U1.SDA`, `J1.3`). KiCad pads are addressed by
+`pad.GetName()` (numbers like `"1"` or named pads like `"VCC"`). v2.2 must produce, per component, a
+`padNets: { padName -> netName }` map. Reuse the `PinMap`/`PinReport` pin/pad concepts:
+
+1. **Numeric pins** (`J1.3`, `R1.2`): pin name is already the pad number → identity map. Covers passives,
+   diodes, headers, most connectors. (Matches `KiCadNetlist.PinOf` which already defaults a missing pin
+   to `"1"`.)
+2. **Named pins that equal silkscreen** (modules/dev boards: `U1.VCC`, `U1.SDA`): if the footprint has a
+   pad with that exact name, map directly. Module footprints (ESP32-WROOM, headers) name pads to match.
+3. **Logical IC pins** (`U1.SDA` on a QFP/SOIC): map logical pin → pad number via the component's pin
+   table order — reuse the KB pin list / `PinReport` ordering so pin *index* gives the pad number. This
+   is the per-footprint **pin map** §4 calls for.
+4. **Validation (pure, testable):** before emitting the job, assert every net node's `(alias,pin)`
+   resolves to a `padName` in that component's map; an unresolved node becomes a `PcbDiagnostic`
+   ("net X node U1.SDA: no pad") rather than a silent mis-wire — same generate→check→fix shape.
+
+Building `padNets` is pure C# over the existing `Project` model + KB pin tables — fully unit-testable
+without KiCad. The actual `pad.GetName()` reconciliation (case 2/3 against the *real* footprint pads) is
+verified inside `build_board.py` at load time and any mismatch is reported back in the result JSON.
+
+### F. New code (v2.2 only)
+
+- `Foundry.Core/Pcb/KiCadInstaller.cs` — locate kicad-cli + bundled `bin/python.exe` + footprint dir
+  (no download; install guidance). Mirrors `OpenScadInstaller`/`FirmwareBuilder.Locate`.
+- `Foundry.Core/Pcb/FootprintMap.cs` — §D map + size-token logic (pure).
+- `Foundry.Core/Pcb/PcbJob.cs` — the §C job-document DTO + builder from `Project` (reuses
+  `KiCadNetlist` nets + §E `padNets`) (pure).
+- `Foundry.Core/Pcb/PcbResult.cs` / `PcbDiagnostic.cs` — mirror `BuildResult`/`BuildDiagnostic`, with
+  `NotInstalled()`/`Skipped()`.
+- `Foundry.Core/Pcb/PcbBuilder.cs` — orchestrator: locate → build job → run bundled python on
+  `build_board.py` → parse (mirror `FirmwareBuilder`). `NotInstalled()` when KiCad absent.
+- `Foundry.Core/Pcb/KiCadScripts/build_board.py` — embedded resource (§B).
+- Populate `(footprint "...")` in `KiCadNetlist` from `FootprintMap` (currently writes `""`).
+- UI: an **"Export to KiCad PCB"** action next to the existing Wiring-tab **KICAD** netlist button,
+  same wiring/placement.
+
+Tests (`Foundry.Tests`, all KiCad-free): `FootprintMap` keyword→id asserts incl. size-token + generic
+fallback; `PcbJob` builder (net set, `padNets`, grid coords, outline) from a sample `Project`; `padNets`
+validation flags an unresolved node; `PcbResult.Parse` for ok/error/not-installed; an integration test
+that actually invokes `build_board.py` guarded by `if (KiCadInstaller.Locate() is null) return;`.

@@ -21,6 +21,12 @@
     </None>
   </ItemGroup>
 
+  <!-- pcbnew board-build script (Track B v2.2) — shipped as an embedded resource and written to a
+       temp dir at runtime by PcbBuilder, then run against KiCad's bundled Python. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Pcb\KiCadScripts\build_board.py" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Foundry.Tests" />
   </ItemGroup>

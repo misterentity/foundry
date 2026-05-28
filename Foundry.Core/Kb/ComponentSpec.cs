@@ -39,6 +39,13 @@ public sealed class ComponentSpec
     /// <summary>I²C 7-bit address if this part sits on an I²C bus, else null.</summary>
     public int? I2cAddress { get; init; }
 
+    /// <summary>
+    /// Explicit KiCad footprint lib id ("Lib:Footprint", e.g. "Resistor_SMD:R_0805_2012Metric").
+    /// Authoritative when set; otherwise <see cref="Foundry.Core.Pcb.FootprintMap"/> infers one
+    /// from keyword heuristics. Mirrors how <see cref="Ref"/>/MPN already carry sourcing identity.
+    /// </summary>
+    public string? Footprint { get; init; }
+
     public List<PinSpec> Pins { get; init; } = new();
 
     public PinSpec? Pin(string name) =>

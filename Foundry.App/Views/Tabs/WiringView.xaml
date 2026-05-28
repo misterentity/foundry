@@ -19,13 +19,38 @@
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
           <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkMute}" VerticalAlignment="Center" Margin="0,0,14,0" Text="{Binding NetCount, StringFormat='{}{0} NETS'}"/>
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportKiCadCommand}" Content="KICAD" ToolTip="Export a KiCad netlist (.net) + pinout CSV for PCB layout"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportKiCadCommand}" Content="KICAD" ToolTip="Export a KiCad netlist (.net) + pinout CSV for PCB layout"
+                  AutomationProperties.Name="Export KiCad netlist"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportPcbCommand}" Content="EXPORT PCB"
+                  ToolTip="Build a KiCad PCB (.kicad_pcb) from the netlist — footprints, grid placement and ratsnest"
+                  AutomationProperties.Name="Export to KiCad PCB"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportSvgCommand}" Content="SVG"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPngCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PNG"/></StackPanel>
           </Button>
         </StackPanel>
       </Grid>
+
+      <!-- PCB EXPORT STATUS (Track B) — mirrors the firmware VERIFY-BUILD status block -->
+      <Border BorderBrush="{Binding PcbSeverity, Converter={StaticResource SevBrush}}" BorderThickness="1" Padding="16,12" Margin="0,0,0,20"
+              Background="{StaticResource Brush.Surface1}" Visibility="{Binding HasPcbStatus, Converter={StaticResource BoolVis}}">
+        <StackPanel>
+          <StackPanel Orientation="Horizontal">
+            <Rectangle Width="6" Height="6" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding PcbSeverity, Converter={StaticResource SevBrush}}"/>
+            <TextBlock Style="{StaticResource Mono}" FontSize="12.5" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" Text="{Binding PcbStatus}"/>
+          </StackPanel>
+          <ProgressBar IsIndeterminate="True" Height="3" Margin="0,10,0,0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"
+                       Visibility="{Binding IsExportingPcb, Converter={StaticResource BoolVis}}"/>
+          <ItemsControl ItemsSource="{Binding PcbNotes}" Margin="0,10,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="11" TextWrapping="Wrap" Margin="14,2,0,0"
+                           Foreground="{StaticResource Brush.InkMute}" Text="{Binding}"/>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
 
       <!-- VIEW TOGGLE + LIVE SIMULATION -->
       <Grid Margin="0,0,0,12">
