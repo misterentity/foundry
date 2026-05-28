@@ -332,6 +332,19 @@ public sealed partial class WiringViewModel : TabViewModelBase
     public bool HasPcbStatus => !string.IsNullOrEmpty(PcbStatus);
     partial void OnPcbStatusChanged(string value) => OnPropertyChanged(nameof(HasPcbStatus));
 
+    // Track B v2.4: route the placed board with FreeRouting (export DSN → headless route → import SES).
+    // The last-built board is remembered so ROUTE can run on it without rebuilding.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRoutePcb))]
+    [NotifyCanExecuteChangedFor(nameof(RoutePcbCommand))]
+    private string? _lastPcbPath;
+    public bool CanRoutePcb => !IsExportingPcb && !string.IsNullOrEmpty(LastPcbPath);
+    partial void OnIsExportingPcbChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRoutePcb));
+        RoutePcbCommand.NotifyCanExecuteChanged();
+    }
+
     /// <summary>Live simulation state for this design (RUN/STOP lives by the SCHEMATIC|BREADBOARD toggle).</summary>
     public SimulationViewModel Sim { get; }
 
@@ -407,12 +420,63 @@ public sealed partial class WiringViewModel : TabViewModelBase
             PcbStatus = result.Summary;
             if (result.Ok && result.KicadPcbPath is not null)
             {
+                LastPcbPath = result.KicadPcbPath;
                 Foundry.Core.Diagnostics.AppLog.Info("export", $"KiCad PCB → {result.KicadPcbPath}");
-                Process.Start(new ProcessStartInfo { FileName = result.KicadPcbPath, UseShellExecute = true });
+                // Continue straight into routing — copper tracks on the placed board (v2.4).
+                await RouteCore(result.KicadPcbPath);
             }
         }
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB export failed: {ex.Message}"; }
         finally { IsExportingPcb = false; }
+    }
+
+    /// <summary>
+    /// Route the last-built <c>.kicad_pcb</c> with FreeRouting, writing a <c>.routed.kicad_pcb</c> beside it.
+    /// Degrades gracefully when KiCad / Java (JRE 21+) / the FreeRouting jar are missing — surfaces install
+    /// guidance, downloads the single jar on demand, and never throws (PRD Track B v2.4).
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRoutePcb))]
+    private async Task RoutePcb()
+    {
+        if (IsExportingPcb || string.IsNullOrEmpty(LastPcbPath)) return;
+        IsExportingPcb = true;
+        PcbNotes.Clear();
+        try { await RouteCore(LastPcbPath); }
+        catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB routing failed: {ex.Message}"; }
+        finally { IsExportingPcb = false; }
+    }
+
+    /// <summary>Shared routing step used by both EXPORT+ROUTE and the standalone ROUTE affordance.</summary>
+    private async Task RouteCore(string pcbPath)
+    {
+        // Java is locate-only; the FreeRouting jar can be fetched on demand (~58 MB, one-time).
+        if (Foundry.Core.Pcb.FreeRoutingInstaller.LocateJava() is not null
+            && !Foundry.Core.Pcb.FreeRoutingInstaller.JarPresent)
+        {
+            PcbSeverity = "info"; PcbStatus = "Downloading FreeRouting (~58 MB, one-time)…";
+            try { await Foundry.Core.Pcb.FreeRoutingInstaller.DownloadJarAsync(); }
+            catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"FreeRouting download failed: {ex.Message}"; return; }
+        }
+
+        PcbSeverity = "info"; PcbStatus = "Routing the PCB with FreeRouting…";
+        var route = await Foundry.Core.Pcb.PcbRouter.RouteAsync(pcbPath);
+
+        foreach (var n in route.Notes) PcbNotes.Add(n);
+
+        if (!route.Installed)
+        {
+            PcbSeverity = "info";
+            PcbStatus = route.Summary;  // KiCad + Java (JRE 21+) + jar install guidance
+            return;
+        }
+
+        PcbSeverity = route.Ok ? "pass" : "fail";
+        PcbStatus = route.Summary;
+        if (route.Ok && route.RoutedPcbPath is not null)
+        {
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"routed PCB → {route.RoutedPcbPath}");
+            Process.Start(new ProcessStartInfo { FileName = route.RoutedPcbPath, UseShellExecute = true });
+        }
     }
 
     /// <summary>Render the wiring diagram to a vector SVG in the configured export folder.</summary>

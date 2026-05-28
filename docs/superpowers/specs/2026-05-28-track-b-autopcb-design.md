@@ -841,3 +841,211 @@ public static PcbJob Build(Project.Project project, string outPath,
   a fixture plan still serializes the identical `PcbJobComponent` shape (same keys, just different x/y).
 - `FootprintMapTests`: `CourtyardOf` returns sane sizes per class incl. `1xNN`/`SOIC-N`/`DIP-N` count
   scaling and the generous unmatched default (never 0×0).
+
+---
+
+## v2.4 Autoroute Recipe (concrete)
+
+Scope for v2.4 **only**: take the placed, net-assigned `.kicad_pcb` that `PcbBuilder.BuildAsync` already
+produces (v2.2 geometry + v2.3 AI placement) and add **copper tracks** — export Specctra DSN → run
+FreeRouting headless → import the routed SES back → save a routed `.kicad_pcb`. **No DRC (v2.5), no
+gerbers (v2.6).** The deliverable is "Autoroute produces copper," likely not DRC-perfect.
+
+Home for all new code: `Foundry.Core/Pcb/`. Same posture as v2.2/v2.3: every external call degrades to
+`NotInstalled()`; all logic (command construction, installer locate, result/SES parsing) is pure and
+unit-testable; the one true integration test is guarded by
+`KiCadInstaller.Locate() != null && FreeRoutingInstaller.LocateJava() != null && jar present`.
+
+### A. Environment reality
+
+Neither **KiCad** nor **Java** is installed on the dev machine, so nothing here routes end-to-end
+locally. Hard rules (mirror `FirmwareBuilder` / v2.2):
+1. `RouteAsync` returns `RouteResult.NotInstalled()` (same shape as `PcbResult.NotInstalled()`) when
+   KiCad's bundled python OR Java OR the FreeRouting jar can't be located — the UI shows install/download
+   guidance, never throws.
+2. The only KiCad-dependent steps are the two pcbnew python invocations (DSN export, SES import); the only
+   Java-dependent step is the jar run. Everything else — command construction, installer locate, the
+   FreeRouting log/`-drc` JSON parse — is pure string/object transforms with xUnit asserts.
+
+### B. Step 1 — Specctra DSN export from the placed `.kicad_pcb`
+
+**Decision: use pcbnew Python, NOT `kicad-cli`.** Confirmed against the KiCad **master/10** CLI reference:
+`kicad-cli pcb export` has verbs for gerbers, drill, dxf, gencad, glb, step, svg, pos, ipc2581, ipcd356,
+odb, vrml, stats, etc. — **there is NO `specctra`/`dsn` export verb and NO SES import verb at all**
+(checked KiCad 9 and master). So DSN export and SES import **must** go through the SWIG `pcbnew` module,
+exactly like `build_board.py`. This also keeps the dependency surface a single `KiCadInstaller`
+(`<kicad>\bin\python.exe`), no second tool.
+
+The exact module-level functions (verified in the official pcbnew python namespace doxygen) are:
+- `ExportSpecctraDSN(*args)` — overloaded. The standalone overload operates on a `BOARD` (the form that
+  does **not** need a `PCB_EDIT_FRAME`, so it works in a headless script). Returns `bool`.
+- `ImportSpecctraSES("wxString" aFullFilename)` — operates on the **current/loaded board**. Returns `bool`.
+- `LoadBoard(*args)` → `BOARD*`; `SaveBoard("wxString" aFileName, "BOARD" aBoard, "bool" aSkipSettings=False)` → `bool`.
+
+Because `ExportSpecctraDSN`'s in-frame overload exists and historically the bare module call has been
+flaky across versions ("`module has no attribute ExportSpecctraDSN`" reports on some nightlies), the
+script must (a) `LoadBoard` first so a board exists, (b) pass that board to the export call, and (c)
+`hasattr`-guard the call and report a clean diagnostic if the binding is missing in the installed KiCad.
+
+`KiCadScripts/export_dsn.py` (new embedded resource):
+
+```python
+import json, sys, pcbnew
+
+job = json.load(open(sys.argv[1]))          # {"in": "...board.kicad_pcb", "dsn": "...board.dsn"}
+board = pcbnew.LoadBoard(job["in"])         # BOARD with placed footprints + assigned nets (v2.2/v2.3 output)
+
+if not hasattr(pcbnew, "ExportSpecctraDSN"):
+    print(json.dumps({"ok": False, "stage": "dsn", "error": "ExportSpecctraDSN not in this KiCad's pcbnew"}))
+    sys.exit(2)
+
+# Standalone overload: BOARD + filename (does not need a PCB_EDIT_FRAME).
+ok = pcbnew.ExportSpecctraDSN(board, job["dsn"])
+print(json.dumps({"ok": bool(ok), "stage": "dsn", "dsn": job["dsn"]}))
+sys.exit(0 if ok else 1)
+```
+
+Invoked exactly like `build_board.py` (`FirmwareBuilder.RunAsync` pattern):
+`<kicad>\bin\python.exe export_dsn.py job.json`, redirected stdout/stderr, async `WaitForExitAsync(ct)`,
+parse the single-line JSON. (KiCad 8 vs 9: the call name is identical; only `build_board.py`'s
+`PCB_IO_MGR`/`IO_MGR` differed — Specctra export does not.)
+
+### C. Step 2 — FreeRouting headless
+
+**Version: FreeRouting v2.2.4** (latest release, published 2026-05-13).
+**Jar download URL** (single file, on-demand download like the OpenSCAD zip / `FirmwareBuilder.DownloadCliAsync`):
+`https://github.com/freerouting/freerouting/releases/download/v2.2.4/freerouting-2.2.4.jar` (~58 MB).
+Releases index: `https://github.com/freerouting/freerouting/releases`.
+
+**Java requirement: JRE 21+ (the project builds/runs on Java 25; 21 is the floor).** Java is **locate-only**
+(no auto-install): probe `JAVA_HOME\bin\java(.exe)` then PATH, mirroring how OpenSCAD/arduino-cli are
+located. If no Java ≥ 21 is found → `RouteResult.NotInstalled()` with guidance to install a JRE 21+.
+(Note: FreeRouting also ships per-OS installers with a bundled JRE — `freerouting-2.2.4-windows-x64.msi`
+etc. — but for Foundry we follow the "download the single jar, locate system Java" seam; the bundled-JRE
+installer is the documented fallback if the user has no Java.)
+
+**Headless CLI invocation** (verified against the current `docs/command_line_arguments.md`; FreeRouting 2.x
+runs headless without a display when the GUI is disabled):
+
+```
+java -jar freerouting-2.2.4.jar --gui.enabled=false -de board.dsn -do board.ses -mp <passes> -mt <threads>
+```
+
+Flags (current 2.2.x):
+- `--gui.enabled=false` — disables the GUI for true headless / no-display operation. **Required** here.
+- `-de <file.dsn>` — design input (loads the DSN; can also take `dsn+ses+rules`).
+- `-do <file.ses>` — design output; `.ses` extension → writes a Specctra session file (the routed result).
+- `-mp <n>` — upper limit on autorouter passes (e.g. 10). Caps runtime.
+- `-mt <n>` — optimizer thread count.
+- `--logging.console.level=INFO` (or `--logging.file.enabled=true`) — controls the log we parse for outcome (§E).
+- `-drc <file.json>` — **bonus**: FreeRouting can itself write a DRC report in KiCad JSON format; we do NOT
+  use it as the gate in v2.4 (that's v2.5/`kicad-cli pcb drc`), but it's a cheap secondary signal of
+  unrouted/violation count and worth capturing into the result if present.
+
+`FreeRoutingInstaller.cs` (new): `Locate()` (jar in `%LocalAppData%/Foundry/tools/freerouting/`),
+`DownloadJarAsync()` (single-file GET of the URL above, mirrors `FirmwareBuilder.DownloadCliAsync`),
+`LocateJava()` (JAVA_HOME→PATH, parse `java -version` ≥ 21). The run reuses `RunAsync` with `ct` + a
+timeout (routing can take minutes) and "keep best SES so far"/cancellation per the risk plan.
+
+### D. Step 3 — SES import back into the board, then save
+
+Again pcbnew Python (no `kicad-cli` verb exists). `ImportSpecctraSES(aFullFilename)` reads the `.ses` and
+**relocates modules and replaces all vias and tracks** on the current board; we then `SaveBoard` to the
+routed output path.
+
+`KiCadScripts/apply_ses.py` (new embedded resource):
+
+```python
+import json, sys, pcbnew
+
+job = json.load(open(sys.argv[1]))          # {"in": "...board.kicad_pcb", "ses": "...board.ses", "out": "...board_routed.kicad_pcb"}
+board = pcbnew.LoadBoard(job["in"])         # the SAME placed board the DSN was exported from
+
+if not hasattr(pcbnew, "ImportSpecctraSES"):
+    print(json.dumps({"ok": False, "stage": "ses", "error": "ImportSpecctraSES not in this KiCad's pcbnew"}))
+    sys.exit(2)
+
+# ImportSpecctraSES applies to the current/loaded board. Frame-free standalone form: pass the board.
+ok = pcbnew.ImportSpecctraSES(board, job["ses"])   # falls back to pcbnew.ImportSpecctraSES(job["ses"]) if single-arg binding
+
+# Outcome metrics for RouteResult (see §E): unconnected nets remaining after routing.
+board.BuildConnectivity()
+unconnected = board.GetUnconnectedNetCount()
+tracks = sum(1 for _ in board.GetTracks())          # tracks + vias after import (0 before routing)
+
+pcbnew.SaveBoard(job["out"], board)
+print(json.dumps({"ok": bool(ok), "stage": "ses", "out": job["out"],
+                  "unconnected": int(unconnected), "tracks": int(tracks)}))
+sys.exit(0 if ok else 1)
+```
+
+`board.GetUnconnectedNetCount()` and `board.BuildConnectivity()` are confirmed pcbnew BOARD methods;
+`BuildConnectivity()` must be called before the count is valid. Note `ImportSpecctraSES` argument arity
+has varied across versions (frame-bound single-filename form vs standalone board+filename form), so the
+script attempts the board+filename overload and falls back to the single-arg form — both reported cleanly.
+
+### E. Step 4 — Reading the routing outcome (RouteResult)
+
+Report **"fully routed" vs "N nets unrouted"** from two independent signals, preferring the deterministic
+board-derived one:
+
+1. **Authoritative (post-import, board-derived):** in `apply_ses.py`, after `BuildConnectivity()`, read
+   `board.GetUnconnectedNetCount()`. `0` ⇒ **fully routed**; `N>0` ⇒ **N nets unrouted**. Also emit the
+   track count (was 0 before routing; >0 confirms copper was actually applied). This is the source of
+   truth because it reflects what actually landed on the saved `.kicad_pcb`, independent of FreeRouting's
+   self-report. (Compare against the pre-route ratsnest count captured right after `BuildAsync` to report
+   "routed M of M+N connections.")
+2. **Secondary (FreeRouting log):** parse the jar's stdout/log (`--logging.console.level=INFO`) for its
+   completion summary — FreeRouting prints incomplete/unrouted counts and pass progress; and if `-drc
+   <json>` was passed, parse that KiCad-format JSON for an `unconnected`/violation count. Used to enrich
+   the message ("FreeRouting: 12 passes, 0 incomplete") and as a fallback if the board query is
+   unavailable.
+
+`RouteResult.cs` (mirror `PcbResult`): `Installed`, `Routed` (bool), `FullyRouted` (== `Unconnected==0`),
+`Unconnected` (int), `TrackCount` (int), `RoutedPcbPath`, `DsnPath`, `SesPath`, `Summary`
+("Fully routed (32 tracks)" / "27 tracks, 3 nets unrouted"), `Diagnostics` (`List<PcbDiagnostic>`),
+`NotInstalled()`/`Skipped()`. The stdout/JSON parsers are pure → unit-tested on captured fixture logs/JSON
+with no KiCad/Java present.
+
+### F. Orchestration & new code (v2.4 only)
+
+`PcbBuilder.RouteAsync(string placedPcbPath, RouteOptions opts, CancellationToken ct)` (or a sibling
+`PcbRouter`) chains: locate (KiCad python + Java + jar; download jar on demand) → temp workdir →
+`export_dsn.py` → `java -jar … --gui.enabled=false -de … -do … -mp …` → `apply_ses.py` → parse → `RouteResult`.
+Any missing dependency short-circuits to `NotInstalled()`; any non-zero exit / `"ok": false` becomes a
+`PcbDiagnostic`. New files:
+- `Foundry.Core/Pcb/FreeRoutingInstaller.cs` — locate/download jar + locate Java ≥ 21 (mirrors `OpenScadInstaller` + `FirmwareBuilder.DownloadCliAsync`).
+- `Foundry.Core/Pcb/RouteResult.cs` — the result DTO above (mirrors `PcbResult`).
+- `Foundry.Core/Pcb/RouteOptions.cs` — passes (`-mp`, default ~10), threads (`-mt`), timeout.
+- `Foundry.Core/Pcb/KiCadScripts/export_dsn.py`, `apply_ses.py` — embedded resources (§B, §D).
+- `PcbBuilder.RouteAsync` (+ command-construction helper, pure) — orchestrator.
+- UI: a **ROUTE / Autoroute** affordance on the Wiring tab next to v2.2's EXPORT PCB, badge
+  "Fully routed" / "3 unrouted", off the UI thread with cancel (per §9 perf risk).
+
+Tests (`Foundry.Tests`, all KiCad/Java-free): FreeRouting command builder emits exactly
+`--gui.enabled=false -de <dsn> -do <ses> -mp <n> -mt <n>`; `FreeRoutingInstaller` jar-path/Java-version
+parsing; `RouteResult` parse of fixture `export_dsn.py`/`apply_ses.py` JSON (ok / not-found-binding /
+error) and of a captured FreeRouting log (incomplete-count extraction); `NotInstalled()` when any
+dependency is absent; one integration test guarded by
+`if (KiCadInstaller.Locate() is null || FreeRoutingInstaller.LocateJava() is null) return;`.
+
+### G. Sources (v2.4)
+
+- KiCad CLI reference (master) — confirms NO specctra/dsn export verb, NO SES import verb:
+  https://docs.kicad.org/master/en/cli/cli.html ; KiCad 9 CLI: https://docs.kicad.org/9.0/en/cli/cli.html
+- pcbnew Python namespace (signatures `ExportSpecctraDSN(*args)`, `ImportSpecctraSES(wxString)`,
+  `LoadBoard`, `SaveBoard`): https://docs.kicad.org/doxygen-python/namespacepcbnew.html
+- pcbnew scripting helpers (Specctra export/import are frame-free standalone overloads):
+  https://docs.kicad.org/doxygen/pcbnew__scripting__helpers_8h.html ;
+  forum confirmation: https://forum.kicad.info/t/pcbnew-export-import-scripting-functions/16343 ;
+  binding-flakiness note: https://forum.kicad.info/t/python-apis-exportspecctradsn-broken-in-nightly/24011
+- BOARD connectivity API (`GetUnconnectedNetCount`, `BuildConnectivity`, `GetFullRatsnest`):
+  https://docs.kicad.org/doxygen-python-6.0/classpcbnew_1_1BOARD.html
+- FreeRouting latest release v2.2.4 (2026-05-13) + jar URL:
+  https://github.com/freerouting/freerouting/releases/download/v2.2.4/freerouting-2.2.4.jar ;
+  releases: https://github.com/freerouting/freerouting/releases
+- FreeRouting command-line arguments (`--gui.enabled=false`, `-de`, `-do`, `-mp`, `-mt`, `-drc`, logging):
+  https://github.com/freerouting/freerouting/blob/master/docs/command_line_arguments.md
+- FreeRouting + KiCad DSN/SES workflow + Java requirement (21+, builds on 25):
+  https://freerouting.org/freerouting/using-with-kicad ; https://github.com/freerouting/freerouting
+- FreeRouting license GPLv3 (subprocess only, never link/vendor): https://freerouting.org/freerouting/gpl-v3

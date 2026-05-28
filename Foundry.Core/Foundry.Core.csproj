@@ -25,6 +25,8 @@
        temp dir at runtime by PcbBuilder, then run against KiCad's bundled Python. -->
   <ItemGroup>
     <EmbeddedResource Include="Pcb\KiCadScripts\build_board.py" />
+    <EmbeddedResource Include="Pcb\KiCadScripts\export_dsn.py" />
+    <EmbeddedResource Include="Pcb\KiCadScripts\import_ses.py" />
   </ItemGroup>
 
   <ItemGroup>

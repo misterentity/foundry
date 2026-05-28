@@ -21,9 +21,12 @@
           <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkMute}" VerticalAlignment="Center" Margin="0,0,14,0" Text="{Binding NetCount, StringFormat='{}{0} NETS'}"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportKiCadCommand}" Content="KICAD" ToolTip="Export a KiCad netlist (.net) + pinout CSV for PCB layout"
                   AutomationProperties.Name="Export KiCad netlist"/>
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportPcbCommand}" Content="EXPORT PCB"
-                  ToolTip="Build a KiCad PCB (.kicad_pcb) from the netlist — footprints, grid placement and ratsnest"
-                  AutomationProperties.Name="Export to KiCad PCB"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportPcbCommand}" Content="EXPORT + ROUTE PCB"
+                  ToolTip="Build a KiCad PCB (.kicad_pcb) from the netlist — footprints, placement, ratsnest — then route copper tracks with FreeRouting"
+                  AutomationProperties.Name="Export to KiCad PCB and route"/>
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding RoutePcbCommand}" Content="ROUTE"
+                  ToolTip="Route copper tracks on the last-built PCB with FreeRouting (export DSN → headless route → import SES)"
+                  AutomationProperties.Name="Route the last-built PCB"/>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportSvgCommand}" Content="SVG"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPngCommand}">
             <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PNG"/></StackPanel>
