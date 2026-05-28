@@ -34,13 +34,40 @@ jobs:
       - name: Verify build integrity
         shell: pwsh
         run: |
-          $core = (Resolve-Path "build/publish/Foundry.Core.dll").Path
+          $pub = "build/publish"
+          $core = (Resolve-Path "$pub/Foundry.Core.dll").Path
           $asm = [System.Reflection.Assembly]::LoadFile($core)
-          $types = 'Foundry.Core.Generation.ProjectGenerator','Foundry.Core.Update.GitHubUpdater','Foundry.Core.AppInfo'
+
+          # 1) Expected Core types — a stale project-reference DLL (the v0.4.2 class of bug) ships an
+          #    older Foundry.Core.dll missing newer namespaces; assert every feature surface is present.
+          $types = @(
+            'Foundry.Core.Generation.ProjectGenerator','Foundry.Core.Update.GitHubUpdater','Foundry.Core.AppInfo',
+            'Foundry.Core.Simulation.Avr8jsSimulator','Foundry.Core.Simulation.RenodeSimulator',  # live sim engines
+            'Foundry.Core.Pcb.PcbBuilder','Foundry.Core.Pcb.PcbDesigner',                          # auto-PCB build + DRC loop
+            'Foundry.Core.Pcb.Fab.GerberExporter','Foundry.Core.Pcb.Fab.FabService'                # gerbers + fab order
+          )
           foreach ($t in $types) {
             if (-not $asm.GetType($t)) { Write-Error "MISSING type $t in $core — aborting release."; exit 1 }
           }
-          Write-Host "OK: published Foundry.Core.dll contains all expected types ($((Get-Item $core).Length) bytes)."
+
+          # 2) Embedded KiCad/pcbnew scripts must be baked into Foundry.Core.dll (EmbeddedResource).
+          $res = $asm.GetManifestResourceNames()
+          $scripts = 'Foundry.Core.Pcb.KiCadScripts.build_board.py','Foundry.Core.Pcb.KiCadScripts.export_dsn.py','Foundry.Core.Pcb.KiCadScripts.import_ses.py'
+          foreach ($r in $scripts) {
+            if ($res -notcontains $r) { Write-Error "MISSING embedded resource $r in Foundry.Core.dll — aborting release."; exit 1 }
+          }
+
+          # 3) ClearScript V8 native lib must ship (Avr8jsSimulator hosts avr8js in V8 — without this the
+          #    in-process AVR simulator throws at first use). RID-specific native; search the publish tree.
+          $v8 = Get-ChildItem $pub -Recurse -Filter 'ClearScriptV8*.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $v8) { Write-Error "MISSING ClearScriptV8 native dll under $pub — avr8js sim would fail at runtime. Aborting release."; exit 1 }
+
+          # 4) avr8js runtime bundle must ship beside the assembly (loaded by Avr8jsSimulator.BundlePath).
+          $bundle = Join-Path $pub 'Assets/avr8js-runtime.js'
+          if (-not (Test-Path $bundle)) { Write-Error "MISSING $bundle — avr8js sim has no runtime to load. Aborting release."; exit 1 }
+          if ((Get-Item $bundle).Length -lt 10000) { Write-Error "avr8js-runtime.js looks truncated ($((Get-Item $bundle).Length) bytes) — aborting release."; exit 1 }
+
+          Write-Host "OK: Foundry.Core.dll types + embedded scripts present; ClearScriptV8 native ($($v8.Name)) + avr8js bundle ($((Get-Item $bundle).Length) bytes) shipped."
 
       - name: Sign app exe (if cert configured)
         if: ${{ env.SIGN_PFX_BASE64 != '' }}
