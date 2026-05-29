@@ -4,7 +4,7 @@
 ; (sidecar\dist\foundry-cad, optional) is bundled if present.
 
 #define AppName "Foundry"
-#define AppVersion "2.2.2"
+#define AppVersion "2.3.0"
 #define AppPublisher "Foundry"
 
 [Setup]
