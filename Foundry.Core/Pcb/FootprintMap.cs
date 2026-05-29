@@ -217,6 +217,26 @@ public static class FootprintMap
         return map;
     }
 
+    /// <summary>
+    /// Ordered (pin, net) assignments for one component, in netlist order (deduped by pin, first-seen kept).
+    /// build_board.py matches these to the real footprint's pads by name first, then falls back to ordinal
+    /// pad position — so generic fallback headers (pads "1".."N") still get every net even though the
+    /// netlist addresses pins by name (e.g. VCC/AOUT/GND).
+    /// </summary>
+    public static IReadOnlyList<PcbPadNet> PadNetList(string alias, IEnumerable<(string Endpoint, string Net)> endpointNets)
+    {
+        var list = new List<PcbPadNet>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (ep, net) in endpointNets)
+        {
+            if (!RefOf(ep).Equals(alias, StringComparison.OrdinalIgnoreCase)) continue;
+            var pad = PinOf(ep);
+            if (pad.Length == 0 || !seen.Add(pad)) continue;
+            list.Add(new PcbPadNet(pad, net));
+        }
+        return list;
+    }
+
     internal static string RefOf(string endpoint)
     {
         var dot = endpoint.IndexOf('.');

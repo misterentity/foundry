@@ -5,14 +5,24 @@ using Foundry.Core.Kb;
 
 namespace Foundry.Core.Pcb;
 
-/// <summary>One component in the build job: a ref, its footprint lib id, grid position, and pad→net map.</summary>
+/// <summary>One pin→net assignment for a component, in netlist order so the build script can fall back to
+/// ordinal pad assignment when the footprint's pad names don't match the netlist pin names.</summary>
+public sealed record PcbPadNet(
+    [property: JsonPropertyName("pin")] string Pin,
+    [property: JsonPropertyName("net")] string Net);
+
+/// <summary>One component in the build job: a ref, its footprint lib id, grid position, and pad→net map.
+/// <see cref="PadNets"/> is the name-keyed map (v2.2); <see cref="PadNetList"/> is the same data ORDERED,
+/// which lets build_board.py assign by pad-name match first, then by ordinal position — so generic
+/// fallback headers (pads "1".."N") still get every net even though the netlist uses pin names.</summary>
 public sealed record PcbJobComponent(
     [property: JsonPropertyName("ref")] string Ref,
     [property: JsonPropertyName("footprint")] string Footprint,
     [property: JsonPropertyName("x_mm")] double XMm,
     [property: JsonPropertyName("y_mm")] double YMm,
     [property: JsonPropertyName("rot")] double Rot,
-    [property: JsonPropertyName("padNets")] IReadOnlyDictionary<string, string> PadNets);
+    [property: JsonPropertyName("padNets")] IReadOnlyDictionary<string, string> PadNets,
+    [property: JsonPropertyName("padNetList")] IReadOnlyList<PcbPadNet> PadNetList);
 
 /// <summary>One net (name only — pad membership lives on each component's <see cref="PcbJobComponent.PadNets"/>).</summary>
 public sealed record PcbJobNet([property: JsonPropertyName("name")] string Name);
@@ -88,7 +98,7 @@ public sealed record PcbJob(
         {
             var pos = placement[alias];
             return new PcbJobComponent(alias, choiceByRef[alias].LibId, pos.XMm, pos.YMm, pos.Rot,
-                FootprintMap.PadNets(alias, endpointNets));
+                FootprintMap.PadNets(alias, endpointNets), FootprintMap.PadNetList(alias, endpointNets));
         }).ToList();
 
         // Validate every net node resolves to a pad in its component.

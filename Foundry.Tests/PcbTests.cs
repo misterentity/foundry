@@ -140,6 +140,24 @@ public class FootprintMapTests
     }
 
     [Fact]
+    public void PadNetList_PreservesOrder_AndDedupesPins_ForOrdinalFallback()
+    {
+        // Ordered pin->net so build_board.py can assign by pad-name match then ordinal position —
+        // this is what gives generic fallback headers (pads "1".."N") real connectivity (v2.3.1 fix).
+        var pairs = new[]
+        {
+            ("S1.VCC", "+3V3"),
+            ("S1.AOUT", "SIG"),
+            ("S1.GND", "GND"),
+            ("S1.VCC", "+3V3"),   // duplicate pin — first-seen kept, order stable
+            ("S2.VCC", "+3V3"),   // other alias — ignored
+        };
+        var list = FootprintMap.PadNetList("S1", pairs);
+        Assert.Equal(new[] { "VCC", "AOUT", "GND" }, list.Select(p => p.Pin).ToArray());
+        Assert.Equal(new[] { "+3V3", "SIG", "GND" }, list.Select(p => p.Net).ToArray());
+    }
+
+    [Fact]
     public void RefOf_And_PinOf_SplitEndpoint()
     {
         Assert.Equal("U1", FootprintMap.RefOf("U1.GPIO21"));

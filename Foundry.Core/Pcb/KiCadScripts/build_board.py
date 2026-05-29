@@ -77,19 +77,51 @@ def build(job):
         fp.SetReference(comp["ref"])
         board.Add(fp)
 
-        pad_nets = comp.get("padNets") or {}
-        for pad in fp.Pads():
-            pad_name = pad.GetName()
-            net_name = pad_nets.get(pad_name)
+        # Assign every net node to a real pad. The netlist addresses pins by NAME (VCC/AOUT/GPIO0/…) but a
+        # footprint's pads are named "1".."N" (generic headers) or by its own scheme — so match by pad name
+        # first, then fall back to ORDINAL pad position for the rest. Without this, fallback-header parts get
+        # no nets, the board has no connectivity, and routing/DRC operate on an empty board.
+        pad_net_list = comp.get("padNetList")
+        if pad_net_list is None:  # legacy job: derive an (unordered) list from the name-keyed dict
+            pad_net_list = [{"pin": k, "net": v} for k, v in (comp.get("padNets") or {}).items()]
+
+        pads = list(fp.Pads())
+        used = set()  # indices of pads already assigned
+
+        def assign(pad, net_name):
             if net_name and net_name in nets:
                 pad.SetNet(nets[net_name])
-            elif pad_name in pad_nets:
-                notes.append("component %s pad %s: net '%s' not declared" % (comp["ref"], pad_name, net_name))
-        # report net nodes that found no matching pad on the real footprint
-        real_pads = set(p.GetName() for p in fp.Pads())
-        for pad_name in pad_nets:
-            if pad_name not in real_pads:
-                notes.append("component %s: net node pad '%s' not present on %s" % (comp["ref"], pad_name, lib_id))
+                return True
+            return False
+
+        # pass 1: exact pad-name match (case-insensitive)
+        deferred = []
+        for item in pad_net_list:
+            pin = str(item.get("pin", ""))
+            net_name = item.get("net")
+            matched = False
+            for i, pad in enumerate(pads):
+                if i not in used and pad.GetName().lower() == pin.lower():
+                    if assign(pad, net_name):
+                        used.add(i)
+                    matched = True
+                    break
+            if not matched:
+                deferred.append((pin, net_name))
+
+        # pass 2: ordinal — assign each unmatched (pin, net) to the next free pad in order
+        free = [i for i in range(len(pads)) if i not in used]
+        fi = 0
+        for pin, net_name in deferred:
+            if fi >= len(free):
+                notes.append("component %s: no free pad for net node '%s' (%s has %d pads)" % (comp["ref"], pin, lib_id, len(pads)))
+                continue
+            i = free[fi]
+            fi += 1
+            if assign(pads[i], net_name):
+                used.add(i)
+            if pads[i].GetName().lower() != pin.lower():
+                notes.append("component %s: pin '%s' -> pad '%s' by position" % (comp["ref"], pin, pads[i].GetName()))
 
         fp.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(comp["x_mm"]), pcbnew.FromMM(comp["y_mm"])))
         if comp.get("rot"):
