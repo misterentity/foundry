@@ -15,6 +15,20 @@ import sys
 import pcbnew
 
 
+def unconnected_count(board):
+    """KiCad 8/9: BOARD.GetUnconnectedNetCount(). KiCad 10 removed it — read the connectivity object,
+    whose GetUnconnectedCount takes a required aVisibleOnly bool in v10 (count all = False)."""
+    if hasattr(board, "GetUnconnectedNetCount"):
+        return board.GetUnconnectedNetCount()
+    conn = board.GetConnectivity()
+    if conn is None:
+        return 0
+    try:
+        return conn.GetUnconnectedCount(False)   # KiCad 10 signature
+    except TypeError:
+        return conn.GetUnconnectedCount()        # older/other bindings
+
+
 def import_ses(job):
     in_pcb = job["inPcb"]
     ses = job["ses"]
@@ -33,7 +47,7 @@ def import_ses(job):
     ok = True if ok is None else bool(ok)
 
     board.BuildConnectivity()
-    unconnected = board.GetUnconnectedNetCount()
+    unconnected = unconnected_count(board)
 
     tracks = board.GetTracks()
     track_count = 0

@@ -4,7 +4,8 @@ using Foundry.Core.Diagnostics;
 namespace Foundry.Core.Pcb;
 
 /// <summary>
-/// Locates the two things v2.4 routing needs: a Java runtime (JRE 21+) and the FreeRouting jar.
+/// Locates the two things v2.4 routing needs: a Java runtime (JRE 25+ — the pinned FreeRouting 2.2.4 jar
+/// is compiled for Java 25 / class file 69) and the FreeRouting jar.
 /// Java is locate-only — found via <c>JAVA_HOME</c> then PATH, never auto-installed (clear guidance +
 /// JDK download hint when absent). The FreeRouting jar is a single ~58 MB file, so — unlike KiCad's MSI —
 /// it CAN be downloaded on demand to <c>%LocalAppData%/Foundry/tools/freerouting/</c>, mirroring
@@ -14,7 +15,7 @@ public static class FreeRoutingInstaller
 {
     public const string Version = "2.2.4";
     public const string JarUrl = "https://github.com/freerouting/freerouting/releases/download/v2.2.4/freerouting-2.2.4.jar";
-    public const string JdkDownloadUrl = "https://adoptium.net/temurin/releases/?version=21";
+    public const string JdkDownloadUrl = "https://adoptium.net/temurin/releases/?version=25";
 
     private const string JarFileName = "freerouting-2.2.4.jar";
 

@@ -28,11 +28,17 @@ def resolve_lib_dir(lib, fp_dirs):
 
 
 def footprint_loader():
-    """KiCad 9 uses PCB_IO_MGR; KiCad 8 uses IO_MGR. Same FootprintLoad(libDir, name) signature."""
-    mgr = getattr(pcbnew, "PCB_IO_MGR", None) or getattr(pcbnew, "IO_MGR", None)
-    if mgr is None:
-        raise RuntimeError("pcbnew has neither PCB_IO_MGR nor IO_MGR — unsupported KiCad version.")
-    return mgr.FootprintLoad
+    """Resolve a FootprintLoad(libDir, name) callable across KiCad versions.
+
+    KiCad 10 dropped the static PCB_IO_MGR.FootprintLoad; the module-level
+    pcbnew.FootprintLoad works in 8/9/10, so prefer it and fall back to the managers."""
+    if hasattr(pcbnew, "FootprintLoad"):
+        return pcbnew.FootprintLoad
+    for mgr_name in ("PCB_IO_MGR", "IO_MGR"):
+        mgr = getattr(pcbnew, mgr_name, None)
+        if mgr is not None and hasattr(mgr, "FootprintLoad"):
+            return mgr.FootprintLoad
+    raise RuntimeError("pcbnew has no FootprintLoad (module or PCB_IO_MGR/IO_MGR) — unsupported KiCad version.")
 
 
 def build(job):

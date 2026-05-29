@@ -42,10 +42,11 @@ public class FreeRoutingInstallerTests
     }
 
     [Fact]
-    public void JdkDownloadUrl_PointsAtTemurin21()
+    public void JdkDownloadUrl_PointsAtTemurin25()
     {
+        // FreeRouting 2.2.4's jar is compiled for Java 25 (class file 69) — the runtime hint must match.
         Assert.Contains("adoptium", FreeRoutingInstaller.JdkDownloadUrl);
-        Assert.Contains("21", FreeRoutingInstaller.JdkDownloadUrl);
+        Assert.Contains("25", FreeRoutingInstaller.JdkDownloadUrl);
     }
 
     [Fact]

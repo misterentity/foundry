@@ -10,9 +10,17 @@ public static class KiCadInstaller
 {
     public const string DownloadUrl = "https://www.kicad.org/download/windows/";
 
-    /// <summary>Standard Windows install root. Each version lives under <c>&lt;root&gt;\&lt;ver&gt;\bin</c>.</summary>
-    private static string ProgramFilesKiCad => System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "KiCad");
+    /// <summary>Install roots, each holding per-version <c>&lt;root&gt;\&lt;ver&gt;\bin</c> dirs: machine-wide
+    /// Program Files first, then the per-user location winget uses by default
+    /// (<c>%LOCALAPPDATA%\Programs\KiCad</c>) — a winget install is per-user unless run elevated.</summary>
+    private static IEnumerable<string> KiCadRoots()
+    {
+        yield return System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "KiCad");
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrEmpty(local))
+            yield return System.IO.Path.Combine(local, "Programs", "KiCad");
+    }
 
     /// <summary>Resolved KiCad install: the bin dir, python interpreter, kicad-cli, and footprint lib dir.</summary>
     public sealed record Install(string BinDir, string PythonPath, string KicadCliPath, string FootprintDir, string Version);
@@ -48,21 +56,30 @@ public static class KiCadInstaller
             catch { }
         }
 
-        try
+        foreach (var root in KiCadRoots())
         {
-            if (System.IO.Directory.Exists(ProgramFilesKiCad))
+            try
             {
-                foreach (var ver in System.IO.Directory.EnumerateDirectories(ProgramFilesKiCad)
-                             .OrderByDescending(d => d, StringComparer.OrdinalIgnoreCase))   // 9.0 before 8.0
+                if (!System.IO.Directory.Exists(root)) continue;
+                foreach (var ver in System.IO.Directory.EnumerateDirectories(root)
+                             .OrderByDescending(d => ParseVersion(System.IO.Path.GetFileName(d))))   // numeric: 10.0 before 9.0
                 {
                     var bin = System.IO.Path.Combine(ver, "bin");
                     if (System.IO.File.Exists(System.IO.Path.Combine(bin, "kicad-cli.exe"))) return bin;
                 }
             }
+            catch { }
         }
-        catch { }
 
         return null;
+    }
+
+    /// <summary>Parse a KiCad version dir name ("10.0", "9.0", "8") to a comparable <see cref="Version"/>; 0.0 on failure.</summary>
+    private static Version ParseVersion(string? name)
+    {
+        if (Version.TryParse(name, out var v)) return v;
+        if (int.TryParse(name, out var major)) return new Version(major, 0);
+        return new Version(0, 0);
     }
 
     /// <summary>
