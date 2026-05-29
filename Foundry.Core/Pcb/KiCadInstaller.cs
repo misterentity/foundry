@@ -1,14 +1,26 @@
+using System.Diagnostics;
+using System.Net.Http;
+using Foundry.Core.Diagnostics;
+
 namespace Foundry.Core.Pcb;
 
 /// <summary>
 /// Locates a KiCad install — its bundled Python interpreter (the only thing that can <c>import pcbnew</c>)
 /// and <c>kicad-cli.exe</c> — on PATH or under <c>C:\Program Files\KiCad\&lt;ver&gt;\bin</c> (newest first).
-/// Mirrors <see cref="Foundry.Core.Firmware.FirmwareBuilder.Locate"/> / <see cref="Foundry.Core.Cad.OpenScadInstaller"/>,
-/// but does <b>not</b> auto-download: KiCad is a ~1 GB MSI, so we locate-only and surface install guidance.
+/// Mirrors <see cref="Foundry.Core.Firmware.FirmwareBuilder.Locate"/> / <see cref="Foundry.Core.Cad.OpenScadInstaller"/>.
+/// Auto-install via <see cref="InstallAsync"/>: winget per-user (no UAC, lands where <see cref="Locate"/>
+/// expects), falling back to the official silent NSIS exe (one UAC prompt) only when winget is absent.
 /// </summary>
 public static class KiCadInstaller
 {
     public const string DownloadUrl = "https://www.kicad.org/download/windows/";
+
+    /// <summary>winget package id (confirmed: KiCad.KiCad, installer type nullsoft/NSIS).</summary>
+    public const string WingetId = "KiCad.KiCad";
+
+    /// <summary>Official silent NSIS installer (fallback when winget is absent; may prompt one UAC).</summary>
+    public const string FallbackExeUrl =
+        "https://github.com/KiCad/kicad-source-mirror/releases/download/10.0.3/kicad-10.0.3-x86_64.exe";
 
     /// <summary>Install roots, each holding per-version <c>&lt;root&gt;\&lt;ver&gt;\bin</c> dirs: machine-wide
     /// Program Files first, then the per-user location winget uses by default
@@ -95,5 +107,91 @@ public static class KiCadInstaller
             if (!string.IsNullOrWhiteSpace(env)) return env;
         }
         return System.IO.Path.Combine(root, "share", "kicad", "footprints");
+    }
+
+    /// <summary>The <c>winget.exe</c> path (App Installer, per-user) on PATH, or null when absent.</summary>
+    private static string? LocateWinget()
+    {
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(System.IO.Path.PathSeparator))
+        {
+            try { var p = System.IO.Path.Combine(dir.Trim(), "winget.exe"); if (System.IO.File.Exists(p)) return p; }
+            catch { }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Auto-install KiCad. Primary path is winget per-user (no UAC, installs to
+    /// <c>%LOCALAPPDATA%\Programs\KiCad\&lt;ver&gt;\bin</c> where <see cref="Locate"/> finds it). When winget
+    /// is absent it downloads the official NSIS exe and runs it silently (<c>/S</c>) — this may prompt one
+    /// unavoidable UAC. Idempotent: returns immediately if already installed. Re-runs <see cref="Locate"/>
+    /// after either path and throws when KiCad still isn't found.
+    /// </summary>
+    public static async Task<Install> InstallAsync(IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        var existing = Locate();
+        if (existing is not null) return existing;
+
+        var winget = LocateWinget();
+        if (winget is not null)
+        {
+            progress?.Report("Installing via winget…");
+            AppLog.Info("pcb", "installing KiCad via winget (per-user)…");
+            var exit = await RunAsync(winget,
+                $"install -e --id {WingetId} --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity",
+                ct);
+            var located = Locate();
+            if (located is not null)
+            {
+                AppLog.Info("pcb", $"KiCad installed via winget at {located.BinDir}");
+                progress?.Report("Installed");
+                return located;
+            }
+            AppLog.Warn("pcb", $"winget KiCad install did not land where expected (exit {exit}); trying NSIS exe fallback…");
+        }
+
+        // Fallback: official silent NSIS exe (may prompt one UAC).
+        progress?.Report("Downloading installer…");
+        var dir = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Foundry", "tools", "kicad");
+        System.IO.Directory.CreateDirectory(dir);
+        var exe = System.IO.Path.Combine(dir, "kicad-installer.exe");
+        AppLog.Info("pcb", "downloading official KiCad NSIS installer…");
+        using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
+        {
+            var bytes = await http.GetByteArrayAsync(FallbackExeUrl, ct);
+            await System.IO.File.WriteAllBytesAsync(exe, bytes, ct);
+        }
+        progress?.Report("Running installer…");
+        AppLog.Info("pcb", "running KiCad NSIS installer silently (/S) — may prompt UAC…");
+        await RunAsync(exe, "/S", ct);
+        try { System.IO.File.Delete(exe); } catch { }
+
+        var result = Locate() ?? throw new InvalidOperationException("KiCad not found after install.");
+        AppLog.Info("pcb", $"KiCad installed at {result.BinDir}");
+        progress?.Report("Installed");
+        return result;
+    }
+
+    /// <summary>Run a console process to completion (no window, output captured to AppLog). Returns exit code.</summary>
+    private static async Task<int> RunAsync(string fileName, string arguments, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var proc = new Process { StartInfo = psi };
+        proc.Start();
+        var stdout = proc.StandardOutput.ReadToEndAsync(ct);
+        var stderr = proc.StandardError.ReadToEndAsync(ct);
+        await proc.WaitForExitAsync(ct);
+        var err = (await stderr).Trim();
+        if (!string.IsNullOrEmpty(err)) AppLog.Warn("pcb", $"{System.IO.Path.GetFileName(fileName)}: {err}");
+        return proc.ExitCode;
     }
 }

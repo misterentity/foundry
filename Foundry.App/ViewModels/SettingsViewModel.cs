@@ -6,6 +6,7 @@ using Foundry.Core;
 using Foundry.Core.Ai;
 using Foundry.Core.Config;
 using Foundry.Core.Security;
+using Foundry.Core.Toolchain;
 using Microsoft.Win32;
 
 namespace Foundry.App.ViewModels;
@@ -41,6 +42,8 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         foreach (var m in ModelCatalog.Fallback) Models.Add(m);
         RefreshSummaries();
+        foreach (var s in ToolchainProvisioner.Snapshot())
+            OptionalTools.Add(new OptionalToolVm(s, InstallToolAsync));
         _ = LoadModelsAsync();
     }
 
@@ -77,6 +80,40 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _testResult = "";
     [ObservableProperty] private bool _isTesting;
     [ObservableProperty] private string _saveResult = "";
+
+    // ---- optional tools ----
+    public ObservableCollection<OptionalToolVm> OptionalTools { get; } = new();
+
+    private async Task InstallToolAsync(OptionalToolVm row)
+    {
+        row.Busy = true;
+        row.StatusLine = "Starting…";
+        var progress = new Progress<ToolProgress>(p =>
+            Application.Current.Dispatcher.Invoke(() => row.StatusLine = p.Stage));
+        try
+        {
+            var status = await ToolchainProvisioner.InstallAsync(row.Id, progress);
+            row.Apply(status);
+            row.StatusLine = "";
+        }
+        catch (Exception ex)
+        {
+            row.StatusLine = $"✗ {ex.Message}";
+            Foundry.Core.Diagnostics.AppLog.Warn("provision", $"{row.Name} install failed: {ex.Message}");
+        }
+        finally
+        {
+            row.Busy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task InstallAll()
+    {
+        foreach (var row in OptionalTools)
+            if (!row.Installed && !row.Busy)
+                await InstallToolAsync(row);
+    }
 
     // ---- updates ----
     public string CurrentVersion => $"v{AppInfo.Version}";
@@ -181,4 +218,48 @@ public sealed partial class SettingsViewModel : ObservableObject
     public string LogFolder => Foundry.Core.Diagnostics.AppLog.LogDir;
 
     [RelayCommand] private void Back() => _onBack();
+}
+
+/// <summary>One row in the "Optional tools" panel: a tool's identity + live install state, plus a
+/// per-row INSTALL command. The command is disabled once installed or while a download is running.</summary>
+public sealed partial class OptionalToolVm : ObservableObject
+{
+    private readonly Func<OptionalToolVm, Task> _install;
+
+    public OptionalToolVm(ToolStatus status, Func<OptionalToolVm, Task> install)
+    {
+        _install = install;
+        Id = status.Id;
+        Name = status.Name;
+        Purpose = status.Purpose;
+        Apply(status);
+    }
+
+    public ToolId Id { get; }
+    public string Name { get; }
+    public string Purpose { get; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
+    private bool _installed;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(InstallCommand))]
+    private bool _busy;
+
+    [ObservableProperty] private string _location = "";
+    [ObservableProperty] private string _statusText = "";
+    [ObservableProperty] private string _statusLine = "";
+
+    public void Apply(ToolStatus status)
+    {
+        Installed = status.Installed;
+        Location = status.Location ?? "";
+        StatusText = status.Installed ? "Installed" : "Not installed";
+    }
+
+    [RelayCommand(CanExecute = nameof(CanInstall))]
+    private Task Install() => _install(this);
+
+    private bool CanInstall() => !Installed && !Busy;
 }

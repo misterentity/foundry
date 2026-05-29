@@ -192,6 +192,81 @@
             </StackPanel>
           </Border>
 
+          <!-- OPTIONAL TOOLS -->
+          <Border Style="{StaticResource Card}" Margin="0,18,0,0">
+            <StackPanel>
+              <Grid>
+                <StackPanel Orientation="Horizontal">
+                  <c:IconControl Glyph="download" IconSize="14" Stroke="{StaticResource Brush.InkMute}" VerticalAlignment="Center"
+                                 ToolTip="Optional tools" AutomationProperties.Name="Optional tools"/>
+                  <TextBlock Style="{StaticResource Serif}" FontSize="24" Margin="10,0,0,0" Text="Optional tools"/>
+                </StackPanel>
+                <Button Style="{StaticResource Btn}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Command="{Binding InstallAllCommand}" Content="INSTALL ALL"
+                        ToolTip="Download and install every missing tool" AutomationProperties.Name="Install all optional tools"/>
+              </Grid>
+              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,8,0,0"
+                         Text="One-click installs to %LocalAppData%/Foundry/tools — no manual setup. You never need to install these yourself. KiCad installs per-user via the system package manager."/>
+
+              <ItemsControl ItemsSource="{Binding OptionalTools}" Margin="0,8,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,1,0,0" Padding="0,14,0,0" Margin="0,4,0,0">
+                      <StackPanel>
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="13" Foreground="{StaticResource Brush.Ink}" Text="{Binding Name}"/>
+                              <TextBlock Style="{StaticResource Kicker}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                         Foreground="{StaticResource Brush.InkMute}" Text="{Binding StatusText}"/>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="{Binding Purpose}"/>
+                          </StackPanel>
+                          <Button Grid.Column="1" VerticalAlignment="Top" MinWidth="92"
+                                  Command="{Binding InstallCommand}" Content="INSTALL"
+                                  ToolTip="{Binding Name, StringFormat='Install {0}'}"
+                                  AutomationProperties.Name="{Binding Name, StringFormat='Install {0}'}">
+                            <Button.Style>
+                              <Style TargetType="Button" BasedOn="{StaticResource Btn}">
+                                <Style.Triggers>
+                                  <DataTrigger Binding="{Binding Installed}" Value="True">
+                                    <Setter Property="Content" Value="INSTALLED"/>
+                                  </DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+                            </Button.Style>
+                          </Button>
+                        </Grid>
+                        <StackPanel Visibility="{Binding Busy, Converter={StaticResource BoolVis}}" Margin="0,10,0,0">
+                          <ProgressBar IsIndeterminate="True" Height="3" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Brush.Accent}"/>
+                          <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkMute}" Margin="0,6,0,0" Text="{Binding StatusLine}"/>
+                        </StackPanel>
+                        <TextBlock FontFamily="{StaticResource Font.Mono}" FontSize="10.5" Foreground="{StaticResource Brush.Fail}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Text="{Binding StatusLine}">
+                          <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                              <Setter Property="Visibility" Value="{Binding StatusLine, Converter={StaticResource NullVis}}"/>
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding Busy}" Value="True">
+                                  <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </TextBlock.Style>
+                        </TextBlock>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
           <!-- UPDATES -->
           <Border Style="{StaticResource Card}" Margin="0,18,0,0">
             <StackPanel>
