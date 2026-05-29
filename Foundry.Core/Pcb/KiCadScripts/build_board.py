@@ -102,7 +102,9 @@ def build(job):
     try:
         ds = board.GetDesignSettings()
         ds.m_ViasMinSize = pcbnew.FromMM(0.6)
-        ds.m_MinThroughDrill = pcbnew.FromMM(0.3)
+        # 0.2 mm min through-hole: many real footprints (e.g. the ESP32-WROOM thermal-pad via array)
+        # legitimately use 0.2 mm holes, which JLCPCB/PCBWay manufacture fine. 0.3 falsely flagged them.
+        ds.m_MinThroughDrill = pcbnew.FromMM(0.2)
         ds.m_TrackMinWidth = pcbnew.FromMM(0.2)
         ncs = board.GetAllNetClasses()
         default = ncs["Default"] if ncs and "Default" in ncs else None
