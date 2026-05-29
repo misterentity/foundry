@@ -50,7 +50,7 @@ public static class PcbPlacer
     /// clearance enforced between every pair of courtyards.
     /// </summary>
     public static PlaceResult Place(IReadOnlyList<PlacedItem> items, PlacementPlan plan,
-        double marginMm = 5.0, double gapMm = 1.5)
+        double marginMm = 5.0, double gapMm = 2.0)
     {
         plan ??= PlacementPlan.Empty;
         var ordered = items.OrderBy(i => i.Ref, StringComparer.OrdinalIgnoreCase).ToList();

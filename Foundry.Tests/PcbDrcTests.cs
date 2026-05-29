@@ -305,17 +305,17 @@ public class PcbDesignerKnobsTests
     public void Knobs_Initial_AreTheV22Defaults()
     {
         var k = PcbDesigner.Knobs.Initial;
-        Assert.Equal(1.5, k.GapMm);
+        Assert.Equal(2.0, k.GapMm);   // raised 1.5 → 2.0 for real-geometry placement headroom
         Assert.Equal(5.0, k.MarginMm);
         Assert.Equal(10, k.Passes);
     }
 
     [Fact]
-    public void NextGap_Climbs_1p5_2p5_4p0_ThenSaturates()
+    public void NextGap_Climbs_2p0_3p0_4p5_ThenSaturates()
     {
-        Assert.Equal(2.5, PcbDesigner.NextGap(1.5));
-        Assert.Equal(4.0, PcbDesigner.NextGap(2.5));
-        Assert.Equal(4.0, PcbDesigner.NextGap(4.0));   // saturated
+        Assert.Equal(3.0, PcbDesigner.NextGap(2.0));
+        Assert.Equal(4.5, PcbDesigner.NextGap(3.0));
+        Assert.Equal(4.5, PcbDesigner.NextGap(4.5));   // saturated
     }
 
     [Fact]
@@ -417,8 +417,8 @@ public class PcbDesignerLoopTests
         await PcbDesigner.RunLoopAsync(PlacementPlan.Empty, build, RouteOk(), drc, NoRevise(), maxIterations: 3);
 
         Assert.Equal(2, gaps.Count);
-        Assert.Equal(1.5, gaps[0]);   // initial
-        Assert.Equal(2.5, gaps[1]);   // bumped for clearance
+        Assert.Equal(2.0, gaps[0]);   // initial
+        Assert.Equal(3.0, gaps[1]);   // bumped for clearance
     }
 
     [Fact]

@@ -89,6 +89,33 @@ public static class FootprintMap
             return Heur("Package_TO_SOT_SMD:SOT-23");
         }
 
+        // ---- SolarPool exotic parts: modules/sensors mounted via connectors. Map to REAL, manufacturable
+        //      KiCad-10 footprints (all verified to exist + measured) so they stop hitting the generic
+        //      fallback and pad counts are explicit. Checked before the generic connector/header rules. ----
+
+        // DFRobot Gravity analog sensors (pH / ORP) — 3-wire (signal/VCC/GND) → 1x03 JST-PH connector.
+        if (Has("gravity", "ph sensor", "ph probe", "orp", "analog sensor"))
+            return Heur("Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical");
+
+        // DS18B20 waterproof temperature probe — 3-wire → TO-92 inline (matches the bare sensor pinout).
+        if (Has("ds18b20", "1-wire", "1wire", "temperature probe", "temp probe"))
+            return Heur("Package_TO_SOT_THT:TO-92_Inline");
+
+        // 6V solar panel — 2-wire lead → 2-pin JST-PH connector.
+        if (Has("solar", "panel", "photovoltaic"))
+            return Heur("Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical");
+
+        // 18650 Li-ion cell → single-cell battery holder.
+        if (Has("18650", "li-ion cell", "lithium cell", "battery holder"))
+            return Heur("Battery:BatteryHolder_Keystone_1042_1x18650");
+
+        // MT3608 boost / CN3791 MPPT charger modules — soldered onto via header strips. Keep a header but
+        // size it to the module's pin count (no longer the generic fallback diagnostic; pad count explicit).
+        if (Has("mt3608", "boost converter module", "boost module", "step-up module"))
+            return Heur(Header(Math.Max(n, 4)));
+        if (Has("cn3791", "mppt", "charge controller module", "charger module", "solar charger"))
+            return Heur(Header(Math.Max(n, 6)));
+
         if (Has("qfp", "lqfp", "tqfp"))
             return Heur($"Package_QFP:LQFP-{n}_7x7mm_P0.5mm");
         if (Has("soic", "so-8", "so8"))
@@ -176,6 +203,13 @@ public static class FootprintMap
             int n = CountAfter(id, "1x", 2);
             return (n * 2.54, 2.54);
         }
+
+        // ---- connectors / battery holders used for SolarPool exotic parts (offline approximations) ----
+        if (Has("BatteryHolder") && Has("18650")) return (88.0, 21.75);
+        if (Has("BatteryHolder")) return (40.0, 20.0);
+        if (Has("JST_PH_B3B") || Has("1x03") && Has("JST")) return (9.0, 5.6);
+        if (Has("JST_PH_B2B") || Has("1x02") && Has("JST")) return (7.0, 5.6);
+        if (Has("JST")) return (8.5, 6.0);
 
         if (Has("TerminalBlock")) return (10.0, 8.0);
 

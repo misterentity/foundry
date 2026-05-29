@@ -563,10 +563,17 @@ public sealed partial class WiringViewModel : TabViewModelBase
 
             var result = await Foundry.Core.Pcb.PcbDesigner.DesignAsync(Project, dir, ai, model, options);
 
-            // Per-iteration progress: each trace line is "attempt N: …".
+            // Per-iteration progress: each Core trace line starts "attempt N: …"; re-badge it as
+            // "iteration N/M:" for the UI (drop the redundant "attempt N:" prefix) so the error-count
+            // delta the loop emits — e.g. "19 → 4 errors" — reads cleanly.
             int n = 0;
             foreach (var line in result.Trace)
-                PcbNotes.Add($"iteration {++n}/{options.MaxIterations}: {line}");
+            {
+                var body = line.StartsWith("attempt ", StringComparison.Ordinal) && line.IndexOf(": ", StringComparison.Ordinal) is var i && i > 0
+                    ? line[(i + 2)..]
+                    : line;
+                PcbNotes.Add($"iteration {++n}/{options.MaxIterations}: {body}");
+            }
             foreach (var note in result.Notes) PcbNotes.Add(note);
 
             if (!result.Installed)
@@ -577,7 +584,13 @@ public sealed partial class WiringViewModel : TabViewModelBase
             }
 
             PcbSeverity = result.Ok ? "pass" : "fail";
-            PcbStatus = result.Ok ? $"DRC PASS — {result.Summary}" : result.Summary;
+            // Final verdict spelled out: PASS, or the explicit N errors / N unrouted breakdown of the best board.
+            var verdict = result.Report is { } rpt && !rpt.Clean
+                ? $"DRC FAIL — {rpt.ErrorCount} error(s)"
+                  + (rpt.UnconnectedCount > 0 ? $", {rpt.UnconnectedCount} net(s) unrouted" : "")
+                  + $" after {result.Iterations} iteration(s)."
+                : result.Summary;
+            PcbStatus = result.Ok ? $"DRC PASS — {result.Summary}" : verdict;
             if (result.KicadPcbPath is not null)
             {
                 LastPcbPath = result.KicadPcbPath;

@@ -52,8 +52,13 @@ public sealed record PcbJob(
     /// resolves to a pad in its component, emitting a <see cref="PcbDiagnostic"/> rather than mis-wiring.
     /// Pure — no KiCad needed. <paramref name="footprintDirs"/> is the located KiCad footprint dir(s).
     /// </summary>
+    /// <param name="realSizes">Optional measured courtyard sizes (lib id → W×H mm) from KiCad
+    /// (<see cref="PcbBuilder.MeasureAsync"/>). When present, preferred over <see cref="FootprintMap.CourtyardOf"/>
+    /// per lib id so the placer packs using true geometry. Null/missing entries fall back to the offline
+    /// approximation, keeping the no-KiCad path and existing tests deterministic.</param>
     public static PcbJob Build(Project.Project project, string outPath, IReadOnlyList<string> footprintDirs,
-        PlacementPlan? plan = null, double marginMm = 5.0, double gapMm = 1.5)
+        PlacementPlan? plan = null, double marginMm = 5.0, double gapMm = 1.5,
+        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null)
     {
         var diags = new List<PcbDiagnostic>();
         var nets = KiCadNetlist.Nets(project);
@@ -90,8 +95,12 @@ public sealed record PcbJob(
 
         // Deterministic placement: the AI plan (if any) is advice; PcbPlacer owns the coordinates and
         // guarantees no overlap. A null/Empty plan degrades to a tidy grid (identical in spirit to v2.2).
+        // Prefer the REAL measured courtyard (KiCad) over the offline approximation, per lib id.
+        (double, double) SizeOf(string libId) =>
+            realSizes is not null && realSizes.TryGetValue(libId, out var s) ? s : FootprintMap.CourtyardOf(libId);
+
         var items = refs.Select(alias => new PcbPlacer.PlacedItem(
-            alias, choiceByRef[alias].LibId, FootprintMap.CourtyardOf(choiceByRef[alias].LibId))).ToList();
+            alias, choiceByRef[alias].LibId, SizeOf(choiceByRef[alias].LibId))).ToList();
         var placement = PcbPlacer.Place(items, plan ?? PlacementPlan.Empty, marginMm, gapMm);
 
         var components = refs.Select(alias =>
@@ -113,6 +122,36 @@ public sealed record PcbJob(
 
         var jobNets = nets.Select(n => new PcbJobNet(n.Name)).ToList();
         return new PcbJob(outPath, footprintDirs, placement.OutlineSegmentsMm, jobNets, components) { Diagnostics = diags };
+    }
+
+    /// <summary>
+    /// The distinct footprint lib ids the job will use for <paramref name="project"/> — the same
+    /// resolve pass <see cref="Build"/> runs, exposed so <see cref="PcbBuilder.MeasureAsync"/> can ask
+    /// KiCad to measure exactly those footprints before placement. Pure; order is deterministic.
+    /// </summary>
+    public static IReadOnlyList<string> ResolvedLibIds(Project.Project project)
+    {
+        var nets = KiCadNetlist.Nets(project);
+        var endpointNets = nets
+            .SelectMany(n => n.Nodes.Select(ep => (Endpoint: ep, Net: n.Name)))
+            .ToList();
+
+        var refs = endpointNets.Select(e => FootprintMap.RefOf(e.Endpoint))
+            .Concat(project.Components.Select(c => c.Alias))
+            .Where(r => r.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(r => r, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var libIds = new List<string>();
+        foreach (var alias in refs)
+        {
+            var spec = SpecFor(project, alias);
+            int pinCount = Math.Max(spec.Pins.Count, FootprintMap.PadNets(alias, endpointNets).Count);
+            if (pinCount == 0) pinCount = 1;
+            libIds.Add(FootprintMap.Resolve(spec, pinCount).LibId);
+        }
+        return libIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>

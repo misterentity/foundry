@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 using Foundry.Core.Diagnostics;
 
 namespace Foundry.Core.Pcb;
@@ -38,8 +39,19 @@ public static class PcbBuilder
     /// <see cref="PcbDesigner"/> fix loop so it owns the plan + gap/margin across re-place iterations.
     /// <paramref name="plan"/> null/Empty degrades to the tidy grid (= v2.2). NEVER throws.
     /// </summary>
+    public static Task<PcbResult> BuildAsync(Project.Project project, string outputDir,
+        PlacementPlan? plan, double marginMm = 5.0, double gapMm = 1.5, CancellationToken ct = default) =>
+        BuildAsync(project, outputDir, plan, marginMm, gapMm, null, ct);
+
+    /// <summary>
+    /// Build with an explicit plan + knobs AND a pre-measured courtyard map (lib id → real W×H mm). The
+    /// <see cref="PcbDesigner"/> fix loop measures ONCE (<see cref="MeasureAsync"/>) and passes the same
+    /// <paramref name="realSizes"/> across re-place iterations — footprint geometry doesn't change, only
+    /// gap/margin do. When <paramref name="realSizes"/> is null, KiCad is measured here on demand.
+    /// </summary>
     public static async Task<PcbResult> BuildAsync(Project.Project project, string outputDir,
-        PlacementPlan? plan, double marginMm = 5.0, double gapMm = 1.5, CancellationToken ct = default)
+        PlacementPlan? plan, double marginMm, double gapMm,
+        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes, CancellationToken ct = default)
     {
         var kicad = KiCadInstaller.Locate();
         if (kicad is null) return PcbResult.NotInstalled();
@@ -51,7 +63,11 @@ public static class PcbBuilder
             ? new[] { kicad.FootprintDir }
             : Array.Empty<string>();
 
-        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm);
+        // Real-geometry placement: measure the footprints once (unless the caller already did) so the
+        // placer packs using true courtyards instead of CourtyardOf approximations.
+        realSizes ??= await MeasureAsync(project, footprintDirs, ct);
+
+        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm, realSizes);
 
         // Surface job-time diagnostics (unresolved nodes, generic-footprint fallbacks) in the log up front.
         foreach (var d in job.Diagnostics)
@@ -84,6 +100,69 @@ public static class PcbBuilder
             return PcbResult.Failed($"Couldn't build the PCB: {ex.Message}");
         }
         finally { try { System.IO.Directory.Delete(work, true); } catch { } }
+    }
+
+    /// <summary>
+    /// Measure the REAL courtyard size (W×H mm) of every footprint the job will use, via
+    /// <c>build_board.py measure</c>. Resolves the distinct lib ids with the same
+    /// <see cref="PcbJob.ResolvedLibIds"/> pass the build uses, runs the measure subcommand against
+    /// KiCad's Python, and parses <c>sizes</c>. Returns an EMPTY map when KiCad is absent or no footprint
+    /// dir is available (offline path) — callers then fall back to <see cref="FootprintMap.CourtyardOf"/>.
+    /// A footprint missing from <c>sizes</c> (recorded in the script's <c>notes</c>) is simply absent from
+    /// the map, so that one id falls back per-part. Never throws.
+    /// </summary>
+    public static async Task<IReadOnlyDictionary<string, (double WMm, double HMm)>> MeasureAsync(
+        Project.Project project, IReadOnlyList<string> footprintDirs, CancellationToken ct = default)
+    {
+        var empty = new Dictionary<string, (double, double)>(StringComparer.OrdinalIgnoreCase);
+        var kicad = KiCadInstaller.Locate();
+        if (kicad is null || footprintDirs.Count == 0) return empty;
+
+        var libIds = PcbJob.ResolvedLibIds(project);
+        if (libIds.Count == 0) return empty;
+
+        var work = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_measure_" + Guid.NewGuid().ToString("N")[..8]);
+        System.IO.Directory.CreateDirectory(work);
+        try
+        {
+            var scriptPath = System.IO.Path.Combine(work, "build_board.py");
+            await System.IO.File.WriteAllTextAsync(scriptPath, ReadScript(), ct);
+
+            var jobObj = new { mode = "measure", footprintDirs, libIds };
+            var jobPath = System.IO.Path.Combine(work, "measure_job.json");
+            await System.IO.File.WriteAllTextAsync(jobPath, JsonSerializer.Serialize(jobObj), ct);
+
+            // python build_board.py measure <measure_job.json>
+            var (stdout, _, _) = await RunAsync(kicad.PythonPath, $"\"{scriptPath}\" measure \"{jobPath}\"", ct);
+            return ParseSizes(stdout);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            AppLog.Warn("pcb", $"footprint measure failed (using approximations): {ex.Message}", null);
+            return empty;
+        }
+        finally { try { System.IO.Directory.Delete(work, true); } catch { } }
+    }
+
+    private static IReadOnlyDictionary<string, (double WMm, double HMm)> ParseSizes(string stdout)
+    {
+        var map = new Dictionary<string, (double, double)>(StringComparer.OrdinalIgnoreCase);
+        var line = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault(l => l.StartsWith("{"));
+        if (line is null) return map;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (!doc.RootElement.TryGetProperty("sizes", out var sizes)) return map;
+            foreach (var p in sizes.EnumerateObject())
+            {
+                if (p.Value.TryGetProperty("wMm", out var w) && p.Value.TryGetProperty("hMm", out var h))
+                    map[p.Name] = (w.GetDouble(), h.GetDouble());
+            }
+        }
+        catch (JsonException) { /* malformed → fall back to approximations */ }
+        return map;
     }
 
     private static async Task<(string stdout, string stderr, int code)> RunAsync(string exe, string args, CancellationToken ct)

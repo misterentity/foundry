@@ -21,29 +21,33 @@
                    Text="{Binding NetCount, StringFormat='{}{0} NETS'}"/>
       </Grid>
 
-      <!-- ACTION BAR — wraps to available width so it can never overflow the layout (export + Track B PCB/fab) -->
+      <!-- ACTION BAR — wraps to available width so it can never overflow the layout (export + Track B PCB/fab).
+           The headline action is DESIGN (DRC): the full build → route → DRC → remediate → retry loop. Single
+           build+route (EXPORT + ROUTE PCB) and the rest are secondary affordances. -->
       <WrapPanel Margin="0,0,0,24">
-        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportKiCadCommand}" Content="KICAD" ToolTip="Export a KiCad netlist (.net) + pinout CSV for PCB layout"
-                AutomationProperties.Name="Export KiCad netlist"/>
-        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportPcbCommand}" Content="EXPORT + ROUTE PCB"
-                ToolTip="Build a KiCad PCB (.kicad_pcb) from the netlist — footprints, placement, ratsnest — then route copper tracks with FreeRouting"
-                AutomationProperties.Name="Export to KiCad PCB and route"/>
-        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding RoutePcbCommand}" Content="ROUTE"
-                ToolTip="Route copper tracks on the last-built PCB with FreeRouting (export DSN → headless route → import SES)"
-                AutomationProperties.Name="Route the last-built PCB"/>
-        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding DesignPcbCommand}" Content="DESIGN (DRC)"
-                ToolTip="Run the full build → route → DRC fix loop until the board passes DRC or the iteration budget is spent (the v2.5 credibility gate)"
-                AutomationProperties.Name="Design a DRC-clean PCB via the build, route and DRC fix loop"/>
-        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportFabCommand}" Content="EXPORT GERBERS"
-                ToolTip="Export the standard 2-layer fab file set (Gerbers + Excellon drill) from the last DRC-clean board and bundle it into a single board-house-ready ZIP"
-                AutomationProperties.Name="Export Gerbers and drill as a fab ZIP from the last DRC-clean board"/>
+        <Button Style="{StaticResource BtnPrimary}" Margin="0,0,8,8" Command="{Binding DesignPcbCommand}"
+                ToolTip="Design a DRC-clean PCB: build → place → route → DRC, then remediate (looser clearance/more router passes) and retry until it passes or the iteration budget is spent — with per-iteration progress."
+                AutomationProperties.Name="Design a DRC-clean PCB via the build, route and DRC fix loop">
+          <StackPanel Orientation="Horizontal"><c:IconControl Glyph="bolt" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="DESIGN PCB (DRC)"/></StackPanel>
+        </Button>
         <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding DesignAndExportFabCommand}" Content="DESIGN + GERBERS"
                 ToolTip="One-shot: build → place → route → DRC fix loop → Gerbers + drill ZIP — a fab-ready package from the netlist (the v2.6 capstone)"
                 AutomationProperties.Name="Design a DRC-clean PCB and export a fab ZIP in one action"/>
+        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportFabCommand}" Content="EXPORT GERBERS"
+                ToolTip="Export the standard 2-layer fab file set (Gerbers + Excellon drill) from the last DRC-clean board and bundle it into a single board-house-ready ZIP"
+                AutomationProperties.Name="Export Gerbers and drill as a fab ZIP from the last DRC-clean board"/>
+        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportPcbCommand}" Content="EXPORT + ROUTE PCB"
+                ToolTip="Single pass: build a KiCad PCB (.kicad_pcb) from the netlist — footprints, placement, ratsnest — then route copper tracks with FreeRouting (no DRC fix loop — use DESIGN PCB for that)"
+                AutomationProperties.Name="Export to KiCad PCB and route in a single pass"/>
+        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding RoutePcbCommand}" Content="ROUTE"
+                ToolTip="Route copper tracks on the last-built PCB with FreeRouting (export DSN → headless route → import SES)"
+                AutomationProperties.Name="Route the last-built PCB"/>
+        <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportKiCadCommand}" Content="KICAD" ToolTip="Export a KiCad netlist (.net) + pinout CSV for PCB layout"
+                AutomationProperties.Name="Export KiCad netlist"/>
         <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportSvgCommand}" Content="SVG"/>
-        <Button Style="{StaticResource BtnPrimary}" Margin="0,0,0,8" Command="{Binding ExportPngCommand}">
-          <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PNG"/></StackPanel>
-        </Button>
+        <Button Style="{StaticResource BtnGhost}" Margin="0,0,0,8" Command="{Binding ExportPngCommand}" Content="EXPORT PNG"
+                ToolTip="Render the wiring diagram (schematic or breadboard) to a PNG in the export folder"
+                AutomationProperties.Name="Export the wiring diagram to PNG"/>
       </WrapPanel>
 
       <!-- PCB EXPORT STATUS (Track B) — mirrors the firmware VERIFY-BUILD status block -->

@@ -43,7 +43,8 @@ public sealed record PcbDesignResult(
 public static class PcbDesigner
 {
     // Deterministic bump schedule (monotonic — each step strictly loosens). See spec §D.
-    private const double Gap0 = 1.5, Gap1 = 2.5, Gap2 = 4.0;
+    // Gap0 raised 1.5 → 2.0 (real-geometry placement headroom); rungs kept strictly increasing.
+    private const double Gap0 = 2.0, Gap1 = 3.0, Gap2 = 4.5;
     private const double Margin0 = 5.0, Margin1 = 7.0, Margin2 = 10.0;
     private const int Passes0 = 10, Passes1 = 20, Passes2 = 40;
 
@@ -88,10 +89,17 @@ public static class PcbDesigner
             ? await planner.PlanAsync(project, ct)
             : PlacementPlan.Empty;
 
+        // Measure real footprint geometry ONCE and reuse across every re-place iteration — geometry
+        // doesn't change between iterations, only gap/margin do. Avoids re-spawning python each loop.
+        var footprintDirs = System.IO.Directory.Exists(KiCadInstaller.Locate()!.FootprintDir)
+            ? new[] { KiCadInstaller.Locate()!.FootprintDir }
+            : Array.Empty<string>();
+        var realSizes = await PcbBuilder.MeasureAsync(project, footprintDirs, ct);
+
         // Note: PcbBuilder.BuildAsync re-runs PlanAsync internally when handed a keyed client. To keep the
         // loop in control of the plan (so revisions take effect), the build step builds against the job with
         // the loop's current plan and never re-asks the AI for placement.
-        BuildStep build = (plan, knobs, c) => PcbBuilder.BuildAsync(project, outputDir, plan, knobs.MarginMm, knobs.GapMm, c);
+        BuildStep build = (plan, knobs, c) => PcbBuilder.BuildAsync(project, outputDir, plan, knobs.MarginMm, knobs.GapMm, realSizes, c);
         RouteStep route = (built, passes, c) => PcbRouter.RouteAsync(built, new RouteOptions(passes), c);
         DrcStep drc = (board, c) => PcbDrc.CheckAsync(board, options, c);
         ReviseStep revise = planner is not null
@@ -144,6 +152,7 @@ public static class PcbDesigner
         string? bestPath = null;
         DrcReport? bestReport = null;
         int bestAttempt = 0;
+        int? lastErrorCount = null;   // carried across iterations to show the "19 → N errors" delta
 
         for (int attempt = 1; attempt <= maxIterations; attempt++)
         {
@@ -173,7 +182,11 @@ public static class PcbDesigner
                 bestAttempt = attempt;
             }
 
-            trace.Add($"attempt {attempt}: gap={knobs.GapMm:0.#} margin={knobs.MarginMm:0.#} passes={knobs.Passes} → {report.Summary}");
+            // Surface the error-count delta vs the previous iteration ("19 → 4 errors") so progress is legible.
+            var errs = report.ErrorCount + report.UnconnectedCount;
+            var delta = lastErrorCount is { } prev && prev != errs ? $" [{prev} → {errs} errors]" : "";
+            trace.Add($"attempt {attempt}: gap={knobs.GapMm:0.#} margin={knobs.MarginMm:0.#} passes={knobs.Passes} → {report.Summary}{delta}");
+            lastErrorCount = errs;
 
             if (report.Clean)
             {
