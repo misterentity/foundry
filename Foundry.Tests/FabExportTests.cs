@@ -88,22 +88,21 @@ public class GerberExporterArgsTests
     }
 
     [Fact]
-    public void BuildDrillArgs_NormalizesOutputDir_ToTrailingSeparator()
+    public void BuildDrillArgs_OutputDir_HasNoTrailingSeparatorInsideQuotes()
     {
-        var sep = Path.DirectorySeparatorChar;
         var args = GerberExporter.BuildDrillArgs("b.kicad_pcb", "C:/tmp/out");
-        // KiCad's drill verb wants a trailing separator on the output directory.
-        Assert.Contains($"--output \"C:/tmp/out{sep}\"", args);
+        // A quoted path ending in a backslash escapes the closing quote on Windows and breaks kicad-cli,
+        // so the output dir must be quoted WITHOUT a trailing separator.
+        Assert.Contains("--output \"C:/tmp/out\"", args);
     }
 
     [Fact]
-    public void BuildDrillArgs_AlreadyTrailingSeparator_NotDoubled()
+    public void BuildDrillArgs_StripsCallerTrailingSeparator()
     {
-        var sep = Path.DirectorySeparatorChar;
-        var dir = "C:/tmp/out" + sep;
-        var args = GerberExporter.BuildDrillArgs("b.kicad_pcb", dir);
-        Assert.Contains($"--output \"{dir}\"", args);
-        Assert.DoesNotContain($"{sep}{sep}\"", args);
+        // Even if the caller passes a trailing separator, it must be stripped (no '...\"' in the args).
+        var args = GerberExporter.BuildDrillArgs("b.kicad_pcb", @"C:\tmp\out\");
+        Assert.Contains("--output \"C:\\tmp\\out\"", args);
+        Assert.DoesNotContain("\\\"", args.Substring(args.IndexOf("--output", System.StringComparison.Ordinal)));
     }
 }
 

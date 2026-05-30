@@ -39,13 +39,15 @@ public static class GerberExporter
     /// <summary>
     /// Build the pure <c>kicad-cli pcb export drill</c> argument string (unit-testable, exactly per recipe):
     /// Excellon, mm, decimal zeros, drill origin <c>plot</c> (shares the gerbers' origin), plated/non-plated
-    /// split, with gerberX2 drill maps. The output is a directory — KiCad's drill verb wants a trailing
-    /// separator, so <paramref name="outDir"/> is normalized to end with one.
+    /// split, with gerberX2 drill maps. The output dir is quoted WITHOUT a trailing separator: a quoted path
+    /// ending in a backslash (<c>"...\"</c>) escapes the closing quote under Windows arg parsing, mangling
+    /// the argument so kicad-cli rejects it. KiCad 10's drill verb treats the plain dir as a directory fine.
     /// </summary>
     public static string BuildDrillArgs(string boardPath, string outDir, FabOptions? options = null)
     {
         options ??= FabOptions.Default;
-        var dir = EnsureTrailingSeparator(outDir);
+        // Strip any trailing separator: a quoted path ending in '\' escapes the closing quote on Windows.
+        var dir = outDir.TrimEnd('/', '\\');
         var parts = new List<string>
         {
             "pcb", "export", "drill",
@@ -132,14 +134,6 @@ public static class GerberExporter
     }
 
     private static string Quote(string path) => $"\"{path}\"";
-
-    private static string EnsureTrailingSeparator(string dir)
-    {
-        if (string.IsNullOrEmpty(dir)) return dir;
-        return dir.EndsWith(System.IO.Path.DirectorySeparatorChar) || dir.EndsWith(System.IO.Path.AltDirectorySeparatorChar)
-            ? dir
-            : dir + System.IO.Path.DirectorySeparatorChar;
-    }
 
     private static async Task<(string stdout, string stderr, int code)> RunAsync(string exe, string args, CancellationToken ct)
     {
