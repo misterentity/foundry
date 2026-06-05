@@ -77,7 +77,8 @@ public partial class App : Application
         if (string.IsNullOrWhiteSpace(prompt)) { main.OpenSample(); return; }
         var key = new CredentialStore().Read(CredentialStore.AnthropicTarget);
         if (string.IsNullOrWhiteSpace(key)) { main.OpenSample(); return; }
-        var gen = new Foundry.Core.Generation.ProjectGenerator(new AnthropicClient(key), ConfigStore.Load().ModelId);
+        var cfg = ConfigStore.Load();
+        var gen = new Foundry.Core.Generation.ProjectGenerator(new AnthropicClient(key, cfg.MaxOutputTokens), cfg.ModelId);
         // Off the UI thread to avoid a sync-over-async deadlock (diag hook only).
         var r = System.Threading.Tasks.Task.Run(() => gen.GenerateAsync(prompt)).GetAwaiter().GetResult();
         if (r.Ok && r.Project is not null) main.OpenGenerated(r.Project);

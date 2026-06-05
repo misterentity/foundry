@@ -84,3 +84,18 @@ public class GenerationTests
         Assert.NotNull(result.Message);
     }
 }
+
+// ---- AI response truncation detection (max_tokens) ----------------------------------------------
+
+public class AnthropicTruncationTests
+{
+    [Theory]
+    [InlineData("max_tokens", true)]
+    [InlineData("MAX_TOKENS", true)]
+    [InlineData("end_turn", false)]
+    [InlineData("stop_sequence", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    public void IsTruncated_DetectsMaxTokensStopReason(string? stopReason, bool expected) =>
+        Assert.Equal(expected, Foundry.Core.Ai.AnthropicClient.IsTruncated(stopReason));
+}

@@ -121,6 +121,12 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
                 .Where(b => b.Type == "text" && b.Text is not null)
                 .Select(b => b.Text)
                 .FirstOrDefault() ?? "";
+            // Never let a max_tokens truncation be silent: a complex design/firmware pass that overruns the
+            // cap returns partial JSON the caller will reject — surface WHY so it isn't read as a clean fallback.
+            if (IsTruncated(message?.StopReason))
+                Diagnostics.AppLog.Warn("ai",
+                    $"Claude hit the {_maxTokens}-token output cap and the response was TRUNCATED ({text.Length} chars) — " +
+                    "output is incomplete. Raise the output-token limit in Settings or simplify the request.");
             Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, text.Length, sw.ElapsedMilliseconds, true);
             return text;
         }
@@ -186,7 +192,13 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     private sealed class MessageResponse
     {
         [JsonPropertyName("content")] public List<ContentBlock>? Content { get; set; }
+        [JsonPropertyName("stop_reason")] public string? StopReason { get; set; }
     }
+
+    /// <summary>True when the model stopped because it hit the output-token cap — the response is incomplete
+    /// (any JSON it was producing is truncated). Pure + testable.</summary>
+    internal static bool IsTruncated(string? stopReason) =>
+        string.Equals(stopReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
     private sealed class ContentBlock
     {
         [JsonPropertyName("type")] public string Type { get; set; } = "";

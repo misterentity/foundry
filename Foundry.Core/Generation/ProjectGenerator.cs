@@ -266,7 +266,13 @@ Output ONLY the JSON object.
 
             var raw = await _ai.CompleteAsync(FirmwareSystemPrompt, user, _model, ct);
             var json = ExtractJson(raw);
-            if (json is null) return; // keep deterministic fallback
+            if (json is null)
+            {
+                // Don't silently keep the stub: a null result here is usually a truncated/invalid AI response
+                // (see the max_tokens WARN in AnthropicClient). Make the fallback visible.
+                Diagnostics.AppLog.Warn("generation", $"firmware pass returned no usable JSON ({raw.Length} chars, likely truncated) — keeping the deterministic firmware.");
+                return;
+            }
 
             var fw = MapFirmware(json, project.Firmware.Platform);
             if (fw.Files.Count == 0)
