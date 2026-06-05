@@ -14,8 +14,10 @@ public static class RenodeInstaller
     /// <summary>Pinned Renode version. .repl/.resc generation and the RP2040 model are validated against it.</summary>
     public const string Version = "1.16.1";
 
+    // NOTE: the 1.16.1 Windows asset is the .NET portable — "renode-1.16.1.windows-portable.zip" (the old mono
+    // name) does NOT exist for this release and 404s; it must be the "-dotnet" asset.
     private const string PortableUrl =
-        "https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.windows-portable.zip";
+        "https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.windows-portable-dotnet.zip";
 
     public static string ToolsDir => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Foundry", "tools", "renode");
