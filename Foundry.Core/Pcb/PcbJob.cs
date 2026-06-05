@@ -110,8 +110,15 @@ public sealed record PcbJob(
         var components = refs.Select(alias =>
         {
             var pos = placement[alias];
-            return new PcbJobComponent(alias, choiceByRef[alias].LibId, pos.XMm, pos.YMm, pos.Rot,
-                FootprintMap.PadNets(alias, endpointNets), FootprintMap.PadNetList(alias, endpointNets),
+            var libId = choiceByRef[alias].LibId;
+            // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6) via the
+            // authoritative pin map. Pins with no map entry keep their logical name and fall through to the
+            // fail-closed gate in build_board.py (refused), never ordinal-guessed.
+            var padNetList = FootprintMap.PadNetList(alias, endpointNets)
+                .Select(pn => new PcbPadNet(McuPinMap.ResolvePad(libId, pn.Pin) ?? pn.Pin, pn.Net))
+                .ToList();
+            return new PcbJobComponent(alias, libId, pos.XMm, pos.YMm, pos.Rot,
+                FootprintMap.PadNets(alias, endpointNets), padNetList,
                 choiceByRef[alias].IsFallback);
         }).ToList();
 

@@ -23,15 +23,15 @@ public class PcbLiveToolchainTests
     }
 
     [Fact]
-    public async Task RealMcuBoard_AddressedByLogicalPins_IsRefusedNotMiswired()
+    public async Task RealMcuBoard_WithUnmappedPin_IsStillRefusedNotMiswired()
     {
         if (!KiCadPresent) return;   // skip on bare boxes; pcb-live CI runs this for real
 
-        // ESP32 resolves to a real footprint whose pads are all numeric ("1".."39"), wired here by GPIO name.
-        // Foundry has no GPIO-name→pad map, so the honest gate must REFUSE rather than ordinal-map GPIO34→pad 1.
+        // GPIO34/3V3/GND are in the ESP32 pin map (they resolve), but GPIO99 is NOT a real ESP32 pin — it has
+        // no pad, so the honest gate must REFUSE rather than ordinal-guess it. Coverage is incremental + safe.
         var p = new Project
         {
-            Title = "ESP32 logical pins",
+            Title = "ESP32 with an unmapped pin",
             Components = new()
             {
                 new ComponentSpec { Alias = "U1", Ref = "esp32", Name = "ESP32-WROOM-32" },
@@ -40,8 +40,7 @@ public class PcbLiveToolchainTests
             Connections = new()
             {
                 new Connection { From = "U1.3V3", To = "C1.1", Net = "power" },
-                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },
-                new Connection { From = "U1.GPIO34", To = "C1.1", Net = "power" },
+                new Connection { From = "U1.GPIO99", To = "C1.2", Net = "sig" },   // no such pad → unmapped
             },
         };
         var outDir = OutDir();
@@ -49,10 +48,54 @@ public class PcbLiveToolchainTests
         {
             var r = await PcbBuilder.BuildAsync(p, outDir);
             Assert.True(r.Installed);
-            Assert.False(r.Ok);                 // refused — connectivity could not be verified
+            Assert.False(r.Ok);                 // refused — an unmapped pin means connectivity is unverified
             Assert.Null(r.KicadPcbPath);
-            Assert.NotEmpty(r.UnmappedPins);
-            Assert.Contains(r.UnmappedPins, u => u.Contains("GPIO34") || u.Contains("3V3"));
+            Assert.Contains(r.UnmappedPins, u => u.Contains("GPIO99"));
+        }
+        finally { try { Directory.Delete(outDir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task Esp32Board_MappedGpioPins_BuildVerified_OnAuthoritativePads()
+    {
+        if (!KiCadPresent) return;
+
+        // The moat working: an ESP32 wired by logical GPIO name now builds VERIFIED, with each net landing on
+        // the datasheet-correct physical pad (GPIO34→pad 6, 3V3→pad 2, GND→pad 1) — read back from the board.
+        var p = new Project
+        {
+            Title = "ESP32 mapped GPIO",
+            Components = new()
+            {
+                new ComponentSpec { Alias = "U1", Ref = "esp32", Name = "ESP32-WROOM-32" },
+                new ComponentSpec { Alias = "C1", Ref = "cap", Name = "100nF capacitor" },
+                new ComponentSpec { Alias = "R1", Ref = "r1", Name = "10k resistor" },
+            },
+            Connections = new()
+            {
+                new Connection { From = "U1.3V3", To = "C1.1", Net = "power" },
+                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },
+                new Connection { From = "U1.GPIO34", To = "R1.1", Net = "sig" },
+                new Connection { From = "R1.2", To = "C1.2", Net = "gnd" },
+            },
+        };
+        var outDir = OutDir();
+        try
+        {
+            var r = await PcbBuilder.BuildAsync(p, outDir);
+            Assert.True(r.Installed);
+            Assert.True(r.Ok);                  // GPIO34/3V3/GND all resolved to real pads
+            Assert.Empty(r.UnmappedPins);
+            Assert.NotNull(r.KicadPcbPath);
+
+            var padNets = ReadPadNets(await File.ReadAllTextAsync(r.KicadPcbPath!));
+            string Net(string @ref, string pad) => padNets[@ref][pad];
+
+            // each logical pin landed on its authoritative ESP32-WROOM-32 pad, sharing the right net
+            Assert.Equal(Net("U1", "2"), Net("C1", "1"));   // 3V3 (pad 2) ↔ C1.1  (power)
+            Assert.Equal(Net("U1", "1"), Net("C1", "2"));   // GND (pad 1) ↔ C1.2  (gnd)
+            Assert.Equal(Net("U1", "6"), Net("R1", "1"));   // GPIO34 (pad 6) ↔ R1.1 (sig)
+            Assert.Equal(3, new[] { Net("U1", "2"), Net("U1", "1"), Net("U1", "6") }.Distinct().Count());
         }
         finally { try { Directory.Delete(outDir, true); } catch { } }
     }
@@ -121,10 +164,20 @@ public class PcbLiveToolchainTests
             var refM = Regex.Match(block, "\\(property \"Reference\" \"([^\"]+)\"");
             if (!refM.Success) continue;
 
+            // Split on each pad so a net is bound to ITS pad (footprints have many unconnected pads with no
+            // net — a cross-pad regex would mis-attribute the next pad's net). KiCad 10 pad nets are
+            // (net "name"); older KiCad is (net <code> "name") — accept both. First-seen wins (dup pad names).
             var padMap = new Dictionary<string, string>();
-            // KiCad 10 pad nets are (net "name"); older KiCad is (net <code> "name") — accept both.
-            foreach (Match pm in Regex.Matches(block, "\\(pad \"([^\"]+)\"[\\s\\S]*?\\(net (?:\\d+\\s+)?\"([^\"]*)\"\\)"))
-                padMap[pm.Groups[1].Value] = pm.Groups[2].Value;
+            var chunks = block.Split("(pad \"");
+            for (int c = 1; c < chunks.Length; c++)
+            {
+                var chunk = chunks[c];
+                int q = chunk.IndexOf('"');
+                if (q < 0) continue;
+                var padName = chunk[..q];
+                var net = Regex.Match(chunk, "\\(net (?:\\d+\\s+)?\"([^\"]*)\"\\)");
+                if (net.Success && !padMap.ContainsKey(padName)) padMap[padName] = net.Groups[1].Value;
+            }
             result[refM.Groups[1].Value] = padMap;
         }
         return result;

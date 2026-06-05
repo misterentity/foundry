@@ -454,3 +454,47 @@ public class PcbBuilderTests
         Assert.Contains("pcbnew", script);
     }
 }
+
+// ---- McuPinMap: logical-pin → real-pad resolution (the moat's pin maps) --------------------------
+
+public class McuPinMapTests
+{
+    private const string Esp = "RF_Module:ESP32-WROOM-32";
+
+    [Fact]
+    public void Esp32_ResolvesLogicalPinsToAuthoritativePads()
+    {
+        Assert.Equal("6", McuPinMap.ResolvePad(Esp, "GPIO34"));
+        Assert.Equal("2", McuPinMap.ResolvePad(Esp, "3V3"));
+        Assert.Equal("1", McuPinMap.ResolvePad(Esp, "GND"));
+        Assert.Equal("25", McuPinMap.ResolvePad(Esp, "GPIO0"));
+        Assert.Equal("3", McuPinMap.ResolvePad(Esp, "EN"));
+    }
+
+    [Fact]
+    public void Esp32_NormalizesAliases()
+    {
+        Assert.Equal("6", McuPinMap.ResolvePad(Esp, "IO34"));       // KiCad-symbol style
+        Assert.Equal("2", McuPinMap.ResolvePad(Esp, "VDD"));
+        Assert.Equal("4", McuPinMap.ResolvePad(Esp, "SENSOR_VP")); // GPIO36
+        Assert.Equal("35", McuPinMap.ResolvePad(Esp, "TX"));       // TXD0 / GPIO1
+        Assert.Equal("34", McuPinMap.ResolvePad(Esp, "RXD0"));     // GPIO3
+    }
+
+    [Fact]
+    public void UnknownPinOrFootprint_ReturnsNull_SoCallerFailsClosed()
+    {
+        Assert.Null(McuPinMap.ResolvePad(Esp, "GPIO99"));                 // no such pin on the module
+        Assert.Null(McuPinMap.ResolvePad("Connector:Generic_1x04", "VCC")); // no map for this footprint
+    }
+
+    [Fact]
+    public void EveryMappedEsp32PadIsAValidFootprintPadNumber()
+    {
+        foreach (var gpio in new[] { "GPIO0", "GPIO34", "GPIO23", "GPIO1", "GPIO3", "GPIO36", "GPIO39", "3V3", "GND", "EN" })
+        {
+            var pad = McuPinMap.ResolvePad(Esp, gpio);
+            Assert.True(int.TryParse(pad, out var n) && n is >= 1 and <= 39, $"{gpio} -> {pad}");
+        }
+    }
+}
