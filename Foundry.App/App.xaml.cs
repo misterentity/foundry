@@ -176,8 +176,9 @@ public partial class App : Application
             var path = await updater.DownloadAsync(info.InstallerUrl, info.InstallerName!);
             if (!InstallerTrusted(path))
             {
-                MessageBox.Show("The downloaded update could not be verified as signed by Foundry's publisher, so it was not run. Download it manually from the releases page if you trust it.",
-                    "Foundry — update blocked", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (MessageBox.Show("The downloaded update could not be verified as signed by Foundry's publisher, so it was not run.\n\nOpen the releases page to update manually?",
+                    "Foundry — update blocked", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                    OpenUrl(info.ReleaseUrl);
                 return;
             }
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
@@ -193,17 +194,28 @@ public partial class App : Application
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     /// <summary>
-    /// Only run a downloaded installer if it's Authenticode-signed by the SAME publisher as the
-    /// running app (thumbprint pin). If the running app is itself unsigned (no cert to pin to),
-    /// we can't verify the publisher — allow it but log, since the repo is already pinned.
+    /// Only run a downloaded installer if it carries a valid trusted Authenticode signature AND is signed by
+    /// the SAME publisher as the running app (thumbprint pin). If the running app is itself unsigned (no cert
+    /// to pin to), we FAIL CLOSED — refuse to auto-run, and let the user update manually from the releases
+    /// page — rather than silently running an unverifiable installer.
     /// </summary>
     private static bool InstallerTrusted(string path)
     {
+        // (0) The installer must carry a VALID, trusted Authenticode signature (full chain via WinVerifyTrust),
+        //     not merely an extractable certificate — catches untrusted/expired/revoked or tampered binaries.
+        if (!Foundry.Core.Provisioning.DownloadVerifier.VerifyAuthenticode(path))
+        {
+            Foundry.Core.Diagnostics.AppLog.Error("update", "downloaded installer failed Authenticode verification — refusing to run");
+            return false;
+        }
         var appCert = SignerCert(Process.GetCurrentProcess().MainModule?.FileName);
         if (appCert is null)
         {
-            Foundry.Core.Diagnostics.AppLog.Warn("update", "running app is unsigned — cannot pin publisher; running update unverified");
-            return true;
+            // Fail CLOSED: an unsigned running app can't pin a publisher, so we will NOT silently auto-run a
+            // downloaded installer (a CDN/repo/MITM compromise would be silent RCE). The caller offers the
+            // releases page for a manual, user-verified update instead.
+            Foundry.Core.Diagnostics.AppLog.Error("update", "running app is unsigned — cannot pin publisher; refusing to auto-run the update");
+            return false;
         }
         var fileCert = SignerCert(path);
         if (fileCert is null)

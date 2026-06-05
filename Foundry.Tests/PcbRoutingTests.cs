@@ -42,6 +42,13 @@ public class FreeRoutingInstallerTests
     }
 
     [Fact]
+    public void JarSha256_IsAPinned64HexDigest()
+    {
+        // A .jar can't be Authenticode-verified, so the pin must be present and well-formed (fail-closed).
+        Assert.Matches("^[0-9A-Fa-f]{64}$", FreeRoutingInstaller.JarSha256);
+    }
+
+    [Fact]
     public void JdkDownloadUrl_PointsAtTemurin25()
     {
         // FreeRouting 2.2.4's jar is compiled for Java 25 (class file 69) — the runtime hint must match.

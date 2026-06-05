@@ -1462,11 +1462,47 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
     private async Task Flash()
     {
         if (IsFlashing) return;
+
+        // Resolve the exact target board FIRST so the confirmation names the real port + resolved board, and
+        // never silently flash the first of several connected boards.
+        var board = SelectedBoard;
+        if (board is null)
+        {
+            var detected = await Foundry.Core.Firmware.FirmwareBuilder.DetectPortsAsync(Project);
+            if (detected.Count == 0)
+            {
+                FlashSeverity = "info"; FlashStatus = "No board detected — connect a board, then Detect boards.";
+                return;
+            }
+            if (detected.Count > 1)
+            {
+                Boards.Clear();
+                foreach (var b in detected) Boards.Add(b);
+                FlashSeverity = "info"; FlashStatus = "Multiple boards detected — pick one under Detect boards, then Flash.";
+                return;
+            }
+            board = detected[0];
+        }
+
+        var plan = Foundry.Core.Firmware.FirmwareBuilder.BuildFlashPlan(Project, board);
+
+        // Flashing is the only IRREVERSIBLE hardware action — require an explicit confirm, defaulting to Cancel.
+        var text = plan.VendorMismatch ? plan.MismatchWarning + "\n\n" + plan.ConfirmText : plan.ConfirmText;
+        var confirm = System.Windows.MessageBox.Show(text, "Foundry — confirm flash",
+            System.Windows.MessageBoxButton.OKCancel,
+            plan.VendorMismatch ? System.Windows.MessageBoxImage.Warning : System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.Cancel);
+        if (confirm != System.Windows.MessageBoxResult.OK)
+        {
+            FlashSeverity = "info"; FlashStatus = "Flash cancelled.";
+            return;
+        }
+
         IsFlashing = true;
-        FlashSeverity = "info"; FlashStatus = "Compiling and flashing…";
+        FlashSeverity = "info"; FlashStatus = $"Compiling and flashing {plan.Fqbn} → {plan.Port}…";
         try
         {
-            var result = await Foundry.Core.Firmware.FirmwareBuilder.UploadAsync(Project, SelectedBoard);
+            var result = await Foundry.Core.Firmware.FirmwareBuilder.UploadAsync(Project, board, forceMismatch: plan.VendorMismatch);
             if (!result.Installed)
             {
                 FlashSeverity = "info"; FlashStatus = result.Summary;   // "install arduino-cli…"

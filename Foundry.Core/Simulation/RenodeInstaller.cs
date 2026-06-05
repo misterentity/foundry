@@ -50,13 +50,13 @@ public static class RenodeInstaller
         var zip = System.IO.Path.Combine(ToolsDir, "renode.zip");
         Diagnostics.AppLog.Info("sim", $"downloading Renode {Version} (portable) — this is a large file…");
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
-        {
-            var bytes = await http.GetByteArrayAsync(PortableUrl, ct);
-            await System.IO.File.WriteAllBytesAsync(zip, bytes, ct);
-        }
-        ZipFile.ExtractToDirectory(zip, ToolsDir, overwriteFiles: true);
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, PortableUrl, zip, null, ct);
+        // Zip-slip-safe extract (a malicious archive can't write outside ToolsDir).
+        Provisioning.DownloadVerifier.ExtractZipSafe(zip, ToolsDir, overwrite: true);
         try { System.IO.File.Delete(zip); } catch { }
         var exe = Locate() ?? throw new InvalidOperationException("Renode.exe not found after download.");
+        // Fail-closed: refuse to run a Renode.exe that isn't validly publisher-signed.
+        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded Renode.exe");
         Diagnostics.AppLog.Info("sim", $"Renode {Version} installed at {exe}");
         return exe;
     }

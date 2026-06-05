@@ -42,13 +42,12 @@ public static class OpenScadInstaller
         System.IO.Directory.CreateDirectory(ToolsDir);
         var zip = System.IO.Path.Combine(ToolsDir, "openscad.zip");
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
-        {
-            var bytes = await http.GetByteArrayAsync(PortableUrl, ct);
-            await System.IO.File.WriteAllBytesAsync(zip, bytes, ct);
-        }
-        ZipFile.ExtractToDirectory(zip, ToolsDir, overwriteFiles: true);
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, PortableUrl, zip, null, ct);
+        Provisioning.DownloadVerifier.ExtractZipSafe(zip, ToolsDir, overwrite: true);
         try { System.IO.File.Delete(zip); } catch { }
         var exe = Locate() ?? throw new InvalidOperationException("openscad.exe not found after download.");
+        // Fail-closed: refuse to run an openscad.exe that isn't validly publisher-signed.
+        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded openscad.exe");
         Diagnostics.AppLog.Info("cad", $"OpenSCAD installed at {exe}");
         return exe;
     }

@@ -270,13 +270,69 @@ public static class FirmwareBuilder
             .ToList();
     }
 
+    /// <summary>Where the resolved flash FQBN came from — for the confirm dialog and tests.</summary>
+    public enum FqbnSource { Inferred, ExactMatch, PortPreferredOverInferred }
+
+    /// <summary>A vetted, ready-to-confirm flash plan: the exact port + resolved FQBN that will be written,
+    /// whether the connected board is a DIFFERENT family than the firmware (brick risk), and the human text
+    /// the UI must show before the (irreversible) write.</summary>
+    public sealed record FlashPlan(string Port, string Fqbn, FqbnSource Source, bool VendorMismatch,
+        string ConfirmText, string? MismatchWarning);
+
+    public static string VendorOf(string fqbn) =>
+        !string.IsNullOrEmpty(fqbn) && fqbn.Split(':') is { Length: >= 1 } p ? p[0] : "";
+
+    /// <summary>Strict FQBN shape (vendor:arch:board[:opts]) — rejects spaces/metacharacters so the value is
+    /// safe to pass to arduino-cli and can't smuggle extra arguments.</summary>
+    public static bool IsValidFqbn(string fqbn) =>
+        !string.IsNullOrWhiteSpace(fqbn) &&
+        System.Text.RegularExpressions.Regex.IsMatch(fqbn, @"^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.:=,-]+$");
+
+    /// <summary>Strict serial-port shape (COMn or /dev/...).</summary>
+    public static bool IsValidPort(string port) =>
+        !string.IsNullOrWhiteSpace(port) &&
+        System.Text.RegularExpressions.Regex.IsMatch(port, @"^(COM\d+|/dev/[A-Za-z0-9/._-]+)$");
+
     /// <summary>
-    /// One-click flash: pick a target board (caller-supplied or auto-detected), compile, and run
-    /// <c>arduino-cli upload</c> against it. Returns a structured result mirroring <see cref="BuildResult"/>.
-    /// When <paramref name="target"/> is null the most-likely connected board is used; ambiguity should be
-    /// resolved up front via <see cref="DetectPortsAsync"/>.
+    /// Resolve which FQBN will actually be written to <paramref name="board"/> and whether that's a
+    /// cross-family mismatch. Rule: when the connected board reports a CONCRETE FQBN, the PHYSICAL board wins
+    /// (you can't safely flash an ESP32 image onto an AVR); the inferred FQBN is only a fallback for an
+    /// unidentified port. A different vendor family than the firmware was written for is flagged as a brick risk.
     /// </summary>
-    public static async Task<UploadResult> UploadAsync(Project.Project project, DetectedBoard? target, CancellationToken ct = default)
+    public static FlashPlan BuildFlashPlan(Project.Project project, DetectedBoard board)
+    {
+        var inferred = Fqbn(project);
+        string fqbn; FqbnSource source; bool mismatch = false; string? warn = null;
+
+        if (board.Fqbn is null)
+        {
+            fqbn = inferred; source = FqbnSource.Inferred;
+        }
+        else if (board.Fqbn.Equals(inferred, StringComparison.OrdinalIgnoreCase))
+        {
+            fqbn = board.Fqbn; source = FqbnSource.ExactMatch;
+        }
+        else
+        {
+            fqbn = board.Fqbn; source = FqbnSource.PortPreferredOverInferred;   // physical board wins
+            mismatch = !VendorOf(board.Fqbn).Equals(VendorOf(inferred), StringComparison.OrdinalIgnoreCase);
+            if (mismatch)
+                warn = $"The connected board is a {VendorOf(board.Fqbn)} but the firmware was written for {VendorOf(inferred)}. " +
+                       "Flashing the wrong family can BRICK a board — only proceed if you're sure.";
+        }
+
+        var confirm = $"Flash firmware to:\n  {board.Label}\n  port {board.Port}\n  board {fqbn}\n\nThis writes to the device now and cannot be undone.";
+        return new FlashPlan(board.Port, fqbn, source, mismatch, confirm, warn);
+    }
+
+    /// <summary>
+    /// One-click flash: compile + <c>arduino-cli upload</c> to a target board. <paramref name="target"/> must
+    /// be supplied when more than one board is connected (no silent first-port auto-flash). A cross-family
+    /// FQBN/port mismatch is refused unless <paramref name="forceMismatch"/> is set (after a user confirm).
+    /// Returns a structured result mirroring <see cref="BuildResult"/>.
+    /// </summary>
+    public static async Task<UploadResult> UploadAsync(Project.Project project, DetectedBoard? target,
+        bool forceMismatch = false, CancellationToken ct = default)
     {
         var cli = Locate();
         if (cli is null) return UploadResult.NotInstalled();
@@ -288,14 +344,22 @@ public static class FirmwareBuilder
         if (board is null)
         {
             var detected = await DetectPortsAsync(project, ct);
-            board = detected.FirstOrDefault();
-            if (board is null) return UploadResult.NoBoard();
+            if (detected.Count == 0) return UploadResult.NoBoard();
+            if (detected.Count > 1)   // never silently flash the first of several boards
+                return new UploadResult(true, false, "Multiple boards detected — choose which port to flash.",
+                    string.Join(", ", detected.Select(d => $"{d.Port} ({d.Label})")));
+            board = detected[0];
         }
 
-        // Prefer the project's inferred FQBN; fall back to whatever the port reported.
-        var fqbn = Fqbn(project);
-        if (fqbn == "arduino:avr:uno" && board.Fqbn is not null) fqbn = board.Fqbn;   // trust the port over the safe default
+        var plan = BuildFlashPlan(project, board);
+        if (!IsValidPort(plan.Port) || !IsValidFqbn(plan.Fqbn))
+            return new UploadResult(true, false, "Refusing to flash — invalid port or board identifier.",
+                $"{plan.Port} / {plan.Fqbn}");
+        if (plan.VendorMismatch && !forceMismatch)
+            return new UploadResult(true, false, "Refusing to flash — connected board family doesn't match the firmware.",
+                plan.MismatchWarning ?? "");
 
+        var fqbn = plan.Fqbn;
         var buildDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_flash_" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
@@ -360,14 +424,16 @@ public static class FirmwareBuilder
         var dir = System.IO.Path.GetDirectoryName(LocalToolPath)!;
         System.IO.Directory.CreateDirectory(dir);
         var zip = System.IO.Path.Combine(dir, "arduino-cli.zip");
+        // Arduino embed-signs arduino-cli.exe, so integrity is verified by Authenticode on the extracted exe
+        // (covers the rolling 'latest' URL without re-pinning a SHA each release).
         using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(5) })
-        {
-            var bytes = await http.GetByteArrayAsync("https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip", ct);
-            await System.IO.File.WriteAllBytesAsync(zip, bytes, ct);
-        }
-        System.IO.Compression.ZipFile.ExtractToDirectory(zip, dir, overwriteFiles: true);
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http,
+                "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip", zip, null, ct);
+        Provisioning.DownloadVerifier.ExtractZipSafe(zip, dir, overwrite: true);
         try { System.IO.File.Delete(zip); } catch { }
         if (!System.IO.File.Exists(LocalToolPath)) throw new InvalidOperationException("arduino-cli.exe not found after download.");
+        // Fail-closed: refuse to use an arduino-cli.exe that isn't validly publisher-signed.
+        Provisioning.DownloadVerifier.RequireAuthenticode(LocalToolPath, "downloaded arduino-cli.exe");
         await RunAsync(LocalToolPath, "core update-index", ct);
         Diagnostics.AppLog.Info("build", "arduino-cli installed to app tools folder");
         return LocalToolPath;

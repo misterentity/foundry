@@ -158,10 +158,10 @@ public static class KiCadInstaller
         var exe = System.IO.Path.Combine(dir, "kicad-installer.exe");
         AppLog.Info("pcb", "downloading official KiCad NSIS installer…");
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
-        {
-            var bytes = await http.GetByteArrayAsync(FallbackExeUrl, ct);
-            await System.IO.File.WriteAllBytesAsync(exe, bytes, ct);
-        }
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, FallbackExeUrl, exe, null, ct);
+        // Fail-closed BEFORE running an installer elevated/silent: refuse a KiCad exe that isn't validly
+        // publisher-signed (the highest-stakes path — silent elevated execution). KiCad embed-signs its exe.
+        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded KiCad installer");
         progress?.Report("Running installer…");
         AppLog.Info("pcb", "running KiCad NSIS installer silently (/S) — may prompt UAC…");
         await RunAsync(exe, "/S", ct);
