@@ -31,10 +31,10 @@
           <StackPanel Orientation="Horizontal"><c:IconControl Glyph="bolt" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="DESIGN PCB (DRC)"/></StackPanel>
         </Button>
         <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding DesignAndExportFabCommand}" Content="DESIGN + GERBERS"
-                ToolTip="One-shot: build → place → route → DRC fix loop → Gerbers + drill ZIP — a fab-ready package from the netlist (the v2.6 capstone)"
+                ToolTip="One-shot: build → place → route → DRC fix loop → Gerbers + drill ZIP from the netlist. Design aid — review the Gerbers in a viewer before ordering."
                 AutomationProperties.Name="Design a DRC-clean PCB and export a fab ZIP in one action"/>
         <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportFabCommand}" Content="EXPORT GERBERS"
-                ToolTip="Export the standard 2-layer fab file set (Gerbers + Excellon drill) from the last DRC-clean board and bundle it into a single board-house-ready ZIP"
+                ToolTip="Export the standard 2-layer fab file set (Gerbers + Excellon drill) from the last DRC-clean board into a single ZIP. Design aid — review in a Gerber viewer before ordering."
                 AutomationProperties.Name="Export Gerbers and drill as a fab ZIP from the last DRC-clean board"/>
         <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,8" Command="{Binding ExportPcbCommand}" Content="EXPORT + ROUTE PCB"
                 ToolTip="Single pass: build a KiCad PCB (.kicad_pcb) from the netlist — footprints, placement, ratsnest — then route copper tracks with FreeRouting (no DRC fix loop — use DESIGN PCB for that)"
@@ -63,7 +63,7 @@
           <StackPanel Orientation="Horizontal" Margin="0,12,0,0" Visibility="{Binding HasFabZip, Converter={StaticResource BoolVis}}">
             <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,8,0"
                     Command="{Binding RevealFabZipCommand}" Content="REVEAL FAB ZIP"
-                    ToolTip="Show the fab-ready Gerber + drill ZIP in Explorer"
+                    ToolTip="Show the exported Gerber + drill ZIP in Explorer"
                     AutomationProperties.Name="Reveal the fab ZIP in Explorer"/>
             <Button Style="{StaticResource BtnGhost}" Padding="12,5" FontSize="10" Margin="0,0,8,0"
                     Command="{Binding QuoteFabCommand}" Content="QUOTE"

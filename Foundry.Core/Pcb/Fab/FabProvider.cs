@@ -3,7 +3,7 @@ namespace Foundry.Core.Pcb.Fab;
 /// <summary>
 /// Board + run parameters fed to a fab provider (v2.7). Derived from the fab ZIP / .kicad_pcb via
 /// <see cref="BoardDimensions"/>; <see cref="ZipPath"/> is the v2.6 <c>&lt;name&gt;-fab.zip</c> a house
-/// accepts as-is. <see cref="Layers"/> is known from the pipeline (the 2-layer set), not derived; the rest
+/// expects (review before ordering). <see cref="Layers"/> is known from the pipeline (the 2-layer set), not derived; the rest
 /// is user-chosen (quantity) or fixed for v2.7 (thickness 1.6 mm, FR-4).
 /// </summary>
 public sealed record FabOrderSpec(

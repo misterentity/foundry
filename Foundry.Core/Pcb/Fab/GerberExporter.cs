@@ -7,7 +7,7 @@ namespace Foundry.Core.Pcb.Fab;
 
 /// <summary>
 /// Exports the standard 2-layer fab file set from a routed/DRC-clean <c>.kicad_pcb</c> (Track B v2.6 capstone)
-/// and bundles it into a single fab ZIP a board house (JLCPCB/PCBWay) accepts as-is. Gerbers and drill are
+/// and bundles it into a single ZIP in the format board houses (JLCPCB/PCBWay) expect — review before ordering, not a manufacturability guarantee. Gerbers and drill are
 /// both native <c>kicad-cli pcb export</c> verbs — this mirrors <see cref="PcbDrc"/>'s kicad-cli invocation
 /// (NOT pcbnew python) + pure <c>BuildArgs</c> pattern, and <see cref="DrcReport"/>'s NotInstalled/Parse
 /// degrade. Protel extensions + X2 are KEPT (no <c>--no-protel-ext</c>/<c>--no-x2</c>) per the JLCPCB KiCad-9

@@ -859,11 +859,13 @@ public sealed partial class WiringViewModel : TabViewModelBase
         if (IsFabbing || string.IsNullOrEmpty(LastFabZipPath)) return;
 
         var confirm = System.Windows.MessageBox.Show(
+            "This board is a DESIGN AID, not a verified manufacturable spec — open the Gerbers in a viewer and " +
+            "check footprints, pin assignments and clearances before you spend money on it.\n\n" +
             "Foundry will open the board house's order page in your browser with the order details copied to your " +
             "clipboard and the fab ZIP ready to upload.\n\nFoundry does NOT submit the order and does NOT pay — you " +
             "review the price and place the order yourself on the fab's site.\n\nContinue?",
             "Foundry — prepare PCB order",
-            System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Information);
+            System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Warning);
         if (confirm != System.Windows.MessageBoxResult.OK) return;
 
         IsFabbing = true;
@@ -1324,7 +1326,7 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             File.WriteAllBytes(path, data);
             Foundry.Core.Diagnostics.AppLog.Info("export", $"enclosure {fmt.ToUpperInvariant()} → {path}");
             Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
-            SidecarStatus = $"{fmt.ToUpperInvariant()} exported to {path}";
+            SidecarStatus = $"{fmt.ToUpperInvariant()} exported to {path} — AI-generated geometry; check fit/cutouts before printing.";
         }
         catch (Exception ex) { SidecarStatus = $"export failed: {ex.Message}"; }
     }
