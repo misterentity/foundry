@@ -30,7 +30,7 @@ public sealed record StageRow(int N, string Name, string State)
 }
 
 /// <summary>Workspace shell: rail + main(tabbar + body) + chat (PRD §12, §8.1).</summary>
-public sealed partial class ShellViewModel : ObservableObject
+public sealed partial class ShellViewModel : ObservableObject, IDisposable
 {
     private readonly IPipeline _pipeline;
     private readonly ProjectGenerator _reviser;
@@ -102,8 +102,10 @@ public sealed partial class ShellViewModel : ObservableObject
         SelectedTab = Tabs.FirstOrDefault(t => t.Id == startTab) ?? Tabs[0];
 
         // Surface ERROR-level log entries as an inline banner. AppLog raises Logged from any thread;
-        // marshal back to the dispatcher before touching observable properties.
-        Foundry.Core.Diagnostics.AppLog.Logged += entry =>
+        // marshal back to the dispatcher before touching observable properties. Keep the handler in a field
+        // and unsubscribe in Dispose — the event is STATIC, so an inline lambda would root every dead
+        // ShellViewModel (one per project open) forever and multiply the dispatcher updates per log line.
+        _onLogged = entry =>
         {
             if (entry.Level != "ERROR" && entry.Level != "WARN") return;
             System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
@@ -112,7 +114,14 @@ public sealed partial class ShellViewModel : ObservableObject
                 ErrorText = $"{entry.Category}: {entry.Message}";
             }));
         };
+        Foundry.Core.Diagnostics.AppLog.Logged += _onLogged;
     }
+
+    private readonly Action<Foundry.Core.Diagnostics.LogEntry> _onLogged;
+
+    /// <summary>Detach from the static AppLog.Logged event so this view model (and its whole tab/project
+    /// graph) can be collected when the workspace is swapped.</summary>
+    public void Dispose() => Foundry.Core.Diagnostics.AppLog.Logged -= _onLogged;
 
     [RelayCommand] private void DismissError() => ErrorText = "";
     [RelayCommand] private void OpenLogs() { _onLogs(); ErrorText = ""; }

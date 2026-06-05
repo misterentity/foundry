@@ -26,7 +26,7 @@ public sealed class CredentialStore : ICredentialStore
             TargetName = target,
             CredentialBlobSize = (uint)blob.Length,
             CredentialBlob = Marshal.AllocCoTaskMem(blob.Length),
-            Persist = CRED_PERSIST_LOCAL_MACHINE,
+            Persist = CRED_PERSIST_LOCAL_USER,   // per-user (DPAPI), not machine-wide — matches the secrets invariant
             UserName = "foundry",
         };
         try
@@ -60,19 +60,20 @@ public sealed class CredentialStore : ICredentialStore
 
     public bool Exists(string target) => !string.IsNullOrEmpty(Read(target));
 
-    /// <summary>Masked summary for display, e.g. "sk-ant-…AB12". Never reveals the full key.</summary>
+    /// <summary>Masked summary for display, e.g. "sk-a…mnop". Never reveals the key: shows at most the first 4
+    /// and last 4 characters, and only when that still leaves ≥4 characters hidden in the middle — otherwise
+    /// it's all bullets (capped so the exact length isn't disclosed either).</summary>
     public static string Mask(string? secret)
     {
         if (string.IsNullOrEmpty(secret)) return "—";
-        if (secret.Length <= 8) return new string('•', secret.Length);
-        var head = secret.Length >= 7 ? secret[..7] : secret[..4];
-        var tail = secret[^4..];
-        return $"{head}…{tail}";
+        const int head = 4, tail = 4, minHidden = 4;
+        if (secret.Length < head + tail + minHidden) return new string('•', Math.Min(secret.Length, 8));
+        return $"{secret[..head]}…{secret[^tail..]}";
     }
 
     // ---- P/Invoke ----
     private const uint CRED_TYPE_GENERIC = 1;
-    private const uint CRED_PERSIST_LOCAL_MACHINE = 2;
+    private const uint CRED_PERSIST_LOCAL_USER = 1;   // visible only to the current user on this machine
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct CREDENTIAL

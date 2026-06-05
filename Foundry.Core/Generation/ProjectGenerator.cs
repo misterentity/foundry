@@ -85,7 +85,9 @@ Output ONLY the JSON object.
         if (string.IsNullOrWhiteSpace(prompt))
             return new GenerationResult(false, null, "Describe what you want to build.");
 
-        Diagnostics.AppLog.Info("generation", $"design pass started · model {_model}", prompt);
+        // Log only the prompt's length, never its body — AppLog persists to disk and is documented to never
+        // contain prompts (a prompt can carry proprietary/PII content the user didn't consent to retaining).
+        Diagnostics.AppLog.Info("generation", $"design pass started · model {_model}", $"prompt: {prompt.Length} chars");
 
         // Two attempts: complex designs occasionally truncate or return stray prose; a retry (with a
         // stricter nudge) recovers without bothering the user.
