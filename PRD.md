@@ -51,6 +51,11 @@ the user supplies their own Claude API key (and optional distributor API keys).
 ### Non-goals (v1)
 - Not a full EDA/PCB layout tool (no copper routing, Gerbers). Wiring diagrams are
   breadboard/connection-level, not manufacturable PCBs.
+  > **Superseded in Track B (v2.x):** Foundry now does deterministic auto-placement → copper routing
+  > (FreeRouting) → DRC fix loop → Gerber/Excellon export → assisted fab handoff. AI supplies placement
+  > intent only; geometry/routing/DRC are computed and gated (DRC-clean + connectivity-verified). Still a
+  > design aid with no manufacturability/net→pad guarantee — verify the Gerbers before ordering; parts with
+  > no pin map are refused, never mis-wired. See PRD-v2 "Non-goals".
 - No SPICE-level circuit simulation. Validation is rule-based, not simulated.
 - No guarantee of manufacturability — outputs are design aids; the PRD requires
   clear "verify before you build" framing in the UI.

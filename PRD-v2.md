@@ -16,8 +16,17 @@ exports to **the tools makers actually use next** (KiCad, breadboard view), vali
 and more trustworthy**, sourcing gets **smarter** (ranked substitutes), and good designs become
 **reusable** (templates, shareable bundles). Still local-first, still one canonical Project document.
 
-**Non-goals (unchanged from v1):** no copper auto-routing/Gerbers (we hand off to KiCad), no full SPICE,
-no cloud account system, no manufacturability guarantee (design aid — verify before building).
+**Non-goals (unchanged from v1):** no full SPICE, no cloud account system, no manufacturability guarantee
+(design aid — verify before building).
+
+> **Update (Track B shipped):** the original "no copper auto-routing/Gerbers" non-goal no longer holds.
+> Foundry now ships **Track B**: deterministic auto-placement → FreeRouting copper routing → DRC fix loop →
+> Gerber/Excellon export → assisted (never auto-submitted) fab handoff (JLCPCB/PCBWay). The determinism
+> boundary is preserved (AI supplies placement *intent* only; geometry/routing/DRC are computed) and the
+> output is gated DRC-clean **and** connectivity-verified. It remains a **design aid, NOT a manufacturability
+> guarantee, with no net→pad correctness guarantee** — review the Gerbers in a viewer before ordering. Logical
+> MCU pins resolve to real pads only for parts with a pin map (ESP32 / ESP8266 / RP2040 + any KiCad part whose
+> symbol resolves); anything else is **refused** (never silently mis-wired).
 
 ---
 
