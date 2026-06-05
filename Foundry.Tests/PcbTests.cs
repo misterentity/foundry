@@ -525,6 +525,29 @@ public class PicoPinMapTests
     }
 
     [Fact]
+    public void Esp12E_HasDistinctRstAndEn_AndResolvesGpio()
+    {
+        const string esp12 = "RF_Module:ESP-12E";
+        // The cross-chip bug guard: RST and EN are DIFFERENT pads on the ESP8266 (unlike the ESP32).
+        Assert.Equal("1", McuPinMap.ResolvePad(esp12, "RST"));
+        Assert.Equal("3", McuPinMap.ResolvePad(esp12, "EN"));
+        Assert.NotEqual(McuPinMap.ResolvePad(esp12, "RST"), McuPinMap.ResolvePad(esp12, "EN"));
+        Assert.Equal("18", McuPinMap.ResolvePad(esp12, "GPIO0"));
+        Assert.Equal("8", McuPinMap.ResolvePad(esp12, "3V3"));
+        Assert.Equal("8", McuPinMap.ResolvePad(esp12, "VCC"));   // universal VCC→3V3
+        Assert.Equal("15", McuPinMap.ResolvePad(esp12, "GND"));
+        Assert.Equal("2", McuPinMap.ResolvePad(esp12, "A0"));
+    }
+
+    [Fact]
+    public void Esp32_RstFoldsToEn_ButOnlyForEsp32()
+    {
+        // ESP32: reset IS the EN pin (chip-specific key, not a global fold that would break the ESP8266).
+        Assert.Equal("3", McuPinMap.ResolvePad("RF_Module:ESP32-WROOM-32", "RST"));
+        Assert.Equal("3", McuPinMap.ResolvePad("RF_Module:ESP32-WROOM-32", "EN"));
+    }
+
+    [Fact]
     public void CuratedMaps_AgreeWithSymbolDerived_ForEveryGpioWhereBothResolve()
     {
         // Cross-check the hand-curated McuPinMap against the authoritative KiCad symbol library: wherever BOTH
@@ -533,7 +556,7 @@ public class PicoPinMapTests
         if (kicad is null) return;   // needs the symbol library; pcb-live CI runs this for real
         var dir = kicad.SymbolDir;
 
-        var footprints = new[] { "RF_Module:ESP32-WROOM-32", "Module:RaspberryPi_Pico_Common_SMD" };
+        var footprints = new[] { "RF_Module:ESP32-WROOM-32", "RF_Module:ESP-12E", "Module:RaspberryPi_Pico_Common_SMD" };
         var pins = new List<string> { "3V3", "GND", "VBUS", "VSYS", "EN", "RUN" };
         for (int n = 0; n <= 39; n++) pins.Add("GPIO" + n);
 

@@ -21,6 +21,7 @@ public static class McuPinMap
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["RF_Module:ESP32-WROOM-32"] = Esp32Wroom32(),
+            ["RF_Module:ESP-12E"] = Esp12E(),
             ["Module:RaspberryPi_Pico_Common_SMD"] = RaspberryPiPico(),
         };
 
@@ -35,8 +36,10 @@ public static class McuPinMap
         return m.TryGetValue(Normalize(logicalPin), out var pad) ? pad : null;
     }
 
-    /// <summary>Normalize a Foundry-emitted pin name to the map's canonical key: IOnn→GPIOnn (KiCad-symbol
-    /// style → Foundry/datasheet style), supply/UART aliases folded to their canonical net names.</summary>
+    /// <summary>Normalize a Foundry-emitted pin name with only UNIVERSAL transforms (IOnn/GPn→GPIOnn,
+    /// supply rails). Chip-specific aliases (e.g. ESP32 SENSOR_VP=GPIO36, or RST=EN which is true on the ESP32
+    /// but NOT the ESP8266) live as explicit keys in each per-chip map — folding them globally would mis-map
+    /// across chips.</summary>
     internal static string Normalize(string pin)
     {
         var p = (pin ?? "").Trim();
@@ -46,13 +49,8 @@ public static class McuPinMap
         if (gp.Success) return "GPIO" + gp.Groups[1].Value;
         return p.ToUpperInvariant() switch
         {
-            "VDD" or "VCC" or "3.3V" or "+3V3" or "3V3" => "3V3",
-            "GND" or "VSS" or "GROUND" => "GND",
-            "RST" or "RESET" or "EN" or "CHIP_PU" => "EN",
-            "VP" or "SENSOR_VP" => "GPIO36",
-            "VN" or "SENSOR_VN" => "GPIO39",
-            "RX" or "RXD" or "RXD0" or "U0RXD" => "GPIO3",
-            "TX" or "TXD" or "TXD0" or "U0TXD" => "GPIO1",
+            "VDD" or "VCC" or "3.3V" or "+3V3" => "3V3",
+            "VSS" or "GROUND" => "GND",
             _ => p.ToUpperInvariant(),
         };
     }
@@ -69,8 +67,9 @@ public static class McuPinMap
             ["GND"] = "1",
             ["3V3"] = "2",
             ["EN"] = "3",
-            ["GPIO36"] = "4",   // SENSOR_VP (input-only ADC1_CH0)
-            ["GPIO39"] = "5",   // SENSOR_VN (input-only ADC1_CH3)
+            ["RST"] = "3", ["RESET"] = "3", ["CHIP_PU"] = "3",   // ESP32: reset IS the EN pin (chip-specific)
+            ["GPIO36"] = "4", ["SENSOR_VP"] = "4", ["VP"] = "4",  // input-only ADC1_CH0
+            ["GPIO39"] = "5", ["SENSOR_VN"] = "5", ["VN"] = "5",  // input-only ADC1_CH3
             ["GPIO34"] = "6",
             ["GPIO35"] = "7",
             ["GPIO32"] = "8",
@@ -97,10 +96,38 @@ public static class McuPinMap
             ["GPIO18"] = "30",
             ["GPIO19"] = "31",
             ["GPIO21"] = "33",
-            ["GPIO3"] = "34",   // RXD0
-            ["GPIO1"] = "35",   // TXD0
+            ["GPIO3"] = "34", ["RXD0"] = "34", ["RX"] = "34",   // U0RXD
+            ["GPIO1"] = "35", ["TXD0"] = "35", ["TX"] = "35",   // U0TXD
             ["GPIO22"] = "36",
             ["GPIO23"] = "37",
+        };
+
+    /// <summary>
+    /// ESP-12E / ESP8266 module (RF_Module:ESP-12E, 22 pads). Pad numbers from KiCad's RF_Module:ESP-12E symbol.
+    /// Note RST (pad 1) and EN (pad 3) are DISTINCT here (unlike the ESP32) — hence chip-specific keys, not a
+    /// global RST→EN fold. The analog input is ADC/A0/TOUT (pad 2). Validated against the symbol by tests.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> Esp12E() =>
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["RST"] = "1", ["RESET"] = "1",
+            ["ADC"] = "2", ["A0"] = "2", ["TOUT"] = "2",
+            ["EN"] = "3", ["CH_PD"] = "3", ["CHIP_EN"] = "3",
+            ["GPIO16"] = "4",
+            ["GPIO14"] = "5",
+            ["GPIO12"] = "6",
+            ["GPIO13"] = "7",
+            ["3V3"] = "8",
+            ["GPIO9"] = "11",
+            ["GPIO10"] = "12",
+            ["GND"] = "15",
+            ["GPIO15"] = "16",
+            ["GPIO2"] = "17",
+            ["GPIO0"] = "18",
+            ["GPIO4"] = "19",
+            ["GPIO5"] = "20",
+            ["GPIO3"] = "21", ["RXD"] = "21", ["RX"] = "21",
+            ["GPIO1"] = "22", ["TXD"] = "22", ["TX"] = "22",
         };
 
     /// <summary>
