@@ -52,6 +52,12 @@ public sealed class SidecarClient
     /// <summary>POST a raw OpenSCAD script and return the rendered mesh (PRD v2 Phase A).</summary>
     public async Task<ScadResult> RenderScadAsync(string scad, string format = "stl", CancellationToken ct = default)
     {
+        // Sandbox: refuse scripts with file-access directives before they reach OpenSCAD (defense in depth —
+        // the sidecar rejects them too). AI-SCAD is a render-only preview; it never needs include/use/import.
+        if (Cad.ScadSafety.FindUnsafeDirective(scad) is { } bad)
+            return new ScadResult(false, Array.Empty<byte>(), "",
+                $"Refusing to render — the script uses '{bad}', which can read local files.");
+
         var body = "{\"scad\":" + System.Text.Json.JsonSerializer.Serialize(scad ?? "") +
                    ",\"format\":\"" + (format == "3mf" ? "3mf" : "stl") + "\"}";
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/enclosure/scad")

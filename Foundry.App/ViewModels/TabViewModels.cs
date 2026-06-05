@@ -1218,7 +1218,8 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             ScadError = "";
             StlBytes = r.Bytes;
             IsLoading = false; ShowOffline = false; MeshReady = true;
-            ScadStatus = $"Rendered with OpenSCAD · {r.Bytes.Length:N0} bytes";
+            // Preview only — EXPORT always uses the deterministic schema geometry, not this AI-authored SCAD.
+            ScadStatus = $"Rendered with OpenSCAD · {r.Bytes.Length:N0} bytes — experimental preview (EXPORT uses the schema geometry)";
             // Mirror the active render in the on-model status badge so it no longer reads the stale
             // schema-build value once Advanced takes over. Schema rebuilds (LoadMeshAsync) overwrite this.
             SidecarStatus = $"openscad · {(r.Format.Length == 0 ? "stl" : r.Format)} · {r.Bytes.Length:N0} bytes · {client.BaseUrl}";
@@ -1311,14 +1312,12 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
         try
         {
             var fmt = (ConfigStore.Load().EnclosureFormat ?? "STL").ToLowerInvariant() == "3mf" ? "3mf" : "stl";
-            byte[]? data = (fmt == "stl") ? StlBytes : null;
-            if (data is null)
-            {
-                var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
-                if (client is null) { SidecarStatus = "can't export — CAD sidecar offline"; return; }
-                var mesh = await client.BuildEnclosureAsync(Foundry.Core.Sidecar.EnclosureSchema.ToJson(E, fmt));
-                data = mesh.Stl;
-            }
+            // Determinism boundary: EXPORT is ALWAYS the deterministic schema→mesh build (enclosure.py CSG),
+            // never the AI-authored OpenSCAD preview. AI fills the schema; geometry is computed from it.
+            var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
+            if (client is null) { SidecarStatus = "can't export — CAD sidecar offline"; return; }
+            var mesh = await client.BuildEnclosureAsync(Foundry.Core.Sidecar.EnclosureSchema.ToJson(E, fmt));
+            var data = mesh.Stl;
             if (data is null || data.Length == 0) { SidecarStatus = "no mesh to export"; return; }
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
@@ -1326,7 +1325,7 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             File.WriteAllBytes(path, data);
             Foundry.Core.Diagnostics.AppLog.Info("export", $"enclosure {fmt.ToUpperInvariant()} → {path}");
             Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
-            SidecarStatus = $"{fmt.ToUpperInvariant()} exported to {path} — AI-generated geometry; check fit/cutouts before printing.";
+            SidecarStatus = $"{fmt.ToUpperInvariant()} exported to {path} — schema-built geometry; check fit/cutouts before printing.";
         }
         catch (Exception ex) { SidecarStatus = $"export failed: {ex.Message}"; }
     }

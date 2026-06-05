@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import shutil
 
 from fastapi import FastAPI
@@ -63,6 +64,11 @@ class ScadRequest(BaseModel):
     format: str = "stl"   # stl | 3mf
 
 
+# OpenSCAD file-access directives — refuse them so an AI-authored/prompt-injected script can't read or
+# exfiltrate local files through the renderer (the C# client checks too; this is defense in depth).
+_SCAD_UNSAFE = re.compile(r"\b(include\s*<|use\s*<|import\s*\(|surface\s*\()", re.IGNORECASE)
+
+
 def _openscad_exe() -> str | None:
     p = os.environ.get("OPENSCAD")
     if p and os.path.exists(p):
@@ -83,6 +89,8 @@ def _openscad_exe() -> str | None:
 
 @app.post("/enclosure/scad")
 def build_scad(req: ScadRequest):
+    if _SCAD_UNSAFE.search(req.scad or ""):
+        return JSONResponse({"detail": "refused: script uses a file-access directive (include/use/import/surface)"}, status_code=400)
     exe = _openscad_exe()
     if exe is None:
         return JSONResponse({"detail": "openscad not installed"}, status_code=503)
