@@ -137,6 +137,45 @@ public class ValidationTests
     }
 
     [Fact]
+    public void PinConflict_SharedI2cBus_IsNotFlagged()
+    {
+        // The MCU's SDA/SCL fan out to multiple devices on one shared bus — that is BY DESIGN, not a pin
+        // conflict. The old rule counted i2c endpoints and false-failed every multi-device I²C design.
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "mcu", Alias = "MCU", Name = "ESP32", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO21", Kind = PinKind.Bidir }, new PinSpec { Name = "GPIO22", Kind = PinKind.Bidir } } },
+            new ComponentSpec { Ref = "d1", Alias = "D1", Name = "BME280", LogicV = 3.3, I2cAddress = 0x76,
+                Pins = new() { new PinSpec { Name = "SDA", Kind = PinKind.Bidir }, new PinSpec { Name = "SCL", Kind = PinKind.Bidir } } },
+            new ComponentSpec { Ref = "d2", Alias = "D2", Name = "OLED", LogicV = 3.3, I2cAddress = 0x3C,
+                Pins = new() { new PinSpec { Name = "SDA", Kind = PinKind.Bidir }, new PinSpec { Name = "SCL", Kind = PinKind.Bidir } } },
+        });
+        var connections = new List<Connection>
+        {
+            new() { From = "MCU.GPIO21", To = "D1.SDA", Net = "i2c" },
+            new() { From = "MCU.GPIO22", To = "D1.SCL", Net = "i2c" },
+            new() { From = "MCU.GPIO21", To = "D2.SDA", Net = "i2c" },   // same bus pin, second device
+            new() { From = "MCU.GPIO22", To = "D2.SCL", Net = "i2c" },
+        };
+        Assert.DoesNotContain(RulesEngine.Validate(connections, kb), f => f.Code == "PIN-CONF");
+    }
+
+    [Fact]
+    public void VoltageLevel_LowDriverIntoHighInput_IsSafe_NotFlagged()
+    {
+        // 3.3V MCU output → 5V device input is normally fine; the direction-blind rule used to false-fail it.
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "mcu", Alias = "MCU", Name = "ESP32", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO5", Kind = PinKind.Output } } },
+            new ComponentSpec { Ref = "dev", Alias = "DEV", Name = "5V Module", LogicV = 5.0,
+                Pins = new() { new PinSpec { Name = "IN", Kind = PinKind.Input } } },
+        });
+        var connections = new List<Connection> { new() { From = "MCU.GPIO5", To = "DEV.IN", Net = "signal" } };
+        Assert.DoesNotContain(RulesEngine.Validate(connections, kb), f => f.Code == "VLT-LVL");
+    }
+
+    [Fact]
     public void I2cCollision_DuplicateAddress_IsFail()
     {
         var kb = new ComponentKb(new[]

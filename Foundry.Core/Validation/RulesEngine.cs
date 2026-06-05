@@ -47,8 +47,11 @@ public static class RulesEngine
     // ---- Rule: two distinct signal nets claim the same MCU pin ----
     private static void PinConflicts(IReadOnlyList<Connection> connections, ComponentKb kb, List<Finding> findings)
     {
+        // Only point-to-point SIGNAL nets are single-driver. An I²C bus is SHARED by design — the MCU's SDA/SCL
+        // fan out to every device on the bus, so counting those endpoints would false-fail the engine's own
+        // primary use case (a multi-device I²C design). Bus nets are excluded here.
         var signalUse = connections
-            .Where(c => c.Net is "signal" or "i2c")
+            .Where(c => c.Net is "signal")
             .SelectMany(c => new[] { Parse(c.From, c.Net), Parse(c.To, c.Net) })
             .Where(e => kb.ByAlias(e.Alias)?.Pin(e.Pin) is { Kind: PinKind.Bidir or PinKind.Output or PinKind.Analog or PinKind.Input })
             .GroupBy(e => e.Full, StringComparer.OrdinalIgnoreCase)
@@ -125,12 +128,18 @@ public static class RulesEngine
 
             if (c.Net is "signal" or "i2c")
             {
-                // logic-level: differing logic voltages, low side not 5V-tolerant
+                // logic-level: a mismatch is only a hazard in ONE direction — a HIGHER-voltage driver into a
+                // LOWER-voltage receiver that isn't 5V-tolerant. The reverse (e.g. a 3.3V output into a 5V input)
+                // is normally safe, so flagging it (the old direction-blind rule did) just nags with bogus fixes.
                 if (ca.LogicV is double la && cb.LogicV is double lb && Math.Abs(la - lb) > 0.5)
                 {
-                    var lowEp = la < lb ? a : b;
-                    var lowPin = kb.ByAlias(lowEp.Alias)!.Pin(lowEp.Pin);
-                    if (lowPin is not { FiveVoltTolerant: true })
+                    var highEp = la > lb ? a : b;
+                    var lowEp = la > lb ? b : a;
+                    var highPin = kb.ByAlias(highEp.Alias)?.Pin(highEp.Pin);
+                    var lowPin = kb.ByAlias(lowEp.Alias)?.Pin(lowEp.Pin);
+                    bool highDrives = highPin is { Kind: PinKind.Output or PinKind.Bidir };
+                    bool lowReceives = lowPin is { Kind: PinKind.Input or PinKind.Bidir or PinKind.Analog };
+                    if (highDrives && lowReceives && lowPin is not { FiveVoltTolerant: true })
                     {
                         mismatch = true;
                         findings.Add(new Finding
