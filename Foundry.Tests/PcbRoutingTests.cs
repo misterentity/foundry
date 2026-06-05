@@ -25,6 +25,14 @@ public class RouteOptionsTests
 
 // ---- FreeRoutingInstaller locate / metadata ------------------------------------------------------
 
+// The LocateJava tests below mutate process-wide JAVA_HOME/PATH (and restore them). xUnit parallelizes
+// across classes by default, so without this a sibling class reading those vars mid-test would see the
+// temporary values — the source of the intermittent LocateJava failures. Serialize this class against all
+// others so the global-env window is never observed concurrently.
+[CollectionDefinition("ProcessEnv", DisableParallelization = true)]
+public sealed class ProcessEnvCollection { }
+
+[Collection("ProcessEnv")]
 public class FreeRoutingInstallerTests
 {
     [Fact]
@@ -39,6 +47,13 @@ public class FreeRoutingInstallerTests
         Assert.Contains("freerouting/freerouting", FreeRoutingInstaller.JarUrl);
         Assert.Contains(FreeRoutingInstaller.Version, FreeRoutingInstaller.JarUrl);
         Assert.EndsWith(".jar", FreeRoutingInstaller.JarUrl);
+    }
+
+    [Fact]
+    public void JarSha256_IsAPinned64HexDigest()
+    {
+        // A .jar can't be Authenticode-verified, so the pin must be present and well-formed (fail-closed).
+        Assert.Matches("^[0-9A-Fa-f]{64}$", FreeRoutingInstaller.JarSha256);
     }
 
     [Fact]

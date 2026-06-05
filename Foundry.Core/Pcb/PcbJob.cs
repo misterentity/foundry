@@ -22,7 +22,11 @@ public sealed record PcbJobComponent(
     [property: JsonPropertyName("y_mm")] double YMm,
     [property: JsonPropertyName("rot")] double Rot,
     [property: JsonPropertyName("padNets")] IReadOnlyDictionary<string, string> PadNets,
-    [property: JsonPropertyName("padNetList")] IReadOnlyList<PcbPadNet> PadNetList);
+    [property: JsonPropertyName("padNetList")] IReadOnlyList<PcbPadNet> PadNetList,
+    // True when FootprintMap couldn't resolve a real footprint and dropped in a generic placeholder header.
+    // build_board.py only ordinal-maps logical pins onto a placeholder; a resolved real footprint addressed
+    // by a logical name with no pad match is left UNMAPPED (connectivity unverified) rather than mis-wired.
+    [property: JsonPropertyName("isFallback")] bool IsFallback = false);
 
 /// <summary>One net (name only — pad membership lives on each component's <see cref="PcbJobComponent.PadNets"/>).</summary>
 public sealed record PcbJobNet([property: JsonPropertyName("name")] string Name);
@@ -58,7 +62,7 @@ public sealed record PcbJob(
     /// approximation, keeping the no-KiCad path and existing tests deterministic.</param>
     public static PcbJob Build(Project.Project project, string outPath, IReadOnlyList<string> footprintDirs,
         PlacementPlan? plan = null, double marginMm = 5.0, double gapMm = 1.5,
-        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null)
+        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null, string? symbolDir = null)
     {
         var diags = new List<PcbDiagnostic>();
         var nets = KiCadNetlist.Nets(project);
@@ -106,8 +110,19 @@ public sealed record PcbJob(
         var components = refs.Select(alias =>
         {
             var pos = placement[alias];
-            return new PcbJobComponent(alias, choiceByRef[alias].LibId, pos.XMm, pos.YMm, pos.Rot,
-                FootprintMap.PadNets(alias, endpointNets), FootprintMap.PadNetList(alias, endpointNets));
+            var libId = choiceByRef[alias].LibId;
+            // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6). Resolution order:
+            // curated McuPinMap (fast, KiCad-free, chip-specific aliases) → symbol-derived SymbolPinMap (any
+            // KiCad part, when a symbol dir is available) → keep the logical name, which then falls through to
+            // the fail-closed gate in build_board.py (refused), never ordinal-guessed.
+            var padNetList = FootprintMap.PadNetList(alias, endpointNets)
+                .Select(pn => new PcbPadNet(
+                    McuPinMap.ResolvePad(libId, pn.Pin) ?? SymbolPinMap.ResolvePad(libId, pn.Pin, symbolDir) ?? pn.Pin,
+                    pn.Net))
+                .ToList();
+            return new PcbJobComponent(alias, libId, pos.XMm, pos.YMm, pos.Rot,
+                FootprintMap.PadNets(alias, endpointNets), padNetList,
+                choiceByRef[alias].IsFallback);
         }).ToList();
 
         // Validate every net node resolves to a pad in its component.

@@ -1,0 +1,107 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Foundry.Core.Config;
+using Foundry.Core.Export;
+using Foundry.Core.Firmware;
+using Foundry.Core.Project;
+using Foundry.Core.Simulation;
+using Foundry.Core.Sourcing;
+using Foundry.Core.Validation;
+using Microsoft.Win32;
+
+namespace Foundry.App.ViewModels;
+
+public sealed partial class OverviewViewModel : TabViewModelBase
+{
+    public OverviewViewModel(Project project) : base(project)
+    {
+        var attention = project.Findings.Where(f => f.Severity is "fail" or "warn").Take(3).ToList();
+        TopFindings = attention.Count > 0 ? attention : project.Findings.Take(3).ToList();
+
+        Sourcing = project.Bom
+            .GroupBy(b => string.IsNullOrWhiteSpace(b.Dist) ? "—" : b.Dist)
+            .Select(g => new SourcingRow
+            {
+                Distributor = g.Key, Lines = g.Count(), Cost = g.Sum(x => x.Qty * x.Price),
+                Status = g.Any(x => x.Stock < 100) ? "warn" : "ok",
+            })
+            .OrderByDescending(s => s.Cost).ToList();
+    }
+
+    /// <summary>Raised when the user asks to regenerate the whole project (handled by the shell).</summary>
+    public event Action? RebuildRequested;
+
+    [RelayCommand] private void Rebuild() => RebuildRequested?.Invoke();
+
+    public IReadOnlyList<Finding> TopFindings { get; }
+    public IReadOnlyList<SourcingRow> Sourcing { get; }
+    public string CostText => $"${Project.Kpis.Cost:0.00}";
+    public bool AllInStock => Project.Bom.Count > 0 && Project.Bom.All(b => b.Stock >= 100);
+    public string StockText => AllInStock ? "All in stock" : $"{Project.Bom.Count(b => b.Stock < 100)} low-stock";
+
+    /// <summary>Export the branded project-spec PDF.</summary>
+    [RelayCommand]
+    private void ExportPdf()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "project-spec.pdf");
+            var wiring = Rendering.WiringImage.Render(Project);
+            File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}"); }
+    }
+
+    /// <summary>Save the current design as a reusable template (PRD v2 G13).</summary>
+    [RelayCommand]
+    private void SaveAsTemplate()
+    {
+        try
+        {
+            Foundry.Core.Project.TemplateStore.Save(Project, Project.Title);
+            System.Windows.MessageBox.Show($"Saved “{Project.Title}” as a template. Start a new project from it via New project → Templates.",
+                "Foundry — template saved", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Couldn't save the template: {ex.Message}", "Foundry", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>Export a shareable .foundryproj bundle (project + deliverables) to the export folder.</summary>
+    [RelayCommand]
+    private void ExportBundle()
+    {
+        try
+        {
+            var dir = ConfigStore.Load().OutputFolder;
+            Directory.CreateDirectory(dir);
+            var safe = string.Concat((Project.Title ?? "project").Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
+            var path = Path.Combine(dir, (string.IsNullOrWhiteSpace(safe) ? "project" : safe) + ProjectBundle.Extension);
+            ProjectBundle.Export(Project, path);
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"bundle → {path}");
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Bundle export failed: {ex.Message}"); }
+    }
+
+    /// <summary>Write the DigiKey BOM CSV and open the cart manager.</summary>
+    [RelayCommand]
+    private void Cart()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Foundry");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "digikey-bom.csv"), CartLinks.DigiKeyBomCsv(Project.Bom));
+            Process.Start(new ProcessStartInfo { FileName = CartLinks.DigiKeyBomManager, UseShellExecute = true });
+        }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Cart export failed: {ex.Message}"); }
+    }
+}

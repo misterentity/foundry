@@ -77,7 +77,8 @@ public partial class App : Application
         if (string.IsNullOrWhiteSpace(prompt)) { main.OpenSample(); return; }
         var key = new CredentialStore().Read(CredentialStore.AnthropicTarget);
         if (string.IsNullOrWhiteSpace(key)) { main.OpenSample(); return; }
-        var gen = new Foundry.Core.Generation.ProjectGenerator(new AnthropicClient(key), ConfigStore.Load().ModelId);
+        var cfg = ConfigStore.Load();
+        var gen = new Foundry.Core.Generation.ProjectGenerator(new AnthropicClient(key, cfg.MaxOutputTokens), cfg.ModelId);
         // Off the UI thread to avoid a sync-over-async deadlock (diag hook only).
         var r = System.Threading.Tasks.Task.Run(() => gen.GenerateAsync(prompt)).GetAwaiter().GetResult();
         if (r.Ok && r.Project is not null) main.OpenGenerated(r.Project);
@@ -176,8 +177,9 @@ public partial class App : Application
             var path = await updater.DownloadAsync(info.InstallerUrl, info.InstallerName!);
             if (!InstallerTrusted(path))
             {
-                MessageBox.Show("The downloaded update could not be verified as signed by Foundry's publisher, so it was not run. Download it manually from the releases page if you trust it.",
-                    "Foundry — update blocked", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (MessageBox.Show("The downloaded update could not be verified as signed by Foundry's publisher, so it was not run.\n\nOpen the releases page to update manually?",
+                    "Foundry — update blocked", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                    OpenUrl(info.ReleaseUrl);
                 return;
             }
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
@@ -193,18 +195,31 @@ public partial class App : Application
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     /// <summary>
-    /// Only run a downloaded installer if it's Authenticode-signed by the SAME publisher as the
-    /// running app (thumbprint pin). If the running app is itself unsigned (no cert to pin to),
-    /// we can't verify the publisher — allow it but log, since the repo is already pinned.
+    /// Trust policy for an auto-downloaded installer. When the running app is SIGNED, the installer must carry a
+    /// valid, trusted Authenticode signature (full chain via WinVerifyTrust) from the SAME publisher as the app
+    /// (thumbprint pin). When the app is UNSIGNED — the current state, code-signing not enabled yet — there's no
+    /// publisher to pin to, so the update is allowed to run but logged as unverified. Code-sign the app +
+    /// installer (SIGN_PFX_BASE64/SIGN_PASSWORD) to automatically enforce the strict gate.
     /// </summary>
     private static bool InstallerTrusted(string path)
     {
         var appCert = SignerCert(Process.GetCurrentProcess().MainModule?.FileName);
         if (appCert is null)
         {
-            Foundry.Core.Diagnostics.AppLog.Warn("update", "running app is unsigned — cannot pin publisher; running update unverified");
+            // Unsigned app: can't verify the update's publisher. Allow it (pre-signing behavior) but make the
+            // gap visible — signing the build flips this to full Authenticode + publisher-pin verification.
+            Foundry.Core.Diagnostics.AppLog.Warn("update",
+                "running app is unsigned — can't verify the update's publisher; running it unverified. Sign the build to enforce verification.");
             return true;
         }
+        // Signed app → require a valid, trusted Authenticode signature (not merely an extractable cert: this
+        // catches untrusted/expired/revoked or tampered installers)…
+        if (!Foundry.Core.Provisioning.DownloadVerifier.VerifyAuthenticode(path))
+        {
+            Foundry.Core.Diagnostics.AppLog.Error("update", "downloaded installer failed Authenticode verification — refusing to run");
+            return false;
+        }
+        // …from the SAME publisher as the running app.
         var fileCert = SignerCert(path);
         if (fileCert is null)
         {

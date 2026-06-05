@@ -16,6 +16,9 @@ public static class FreeRoutingInstaller
 {
     public const string Version = "2.2.4";
     public const string JarUrl = "https://github.com/freerouting/freerouting/releases/download/v2.2.4/freerouting-2.2.4.jar";
+    /// <summary>Pinned SHA-256 of the v2.2.4 jar (a .jar isn't Authenticode-signable). Verified fail-closed on download.
+    /// Computed from the official GitHub release asset (github.com/freerouting/freerouting v2.2.4).</summary>
+    public const string JarSha256 = "06E2E89CB1AE7FE74FB37176C67A083BBB8A250AB72006BCCCC4DB18ACA91ED7";
     public const string JdkDownloadUrl = "https://adoptium.net/temurin/releases/?version=25";
 
     /// <summary>Adoptium API binary endpoint — 307-redirects to the latest Temurin 25 GA portable JRE
@@ -104,14 +107,19 @@ public static class FreeRoutingInstaller
         System.IO.Directory.CreateDirectory(JavaToolsDir);
         var zip = System.IO.Path.Combine(JavaToolsDir, "jre.zip");
         AppLog.Info("pcb", "downloading Temurin 25 JRE (portable)…");
+        // The Adoptium 'latest' endpoint has no stable hash, so verify integrity via Authenticode on the
+        // extracted java.exe (Eclipse Adoptium embed-signs Windows binaries) rather than a pinned SHA.
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(15) })
-        {
-            var bytes = await http.GetByteArrayAsync(JreUrl, ct);
-            await System.IO.File.WriteAllBytesAsync(zip, bytes, ct);
-        }
-        ZipFile.ExtractToDirectory(zip, JavaToolsDir, overwriteFiles: true);
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, JreUrl, zip, null, ct);
+        Provisioning.DownloadVerifier.ExtractZipSafe(zip, JavaToolsDir, overwrite: true);
         try { System.IO.File.Delete(zip); } catch { }
         var java = LocateJava() ?? throw new InvalidOperationException("java.exe not found after JRE download.");
+        // Fail-closed: an unsigned/tampered JRE is deleted and the install throws.
+        if (!Provisioning.DownloadVerifier.VerifyAuthenticode(java))
+        {
+            try { System.IO.Directory.Delete(JavaToolsDir, recursive: true); } catch { }
+            throw new Provisioning.IntegrityException("downloaded JRE java.exe failed Authenticode verification — refusing to use it.");
+        }
         AppLog.Info("pcb", $"Java (JRE 25) installed at {java}");
         return java;
     }
@@ -120,13 +128,9 @@ public static class FreeRoutingInstaller
     public static async Task<string> DownloadJarAsync(CancellationToken ct = default)
     {
         System.IO.Directory.CreateDirectory(ToolsDir);
+        // A .jar isn't a PE so it can't be Authenticode-verified — pin its published SHA-256 (fail-closed).
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
-        {
-            var bytes = await http.GetByteArrayAsync(JarUrl, ct);
-            await System.IO.File.WriteAllBytesAsync(JarPath, bytes, ct);
-        }
-        if (!System.IO.File.Exists(JarPath))
-            throw new InvalidOperationException("freerouting jar not found after download.");
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, JarUrl, JarPath, JarSha256, ct);
         AppLog.Info("pcb", $"FreeRouting {Version} jar downloaded to {JarPath}");
         return JarPath;
     }

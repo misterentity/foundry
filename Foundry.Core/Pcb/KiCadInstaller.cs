@@ -35,7 +35,13 @@ public static class KiCadInstaller
     }
 
     /// <summary>Resolved KiCad install: the bin dir, python interpreter, kicad-cli, and footprint lib dir.</summary>
-    public sealed record Install(string BinDir, string PythonPath, string KicadCliPath, string FootprintDir, string Version);
+    public sealed record Install(string BinDir, string PythonPath, string KicadCliPath, string FootprintDir, string Version)
+    {
+        /// <summary>The symbol-library dir (sibling of <see cref="FootprintDir"/>) — source of the authoritative
+        /// pin name→number tables used by <see cref="SymbolPinMap"/> to resolve logical MCU pins to real pads.</summary>
+        public string SymbolDir => System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(FootprintDir.TrimEnd('/', '\\')) ?? FootprintDir, "symbols");
+    }
 
     /// <summary>The located KiCad install (newest version found), or null when KiCad isn't installed.</summary>
     public static Install? Locate()
@@ -158,10 +164,10 @@ public static class KiCadInstaller
         var exe = System.IO.Path.Combine(dir, "kicad-installer.exe");
         AppLog.Info("pcb", "downloading official KiCad NSIS installer…");
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
-        {
-            var bytes = await http.GetByteArrayAsync(FallbackExeUrl, ct);
-            await System.IO.File.WriteAllBytesAsync(exe, bytes, ct);
-        }
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, FallbackExeUrl, exe, null, ct);
+        // Fail-closed BEFORE running an installer elevated/silent: refuse a KiCad exe that isn't validly
+        // publisher-signed (the highest-stakes path — silent elevated execution). KiCad embed-signs its exe.
+        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded KiCad installer");
         progress?.Report("Running installer…");
         AppLog.Info("pcb", "running KiCad NSIS installer silently (/S) — may prompt UAC…");
         await RunAsync(exe, "/S", ct);

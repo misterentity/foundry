@@ -82,4 +82,70 @@ public class FlashTests
         };
         Assert.Equal(expected, FirmwareBuilder.Fqbn(p));
     }
+
+    private static Foundry.Core.Project.Project ProjectFor(string mcuName) => new()
+    {
+        Title = mcuName,
+        Components = new() { new ComponentSpec { Ref = "mcu", Alias = "MCU", Name = mcuName } },
+    };
+
+    [Fact]
+    public void BuildFlashPlan_InferredEsp32_DetectedAvr_FlagsVendorMismatch()
+    {
+        // Firmware written for an ESP32, but an Arduino Uno is on the port: the PHYSICAL board wins and the
+        // cross-family mismatch is flagged so the UI can warn before a brick.
+        var plan = FirmwareBuilder.BuildFlashPlan(ProjectFor("ESP32 dev board"),
+            new DetectedBoard("COM3", "arduino:avr:uno", "Arduino Uno"));
+        Assert.True(plan.VendorMismatch);
+        Assert.Equal("arduino:avr:uno", plan.Fqbn);                         // physical board wins
+        Assert.Equal(FirmwareBuilder.FqbnSource.PortPreferredOverInferred, plan.Source);
+        Assert.Contains("brick", plan.MismatchWarning ?? "", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildFlashPlan_MatchingVendor_PrefersDetectedConcreteFqbn_NoMismatch()
+    {
+        var plan = FirmwareBuilder.BuildFlashPlan(ProjectFor("Arduino Uno"),
+            new DetectedBoard("COM5", "arduino:avr:nano", "Arduino Nano"));
+        Assert.False(plan.VendorMismatch);                                  // same vendor (arduino)
+        Assert.Equal("arduino:avr:nano", plan.Fqbn);                        // detected concrete board wins
+        Assert.Equal(FirmwareBuilder.FqbnSource.PortPreferredOverInferred, plan.Source);
+    }
+
+    [Fact]
+    public void BuildFlashPlan_UnidentifiedPort_FallsBackToInferred()
+    {
+        var plan = FirmwareBuilder.BuildFlashPlan(ProjectFor("ESP32 dev board"),
+            new DetectedBoard("COM3", null, "Unknown"));
+        Assert.False(plan.VendorMismatch);
+        Assert.Equal("esp32:esp32:esp32", plan.Fqbn);
+        Assert.Equal(FirmwareBuilder.FqbnSource.Inferred, plan.Source);
+    }
+
+    [Theory]
+    [InlineData("arduino:avr:uno", true)]
+    [InlineData("esp32:esp32:esp32:PartitionScheme=huge_app", true)]
+    [InlineData("arduino avr uno", false)]
+    [InlineData("arduino:avr:uno; rm -rf /", false)]
+    [InlineData("", false)]
+    public void IsValidFqbn_RejectsInjectionAndMalformed(string fqbn, bool ok) =>
+        Assert.Equal(ok, FirmwareBuilder.IsValidFqbn(fqbn));
+
+    [Theory]
+    [InlineData("COM3", true)]
+    [InlineData("/dev/ttyUSB0", true)]
+    [InlineData("COM3 && calc", false)]
+    [InlineData("", false)]
+    public void IsValidPort_RejectsInjectionAndMalformed(string port, bool ok) =>
+        Assert.Equal(ok, FirmwareBuilder.IsValidPort(port));
+
+    [Fact]
+    public async Task UploadAsync_MultipleBoardsWithNoTarget_RefusesToAutoFlash()
+    {
+        // With >1 connected board and no explicit target, UploadAsync must NOT flash the first one.
+        // (Only meaningful when arduino-cli is present and ≥2 boards are attached; otherwise it returns a
+        // NotInstalled/NoBoard result, which is also not a silent flash.)
+        var r = await FirmwareBuilder.UploadAsync(ProjectFor("Arduino Uno"), target: null);
+        Assert.False(r.Ok);   // never a silent first-port flash
+    }
 }

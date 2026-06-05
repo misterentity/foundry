@@ -10,25 +10,28 @@ namespace Foundry.Core.Simulation;
 /// </summary>
 public static class RenodeReplGenerator
 {
-    /// <summary>Maps an FQBN to the GPIO controller node name + the bundled base platform repl include.</summary>
-    public static (string gpioNode, string? include) Platform(string fqbn)
+    /// <summary>Maps an FQBN to the GPIO-controller node + the base platform repl include. <c>perPort</c> means
+    /// the node name is per-pin (<c>gpioNode</c> + the pin's port letter, e.g. STM32 PB5 → <c>gpioPortB</c>);
+    /// otherwise <c>gpioNode</c> is a single fixed controller for every line.</summary>
+    public static (string gpioNode, string? include, bool perPort) Platform(string fqbn)
     {
         var f = (fqbn ?? "").ToLowerInvariant();
         if (f.StartsWith("stm32") || f.Contains(":stm32"))
-            return ("gpioPortA", "platforms/cpus/stm32f4.repl");
+            return ("gpioPort", "platforms/cpus/stm32f4.repl", true);   // node = gpioPort + <PortLetter> per pin
         if (f.Contains("rp2040") || f.Contains("pico"))
-            return ("gpio", "platforms/cpus/rp2040.repl");
-        // Fallback: a generic Cortex-M GPIO node; the .resc may still load a known platform.
-        return ("gpio", null);
+            // Stock Renode does NOT ship rp2040.repl (it's the community matgla model, not bundled). Emit no
+            // include so a future un-gated run fails loudly with "no platform" rather than silently mis-wiring.
+            return ("gpio", null, false);
+        return ("gpio", null, false);
     }
 
     /// <summary>
     /// Build the .repl text. <paramref name="fqbn"/> selects the base platform; one LED is wired per
-    /// <see cref="SimPin"/>. Returns a self-contained description that the .resc loads.
+    /// <see cref="SimPin"/> on the pin's own GPIO controller (per-port for STM32). Self-contained for the .resc.
     /// </summary>
     public static string Build(string fqbn, IReadOnlyList<SimPin> pins)
     {
-        var (gpioNode, include) = Platform(fqbn);
+        var (gpioNode, include, perPort) = Platform(fqbn);
         var sb = new StringBuilder();
         sb.AppendLine("// GENERATED — Foundry simulation platform");
         sb.AppendLine($"// fqbn: {fqbn}");
@@ -39,11 +42,12 @@ public static class RenodeReplGenerator
         }
         foreach (var p in pins)
         {
-            // Connect the GPIO line to the LED's input, then declare the LED on the GPIO controller.
-            sb.AppendLine($"{gpioNode}:");
+            // Per-port node for STM32 (gpioPortB), single fixed node otherwise — so PA5 and PB5 don't collide.
+            var node = perPort ? gpioNode + p.Port : gpioNode;
+            sb.AppendLine($"{node}:");
             sb.AppendLine($"    {p.Gpio} -> {p.LedName}@0");
             sb.AppendLine();
-            sb.AppendLine($"{p.LedName}: Miscellaneous.LED @ {gpioNode} {p.Gpio}");
+            sb.AppendLine($"{p.LedName}: Miscellaneous.LED @ {node} {p.Gpio}");
             sb.AppendLine();
         }
         return sb.ToString();

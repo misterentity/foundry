@@ -40,18 +40,14 @@ public sealed class RenodeSimulator : ISimulator
         if (fqbn.Contains("avr") || fqbn.Contains("uno") || fqbn.Contains("nano") || fqbn.Contains("mega"))
             return SimCapability.No("AVR isn't emulated by Renode — the avr8js engine handles AVR boards.");
 
-        var supported = fqbn.Contains("stm32") || fqbn.Contains("rp2040") || fqbn.Contains("pico");
-        if (!supported)
-            return SimCapability.No("No live simulation model for this board — flash to run.");
-
-        var pins = GpioPinMap.Build(project.Connections, _kb);
-        if (pins.Count == 0)
-            return SimCapability.No("No MCU GPIO outputs in the netlist to simulate.");
-
-        if (!RenodeInstaller.IsInstalled)
-            return new SimCapability(true, Engine, "Renode not installed — install it to run live simulation.");
-
-        return SimCapability.Yes(Engine);
+        // HONEST GATE — still CLOSED. The STM32 generator is fixed + unit-tested (port-aware GpioPinMap;
+        // per-port gpioPort<X> nodes), and the generated STM32 .repl was confirmed to LOAD CLEAN in real Renode
+        // 1.16.1 (using platforms/cpus/stm32f4.repl resolves; the per-port LED wiring parses). But the full LIVE
+        // path is NOT wired end-to-end: Foundry's firmware build can't produce an STM32 ELF yet (FirmwareBuilder
+        // .Fqbn doesn't infer STM32 and EnsureCoreAsync has no STM32 board-manager URL), and RP2040 has no
+        // bundled platform .repl at all. Keep it gated rather than letting RUN start and fail. Lift ONLY when
+        // RenodeLiveSmokeTest is observed green (real STM32 ELF → PA5 edges) on a machine with the STM32 core.
+        return SimCapability.No("Live simulation for STM32/RP2040 isn't wired up yet — flash to run. (AVR boards do simulate live.)");
     }
 
     public async Task<SimSession> StartAsync(Project.Project project, CancellationToken ct = default)

@@ -341,7 +341,7 @@ public class CourtyardOfTests
 {
     [Theory]
     [InlineData("RF_Module:ESP32-WROOM-32", 18.0, 25.5)]
-    [InlineData("RPi_Pico:RPi_Pico_SMD_TH", 21.0, 51.0)]
+    [InlineData("Module:RaspberryPi_Pico_Common_SMD", 21.0, 51.0)]
     [InlineData("Resistor_SMD:R_0402_1005Metric", 1.0, 0.5)]
     [InlineData("Resistor_SMD:R_0603_1608Metric", 1.6, 0.8)]
     [InlineData("Resistor_SMD:R_0805_2012Metric", 2.0, 1.25)]

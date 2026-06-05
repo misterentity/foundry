@@ -122,11 +122,14 @@ public class DrcReportParseTests
     }
 
     [Fact]
-    public void Parse_ExitZero_NoReportFile_ReconciledToClean()
+    public void Parse_ExitZero_NoReportFile_IsInconclusiveNotClean()
     {
+        // exit 0 + no report file means DRC did NOT actually verify the board — never treat that as clean,
+        // or an unchecked board becomes the authoritative PASS the fab path trusts.
         var r = DrcReport.Parse(null, 0, null);
-        Assert.True(r.Ok);
-        Assert.True(r.Clean);
+        Assert.False(r.Ok);
+        Assert.False(r.Clean);
+        Assert.Contains("could not verify", string.Join(" ", new[] { r.Summary }.Concat(r.Notes)), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -368,6 +371,31 @@ public class PcbDesignerLoopTests
         (built, passes, ct) => Task.FromResult(Routed("routed_" + built));
     private static PcbDesigner.ReviseStep NoRevise() =>
         (plan, viol, ct) => Task.FromResult(plan);
+
+    [Fact]
+    public async Task RunLoop_BlocksOnUnmappedPins_NoRouteNoExport()
+    {
+        // Even if the build otherwise looks OK, an unmapped net pin (named footprint, no pad match) means
+        // the board may be mis-wired — the loop must refuse to route, DRC, or export it.
+        int routeCalls = 0, drcCalls = 0;
+        PcbDesigner.BuildStep build = (plan, knobs, ct) =>
+            Task.FromResult(new PcbResult(true, true, "built", "board.kicad_pcb", Array.Empty<string>())
+            {
+                UnmappedPins = new[] { "U1.SDA (net I2C_SDA) on Sensor:BME280" },
+            });
+        PcbDesigner.RouteStep route = (built, passes, ct) => { routeCalls++; return Task.FromResult(Routed("r.kicad_pcb")); };
+        PcbDesigner.DrcStep drc = (board, ct) => { drcCalls++; return Task.FromResult(Clean()); };
+
+        var r = await PcbDesigner.RunLoopAsync(PlacementPlan.Empty, build, route, drc, NoRevise(), maxIterations: 3);
+
+        Assert.True(r.Installed);
+        Assert.False(r.Ok);
+        Assert.Null(r.KicadPcbPath);
+        Assert.Equal(0, routeCalls);   // never routed a possibly-miswired board
+        Assert.Equal(0, drcCalls);     // never DRC'd it
+        Assert.Contains("unverified", r.Summary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(r.Notes, n => n.Contains("SDA"));
+    }
 
     [Fact]
     public async Task Loop_StopsImmediately_WhenFirstDrcIsClean()

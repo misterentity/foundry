@@ -84,17 +84,11 @@ public static class PcbDrc
 
     private static string Quote(string path) => $"\"{path}\"";
 
+    // Thin adapter over the shared ProcessRunner: concurrent stdout/stderr drain (no pipe-buffer deadlock),
+    // a timeout, and process-tree kill on timeout/cancel. kicad-cli is fast → KicadTimeout.
     private static async Task<(string stdout, string stderr, int code)> RunAsync(string exe, string args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = exe, Arguments = args,
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-        };
-        using var p = Process.Start(psi)!;
-        var o = await p.StandardOutput.ReadToEndAsync(ct);
-        var e = await p.StandardError.ReadToEndAsync(ct);
-        await p.WaitForExitAsync(ct);
-        return (o, e, p.ExitCode);
+        var r = await Diagnostics.ProcessRunner.RunAsync(exe, args, Diagnostics.ProcessRunner.KicadTimeout, ct);
+        return (r.Stdout, r.Stderr, r.ExitCode);
     }
 }

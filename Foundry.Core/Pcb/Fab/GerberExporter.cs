@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using Foundry.Core.Diagnostics;
+using Foundry.Core.Pcb;
 
 namespace Foundry.Core.Pcb.Fab;
 
 /// <summary>
 /// Exports the standard 2-layer fab file set from a routed/DRC-clean <c>.kicad_pcb</c> (Track B v2.6 capstone)
-/// and bundles it into a single fab ZIP a board house (JLCPCB/PCBWay) accepts as-is. Gerbers and drill are
+/// and bundles it into a single ZIP in the format board houses (JLCPCB/PCBWay) expect — review before ordering, not a manufacturability guarantee. Gerbers and drill are
 /// both native <c>kicad-cli pcb export</c> verbs — this mirrors <see cref="PcbDrc"/>'s kicad-cli invocation
 /// (NOT pcbnew python) + pure <c>BuildArgs</c> pattern, and <see cref="DrcReport"/>'s NotInstalled/Parse
 /// degrade. Protel extensions + X2 are KEPT (no <c>--no-protel-ext</c>/<c>--no-x2</c>) per the JLCPCB KiCad-9
@@ -76,7 +77,8 @@ public static class GerberExporter
     /// caller owns the input board (it is not modified or deleted). Never throws on the normal degrade.
     /// </summary>
     public static async Task<FabExportResult> ExportAsync(string kicadPcbPath, string outputDir,
-        FabOptions? options = null, CancellationToken ct = default)
+        FabOptions? options = null, bool drcClean = false, DrcOptions? drcOptions = null,
+        CancellationToken ct = default)
     {
         options ??= FabOptions.Default;
 
@@ -85,6 +87,17 @@ public static class GerberExporter
 
         if (!System.IO.File.Exists(kicadPcbPath))
             return FabExportResult.Failed($"Input board not found: {kicadPcbPath}");
+
+        // Fab gate (defense in depth): never package a board that hasn't passed DRC. Callers that already
+        // ran DRC on THIS board (the orchestrator) pass drcClean:true to skip a redundant kicad-cli run;
+        // the standalone "Export Gerbers" path leaves it false, so ExportAsync verifies before exporting.
+        if (!drcClean)
+        {
+            var drc = await PcbDrc.CheckAsync(kicadPcbPath, drcOptions, ct);
+            if (!drc.Installed) return FabExportResult.NotInstalled();
+            if (!drc.Clean)
+                return FabExportResult.Failed($"Refusing to export — board is not DRC-clean: {drc.Summary}", drc.Notes);
+        }
 
         var name = System.IO.Path.GetFileNameWithoutExtension(kicadPcbPath);
         var work = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
@@ -135,17 +148,11 @@ public static class GerberExporter
 
     private static string Quote(string path) => $"\"{path}\"";
 
+    // Thin adapter over the shared ProcessRunner: concurrent stdout/stderr drain (no pipe-buffer deadlock),
+    // a timeout, and process-tree kill on timeout/cancel. kicad-cli export is fast → KicadTimeout.
     private static async Task<(string stdout, string stderr, int code)> RunAsync(string exe, string args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = exe, Arguments = args,
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-        };
-        using var p = Process.Start(psi)!;
-        var o = await p.StandardOutput.ReadToEndAsync(ct);
-        var e = await p.StandardError.ReadToEndAsync(ct);
-        await p.WaitForExitAsync(ct);
-        return (o, e, p.ExitCode);
+        var r = await ProcessRunner.RunAsync(exe, args, ProcessRunner.KicadTimeout, ct);
+        return (r.Stdout, r.Stderr, r.ExitCode);
     }
 }

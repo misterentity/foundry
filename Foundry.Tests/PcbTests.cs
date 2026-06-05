@@ -367,6 +367,63 @@ public class PcbResultTests
         Assert.False(r.Ok);
         Assert.Contains(r.Notes, n => n.Contains("pcbnew"));
     }
+
+    [Fact]
+    public void Parse_UnmappedPins_BlocksOk_AndSurfacesThem()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "foundry_pcb_test_" + Guid.NewGuid().ToString("N")[..8] + ".kicad_pcb");
+        File.WriteAllText(tmp, "(kicad_pcb)");
+        try
+        {
+            // The board file exists and the script even said ok:true, but a NAMED footprint had an
+            // unmatched net pin — connectivity is UNVERIFIED, so the C# side must fail the build.
+            var json = "{\"ok\":true,\"out\":\"" + tmp.Replace("\\", "\\\\") +
+                       "\",\"components\":1,\"nets\":3,\"unmappedPins\":[{\"ref\":\"U1\",\"pin\":\"SDA\",\"net\":\"I2C_SDA\",\"footprint\":\"Sensor:BME280\"}],\"byPosition\":[],\"notes\":[]}";
+            var r = PcbResult.Parse(json, "", 0, tmp);
+            Assert.False(r.Ok);
+            Assert.Null(r.KicadPcbPath);
+            Assert.NotEmpty(r.UnmappedPins);
+            Assert.Contains(r.UnmappedPins, u => u.Contains("SDA"));
+            Assert.Contains(r.Notes, n => n.Contains("Connectivity unverified"));
+        }
+        finally { File.Delete(tmp); }
+    }
+
+    [Fact]
+    public void Parse_ByPositionOnHeader_StaysOk()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "foundry_pcb_test_" + Guid.NewGuid().ToString("N")[..8] + ".kicad_pcb");
+        File.WriteAllText(tmp, "(kicad_pcb)");
+        try
+        {
+            // A pure-numeric header placed pins by ordinal position — allowed; no unmapped pins -> Ok stays true.
+            var json = "{\"ok\":true,\"out\":\"" + tmp.Replace("\\", "\\\\") +
+                       "\",\"components\":1,\"nets\":3,\"unmappedPins\":[],\"byPosition\":[{\"ref\":\"J1\",\"pin\":\"VCC\",\"pad\":\"1\",\"footprint\":\"Connector:Header\"}],\"notes\":[]}";
+            var r = PcbResult.Parse(json, "", 0, tmp);
+            Assert.True(r.Ok);
+            Assert.Equal(tmp, r.KicadPcbPath);
+            Assert.Empty(r.UnmappedPins);
+            Assert.Equal(1, r.ByPositionCount);
+        }
+        finally { File.Delete(tmp); }
+    }
+
+    [Fact]
+    public void Parse_NoUnmapped_BackCompat()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "foundry_pcb_test_" + Guid.NewGuid().ToString("N")[..8] + ".kicad_pcb");
+        File.WriteAllText(tmp, "(kicad_pcb)");
+        try
+        {
+            // Legacy script output with no unmappedPins/byPosition fields still parses clean.
+            var json = "{\"ok\":true,\"out\":\"" + tmp.Replace("\\", "\\\\") + "\",\"components\":2,\"nets\":4,\"notes\":[]}";
+            var r = PcbResult.Parse(json, "", 0, tmp);
+            Assert.True(r.Ok);
+            Assert.Empty(r.UnmappedPins);
+            Assert.Equal(0, r.ByPositionCount);
+        }
+        finally { File.Delete(tmp); }
+    }
 }
 
 public class PcbBuilderTests
@@ -395,5 +452,160 @@ public class PcbBuilderTests
         var script = PcbBuilder.ReadScript();
         Assert.False(string.IsNullOrWhiteSpace(script));
         Assert.Contains("pcbnew", script);
+    }
+}
+
+// ---- McuPinMap: logical-pin → real-pad resolution (the moat's pin maps) --------------------------
+
+public class McuPinMapTests
+{
+    private const string Esp = "RF_Module:ESP32-WROOM-32";
+
+    [Fact]
+    public void Esp32_ResolvesLogicalPinsToAuthoritativePads()
+    {
+        Assert.Equal("6", McuPinMap.ResolvePad(Esp, "GPIO34"));
+        Assert.Equal("2", McuPinMap.ResolvePad(Esp, "3V3"));
+        Assert.Equal("1", McuPinMap.ResolvePad(Esp, "GND"));
+        Assert.Equal("25", McuPinMap.ResolvePad(Esp, "GPIO0"));
+        Assert.Equal("3", McuPinMap.ResolvePad(Esp, "EN"));
+    }
+
+    [Fact]
+    public void Esp32_NormalizesAliases()
+    {
+        Assert.Equal("6", McuPinMap.ResolvePad(Esp, "IO34"));       // KiCad-symbol style
+        Assert.Equal("2", McuPinMap.ResolvePad(Esp, "VDD"));
+        Assert.Equal("4", McuPinMap.ResolvePad(Esp, "SENSOR_VP")); // GPIO36
+        Assert.Equal("35", McuPinMap.ResolvePad(Esp, "TX"));       // TXD0 / GPIO1
+        Assert.Equal("34", McuPinMap.ResolvePad(Esp, "RXD0"));     // GPIO3
+    }
+
+    [Fact]
+    public void UnknownPinOrFootprint_ReturnsNull_SoCallerFailsClosed()
+    {
+        Assert.Null(McuPinMap.ResolvePad(Esp, "GPIO99"));                 // no such pin on the module
+        Assert.Null(McuPinMap.ResolvePad("Connector:Generic_1x04", "VCC")); // no map for this footprint
+    }
+
+    [Fact]
+    public void EveryMappedEsp32PadIsAValidFootprintPadNumber()
+    {
+        foreach (var gpio in new[] { "GPIO0", "GPIO34", "GPIO23", "GPIO1", "GPIO3", "GPIO36", "GPIO39", "3V3", "GND", "EN" })
+        {
+            var pad = McuPinMap.ResolvePad(Esp, gpio);
+            Assert.True(int.TryParse(pad, out var n) && n is >= 1 and <= 39, $"{gpio} -> {pad}");
+        }
+    }
+}
+
+// ---- RP2040/Pico curated map + cross-check against the authoritative symbol library -------------
+
+public class PicoPinMapTests
+{
+    private const string Pico = "Module:RaspberryPi_Pico_Common_SMD";
+
+    [Fact]
+    public void Pico_ResolvesGpioAndPowerToAuthoritativePads()
+    {
+        Assert.Equal("1", McuPinMap.ResolvePad(Pico, "GPIO0"));
+        Assert.Equal("2", McuPinMap.ResolvePad(Pico, "GPIO1"));
+        Assert.Equal("29", McuPinMap.ResolvePad(Pico, "GPIO22"));
+        Assert.Equal("31", McuPinMap.ResolvePad(Pico, "GPIO26"));   // ADC0
+        Assert.Equal("36", McuPinMap.ResolvePad(Pico, "3V3"));
+        Assert.Equal("40", McuPinMap.ResolvePad(Pico, "VBUS"));
+        Assert.Equal("3", McuPinMap.ResolvePad(Pico, "GND"));
+    }
+
+    [Fact]
+    public void Pico_NormalizesGpSilkscreenNaming()
+    {
+        Assert.Equal("1", McuPinMap.ResolvePad(Pico, "GP0"));    // Pico silkscreen GP0 == GPIO0
+        Assert.Equal("29", McuPinMap.ResolvePad(Pico, "GP22"));
+    }
+
+    [Fact]
+    public void Esp12E_HasDistinctRstAndEn_AndResolvesGpio()
+    {
+        const string esp12 = "RF_Module:ESP-12E";
+        // The cross-chip bug guard: RST and EN are DIFFERENT pads on the ESP8266 (unlike the ESP32).
+        Assert.Equal("1", McuPinMap.ResolvePad(esp12, "RST"));
+        Assert.Equal("3", McuPinMap.ResolvePad(esp12, "EN"));
+        Assert.NotEqual(McuPinMap.ResolvePad(esp12, "RST"), McuPinMap.ResolvePad(esp12, "EN"));
+        Assert.Equal("18", McuPinMap.ResolvePad(esp12, "GPIO0"));
+        Assert.Equal("8", McuPinMap.ResolvePad(esp12, "3V3"));
+        Assert.Equal("8", McuPinMap.ResolvePad(esp12, "VCC"));   // universal VCC→3V3
+        Assert.Equal("15", McuPinMap.ResolvePad(esp12, "GND"));
+        Assert.Equal("2", McuPinMap.ResolvePad(esp12, "A0"));
+    }
+
+    [Fact]
+    public void Esp32_RstFoldsToEn_ButOnlyForEsp32()
+    {
+        // ESP32: reset IS the EN pin (chip-specific key, not a global fold that would break the ESP8266).
+        Assert.Equal("3", McuPinMap.ResolvePad("RF_Module:ESP32-WROOM-32", "RST"));
+        Assert.Equal("3", McuPinMap.ResolvePad("RF_Module:ESP32-WROOM-32", "EN"));
+    }
+
+    [Fact]
+    public void CuratedMaps_AgreeWithSymbolDerived_ForEveryGpioWhereBothResolve()
+    {
+        // Cross-check the hand-curated McuPinMap against the authoritative KiCad symbol library: wherever BOTH
+        // resolve a pin, the pad numbers MUST match — so a transcription typo in the curated map fails the build.
+        var kicad = KiCadInstaller.Locate();
+        if (kicad is null) return;   // needs the symbol library; pcb-live CI runs this for real
+        var dir = kicad.SymbolDir;
+
+        var footprints = new[] { "RF_Module:ESP32-WROOM-32", "RF_Module:ESP-12E", "Module:RaspberryPi_Pico_Common_SMD" };
+        var pins = new List<string> { "3V3", "GND", "VBUS", "VSYS", "EN", "RUN" };
+        for (int n = 0; n <= 39; n++) pins.Add("GPIO" + n);
+
+        int agreed = 0;
+        foreach (var fp in footprints)
+            foreach (var pin in pins)
+            {
+                var curated = McuPinMap.ResolvePad(fp, pin);
+                var derived = SymbolPinMap.ResolvePad(fp, pin, dir);
+                if (curated is not null && derived is not null)
+                {
+                    Assert.Equal(derived, curated);   // authoritative symbol vs curated table
+                    agreed++;
+                }
+            }
+        Assert.True(agreed >= 30, $"expected the cross-check to verify many pins, only {agreed}");
+    }
+}
+
+public class SymbolPinMapTests
+{
+    [Theory]
+    [InlineData("IO34", "GPIO34")]
+    [InlineData("GPIO26_ADC0", "GPIO26")]
+    [InlineData("GP5", "GPIO5")]
+    [InlineData("VDD", "3V3")]
+    [InlineData("VSS", "GND")]
+    [InlineData("RUN", "RUN")]
+    public void Canonical_NormalizesUniversalNames(string raw, string expected) =>
+        Assert.Equal(expected, SymbolPinMap.Canonical(raw));
+
+    [Fact]
+    public void ResolvePad_NoSymbolDir_ReturnsNull()
+    {
+        Assert.Null(SymbolPinMap.ResolvePad("Module:RaspberryPi_Pico_Common_SMD", "GPIO0", null));
+        Assert.Null(SymbolPinMap.ResolvePad("Module:RaspberryPi_Pico_Common_SMD", "GPIO0", ""));
+    }
+
+    [Fact]
+    public void ResolvePad_DerivesPicoPadsFromRealSymbolLibrary()
+    {
+        var kicad = KiCadInstaller.Locate();
+        if (kicad is null) return;   // needs KiCad's symbol library
+        var dir = kicad.SymbolDir;
+        const string pico = "Module:RaspberryPi_Pico_Common_SMD";
+        Assert.Equal("1", SymbolPinMap.ResolvePad(pico, "GPIO0", dir));
+        Assert.Equal("31", SymbolPinMap.ResolvePad(pico, "GPIO26", dir));   // GPIO26_ADC0 in the symbol
+        Assert.Equal("36", SymbolPinMap.ResolvePad(pico, "3V3", dir));
+        Assert.Equal("40", SymbolPinMap.ResolvePad(pico, "VBUS", dir));
+        Assert.Null(SymbolPinMap.ResolvePad(pico, "GPIO99", dir));          // no such pin → fail closed
     }
 }

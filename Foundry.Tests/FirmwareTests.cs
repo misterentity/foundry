@@ -90,4 +90,52 @@ public class FirmwareTests
         }
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
+
+    [Theory]
+    [InlineData("GP5")]      // Raspberry Pi Pico silkscreen
+    [InlineData("D13")]      // Arduino digital
+    [InlineData("A0")]       // Arduino analog
+    [InlineData("P0.28")]    // nRF port.pin
+    [InlineData("PA5")]      // STM32 port A pin 5
+    [InlineData("PB5")]      // STM32 port B pin 5 (shares the pin number with PA5 — must still detect)
+    public void DetectMcuAlias_FindsNonGpioNamedMcus(string mcuPinName)
+    {
+        // Before the fix only pins literally starting with "GPIO" were recognized, so Pico/AVR/nRF MCUs went
+        // undetected and Build() silently returned an empty pin map.
+        var mcu = new ComponentSpec
+        {
+            Ref = "mcu", Alias = "MCU", Name = "Board",
+            Pins = new()
+            {
+                new PinSpec { Name = mcuPinName, Kind = PinKind.Bidir },
+                new PinSpec { Name = "GND", Kind = PinKind.Ground },
+            },
+        };
+        var dev = new ComponentSpec { Ref = "d", Alias = "DEV", Name = "Sensor",
+            Pins = new() { new PinSpec { Name = "OUT", Kind = PinKind.Output } } };
+        var conns = new List<Connection> { new() { From = $"MCU.{mcuPinName}", To = "DEV.OUT", Net = "signal" } };
+        Assert.Equal("MCU", PinMap.DetectMcuAlias(conns, new ComponentKb(new[] { mcu, dev })));
+    }
+
+    [Fact]
+    public void DetectMcuAlias_PicksThePartWithTheMostGpioPins()
+    {
+        var mcu = new ComponentSpec { Ref = "mcu", Alias = "MCU", Name = "ESP32",
+            Pins = Enumerable.Range(0, 20).Select(i => new PinSpec { Name = $"GPIO{i}", Kind = PinKind.Bidir }).ToList() };
+        var conn = new ComponentSpec { Ref = "j", Alias = "J1", Name = "Header",   // incidental D1-style pad, not the MCU
+            Pins = new() { new PinSpec { Name = "D1", Kind = PinKind.Bidir } } };
+        var conns = new List<Connection> { new() { From = "MCU.GPIO5", To = "J1.D1", Net = "signal" } };
+        Assert.Equal("MCU", PinMap.DetectMcuAlias(conns, new ComponentKb(new[] { mcu, conn })));
+    }
+
+    [Fact]
+    public void Build_NoMcuDetected_ReturnsEmpty()
+    {
+        // two passives, no MCU — the pin map is legitimately empty (and Build logs a warning, not silence).
+        var a = new ComponentSpec { Ref = "r1", Alias = "R1", Name = "Resistor", Pins = new() { new PinSpec { Name = "1", Kind = PinKind.Bidir }, new PinSpec { Name = "2", Kind = PinKind.Bidir } } };
+        var b = new ComponentSpec { Ref = "c1", Alias = "C1", Name = "Capacitor", Pins = new() { new PinSpec { Name = "1", Kind = PinKind.Bidir }, new PinSpec { Name = "2", Kind = PinKind.Bidir } } };
+        var conns = new List<Connection> { new() { From = "R1.1", To = "C1.1", Net = "signal" } };
+        Assert.Empty(PinMap.Build(conns, new ComponentKb(new[] { a, b })));
+    }
 }
+

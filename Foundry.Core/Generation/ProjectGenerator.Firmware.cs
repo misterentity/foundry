@@ -1,0 +1,166 @@
+using System.Text.Json;
+using Foundry.Core.Ai;
+using Foundry.Core.Firmware;
+using Foundry.Core.Kb;
+using Foundry.Core.Project;
+using Foundry.Core.Validation;
+
+namespace Foundry.Core.Generation;
+
+// Firmware enrichment + compile-fix loop (split from ProjectGenerator.cs).
+public sealed partial class ProjectGenerator
+{
+    /// <summary>Ask the model for complete, working firmware for this exact device; inject the derived pin map.</summary>
+    private async Task EnrichFirmwareAsync(Project.Project project, string prompt, CancellationToken ct)
+    {
+        try
+        {
+            var kb = new ComponentKb(project.Components);
+            var entries = PinMap.Build(project.Connections, kb);
+            var platform = project.Firmware.Platform;
+            var pinmapName = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "pinmap.py" : "pinmap.h";
+            var pinmap = platform.Contains("python", StringComparison.OrdinalIgnoreCase)
+                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.Gpio}  # {e.Net}: {e.FromPin} <-> {e.ToPin}"))
+                : PinMap.RenderHeader(entries);
+
+            var parts = string.Join("\n", project.Components.Select(c =>
+                $"- {c.Alias} ({c.Name}): pins {string.Join(", ", c.Pins.Select(p => p.Name))}"));
+            var nets = string.Join("\n", project.Connections.Select(c => $"- {c.From} -> {c.To} [{c.Net}]"));
+
+            var macroList = string.Join(", ", entries.Select(e => e.Macro));
+            var inc = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "from pinmap import *" : "#include \"pinmap.h\"";
+            var user =
+                $"Device: {prompt}\n\nPlatform: {platform}\nParts:\n{parts}\n\nNetlist:\n{nets}\n\n" +
+                $"Pin map ({pinmapName}) is PRE-DEFINED and supplied — DO NOT redefine pins. In your main file you MUST " +
+                $"`{inc}` and use ONLY these exact macro names (do not invent, rename, or alias them):\n{pinmap}\n\n" +
+                $"Available pin macros (use verbatim): {macroList}";
+
+            var raw = await _ai.CompleteAsync(FirmwareSystemPrompt, user, _model, ct);
+            var json = ExtractJson(raw);
+            if (json is null)
+            {
+                // Don't silently keep the stub: a null result here is usually a truncated/invalid AI response
+                // (see the max_tokens WARN in AnthropicClient). Make the fallback visible.
+                Diagnostics.AppLog.Warn("generation", $"firmware pass returned no usable JSON ({raw.Length} chars, likely truncated) — keeping the deterministic firmware.");
+                return;
+            }
+
+            var fw = MapFirmware(json, project.Firmware.Platform);
+            if (fw.Files.Count == 0)
+            {
+                Diagnostics.AppLog.Warn("generation", "firmware pass returned no files — using deterministic fallback");
+                return; // keep the deterministic fallback
+            }
+            Diagnostics.AppLog.Info("generation", $"firmware pass · {fw.Files.Count} files · {fw.Platform}");
+
+            // guarantee the netlist-derived pin map is present + authoritative
+            fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
+            fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
+            foreach (var f in fw.Files) f.Active = false;
+            PickMainFile(fw.Files).Active = true;
+            project.Firmware = fw;
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Warn("generation", $"firmware pass failed: {ex.Message} — using deterministic fallback");
+        }
+    }
+
+    /// <summary>Ask the AI to fix firmware that failed to compile, given the compiler errors (PRD v2 G3).</summary>
+    public async Task<bool> FixFirmwareAsync(Project.Project project, string compilerErrors, CancellationToken ct = default)
+    {
+        if (!_ai.HasKey || string.IsNullOrWhiteSpace(compilerErrors)) return false;
+        try
+        {
+            var kb = new ComponentKb(project.Components);
+            var entries = PinMap.Build(project.Connections, kb);
+            var platform = project.Firmware.Platform;
+            var pinmapName = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "pinmap.py" : "pinmap.h";
+            var pinmap = platform.Contains("python", StringComparison.OrdinalIgnoreCase)
+                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.Gpio}"))
+                : PinMap.RenderHeader(entries);
+            var inc = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "from pinmap import *" : "#include \"pinmap.h\"";
+            var current = string.Join("\n\n", project.Firmware.Files
+                .Where(f => !f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase))
+                .Select(f => $"// ===== FILE: {f.Name} =====\n{f.Content}"));
+
+            var user =
+                $"This {platform} firmware fails to compile. Fix the errors and return the FULL corrected firmware as " +
+                $"the usual JSON. Keep the same files; change only what's needed.\n\nCOMPILER ERRORS:\n{compilerErrors}\n\n" +
+                $"Pin map ({pinmapName}) is PRE-DEFINED — `{inc}` and use these macros verbatim:\n{pinmap}\n\n" +
+                $"CURRENT FIRMWARE:\n{current}";
+
+            var raw = await _ai.CompleteAsync(FirmwareSystemPrompt, user, _model, ct);
+            var json = ExtractJson(raw);
+            if (json is null) return false;
+            var fw = MapFirmware(json, platform);
+            if (fw.Files.Count == 0) return false;
+
+            fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
+            fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
+            foreach (var f in fw.Files) f.Active = false;
+            PickMainFile(fw.Files).Active = true;
+            project.Firmware = fw;
+            Diagnostics.AppLog.Info("build", $"AI build-fix applied · {fw.Files.Count} files");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Warn("build", $"build-fix failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private const string FirmwareSystemPrompt = """
+You are a senior embedded-firmware engineer. Write COMPLETE, working firmware for the exact device
+described — real application logic, not a skeleton: initialize every peripheral, implement the
+protocols it needs (Wi-Fi/MQTT/HTTP/BLE/I2C/SPI/ADC as appropriate), the main control loop, timing,
+and sensible defaults. The primary sketch MUST be named exactly "main.ino" (Arduino C++) or "main.py"
+(MicroPython) — name it nothing else. The main file MUST include the supplied pin map
+(`#include "pinmap.h"` for Arduino, `from pinmap import *` for MicroPython) and use its PIN_* macros
+verbatim for every pin — never hard-code, rename, redefine, or invent pin macros not in the supplied map.
+Put secrets (Wi-Fi creds, tokens) as clearly-marked #define/constant placeholders in a separate config
+file. Use only widely-available libraries. Return ONLY one JSON object, no prose:
+{
+ "platform": "Arduino C++" | "MicroPython",
+ "board": "esp32:esp32:esp32",
+ "files": [{"name":"main.ino","content":"<full source>"}, {"name":"config.h","content":"..."}],
+ "libraries": [["WiFi","built-in"], ["PubSubClient","2.8"]]
+}
+Include the main sketch and any helper/config files. Do NOT include the pin-map file (it is supplied).
+""";
+
+    /// <summary>The sketch to show/flash first: a main.* file if present, else the largest source file.</summary>
+    public static FirmwareFile PickMainFile(IReadOnlyList<FirmwareFile> files)
+    {
+        var main = files.FirstOrDefault(f => f.Name.StartsWith("main", StringComparison.OrdinalIgnoreCase));
+        if (main is not null) return main;
+        bool IsSource(string n) => n.EndsWith(".ino") || n.EndsWith(".py") || n.EndsWith(".cpp") || n.EndsWith(".c");
+        return files.Where(f => IsSource(f.Name.ToLowerInvariant())).OrderByDescending(f => f.Content.Length).FirstOrDefault()
+               ?? files[0];
+    }
+
+    private static Project.Firmware MapFirmware(string json, string fallbackPlatform)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        return new Project.Firmware
+        {
+            Platform = Str(root, "platform", fallbackPlatform),
+            Board = Str(root, "board", ""),
+            Files = Arr(root, "files")
+                .Where(f => f.TryGetProperty("name", out _) )
+                .Select(f => new FirmwareFile
+                {
+                    Name = Str(f, "name", "file.txt"),
+                    Path = "/foundry/firmware/",
+                    Content = Str(f, "content", ""),
+                })
+                .Where(f => f.Content.Length > 0)
+                .ToList(),
+            Libraries = Arr(root, "libraries")
+                .Where(l => l.ValueKind == JsonValueKind.Array && l.GetArrayLength() >= 2)
+                .Select(l => new SpecPair(l[0].GetString() ?? "", l[1].GetString() ?? "")).ToList(),
+        };
+    }
+}

@@ -67,7 +67,8 @@ public static class PcbBuilder
         // placer packs using true courtyards instead of CourtyardOf approximations.
         realSizes ??= await MeasureAsync(project, footprintDirs, ct);
 
-        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm, realSizes);
+        var symbolDir = System.IO.Directory.Exists(kicad.SymbolDir) ? kicad.SymbolDir : null;
+        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm, realSizes, symbolDir);
 
         // Surface job-time diagnostics (unresolved nodes, generic-footprint fallbacks) in the log up front.
         foreach (var d in job.Diagnostics)
@@ -165,18 +166,12 @@ public static class PcbBuilder
         return map;
     }
 
+    // Thin adapter over the shared ProcessRunner: concurrent stdout/stderr drain (no pipe-buffer deadlock),
+    // a timeout, and process-tree kill on timeout/cancel. kicad/pcbnew are fast → KicadTimeout.
     private static async Task<(string stdout, string stderr, int code)> RunAsync(string exe, string args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = exe, Arguments = args,
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-        };
-        using var p = Process.Start(psi)!;
-        var o = await p.StandardOutput.ReadToEndAsync(ct);
-        var e = await p.StandardError.ReadToEndAsync(ct);
-        await p.WaitForExitAsync(ct);
-        return (o, e, p.ExitCode);
+        var r = await Diagnostics.ProcessRunner.RunAsync(exe, args, Diagnostics.ProcessRunner.KicadTimeout, ct);
+        return (r.Stdout, r.Stderr, r.ExitCode);
     }
 
     /// <summary>The embedded build_board.py source.</summary>

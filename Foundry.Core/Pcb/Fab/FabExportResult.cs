@@ -4,8 +4,9 @@ namespace Foundry.Core.Pcb.Fab;
 /// Result of the v2.6 Gerber + Excellon drill export and fab-ZIP package (<see cref="GerberExporter"/>) —
 /// mirrors <see cref="DrcReport"/>/<see cref="RouteResult"/>'s Installed/Ok/Summary shape. <see cref="Ok"/>
 /// means both kicad-cli export runs exited 0, the produced set validated (<see cref="FabFileSet"/>), and the
-/// single fab ZIP was written. <see cref="ZipPath"/> is the <c>&lt;name&gt;-fab.zip</c> a board house accepts
-/// as-is; <see cref="Files"/> are the produced gerber/drill files. <see cref="NotInstalled"/> when kicad-cli
+/// single fab ZIP was written. <see cref="ZipPath"/> is the <c>&lt;name&gt;-fab.zip</c> — a standard 2-layer set
+/// in the format board houses expect, to REVIEW (in a Gerber viewer) before ordering, not a manufacturability
+/// guarantee; <see cref="Files"/> are the produced gerber/drill files. <see cref="NotInstalled"/> when kicad-cli
 /// is absent. Never throws.
 /// </summary>
 public sealed record FabExportResult(
@@ -60,7 +61,8 @@ public sealed record FabExportResult(
             return Failed("Couldn't package the fab ZIP.", notes, producedFiles);
         }
 
-        var summary = $"Fab package ready — {producedFiles.Count} files → {System.IO.Path.GetFileName(zipPath)}.";
+        var summary = $"Fab files exported — {producedFiles.Count} files → {System.IO.Path.GetFileName(zipPath)}. " +
+                      "Design aid — review the Gerbers in a viewer before ordering.";
         return new FabExportResult(true, true, summary, zipPath, producedFiles, notes);
     }
 

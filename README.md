@@ -36,6 +36,8 @@ document that every tab reads from and writes to:
 ### v2 — design → fabrication & verification
 
 - **Verify build** — compile the generated firmware with arduino-cli right in the app; **Fix build** lets the AI repair compiler errors and recompile.
+- **One-click flash** — detect a connected board and upload the compiled firmware (with a confirm dialog naming the exact port + board; refuses a family mismatch).
+- **Auto-PCB → fab (Track B)** — deterministic auto-placement → copper routing (FreeRouting) → DRC fix loop → Gerber/Excellon export → an assisted (never auto-submitted) order handoff to JLCPCB/PCBWay. AI supplies placement *intent* only; geometry/routing/DRC are computed and gated DRC-clean + connectivity-verified. **A design aid — review the Gerbers before ordering** (no manufacturability/net→pad guarantee; parts with no pin map are refused, not mis-wired).
 - **KiCad export** — drop the netlist into PCB layout (`.net`) + a pinout CSV.
 - **Breadboard view** — a recognizable breadboard render with colored jumper wires, alongside the schematic.
 - **Smarter sourcing** — ranked part substitutes (cheaper / in-stock), DigiKey + Mouser carts, and a budget mode that reworks the BOM to a target price.
@@ -157,11 +159,12 @@ Python · FastAPI · trimesh + manifold3d + shapely (CAD) · PyInstaller · Inno
 ## Status
 
 **v2.0** — the v1 PRD (F1–F12, §19) plus the v2 roadmap ([`PRD-v2.md`](PRD-v2.md)): firmware
-compile-check + AI build-fix, KiCad export, breadboard view, Validation 2.0, ranked substitutes +
-multi-distributor cart + budget mode, templates + project bundles. Externally-gated, activation-only:
-**code-signing** (add a cert to remove the SmartScreen warning — pipeline is wired) and **live Nexar
-pricing** (add a Nexar key; BOM uses estimates + cart links otherwise). Remaining v2 stretch: one-click
-flash (needs a connected board) and multi-board projects.
+compile-check + AI build-fix, one-click flash, **auto-PCB → routing → DRC → Gerber/fab handoff (Track B)**,
+KiCad export, breadboard view, Validation 2.0, ranked substitutes + multi-distributor cart + budget mode,
+templates + project bundles. Externally-gated, activation-only: **code-signing** (add a cert to remove the
+SmartScreen warning — pipeline is wired; note the in-app updater only auto-runs a signed installer) and
+**live Nexar pricing** (add a Nexar key; BOM uses estimates + cart links otherwise). Remaining v2 stretch:
+multi-board projects.
 
 ## License
 

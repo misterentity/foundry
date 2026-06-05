@@ -130,7 +130,10 @@ public static class PcbDesigner
             return (design, fab);
         }
 
-        var fabResult = await GerberExporter.ExportAsync(design.KicadPcbPath!, outputDir, fabOptions, ct);
+        // Named args: design.Ok is true only when the kept board's DRC report was Clean (RunLoopAsync), so the
+        // orchestrator passes drcClean:true to skip a redundant kicad-cli DRC run inside the exporter.
+        var fabResult = await GerberExporter.ExportAsync(design.KicadPcbPath!, outputDir, fabOptions,
+            drcClean: true, drcOptions: options, ct: ct);
         return (design, fabResult);
     }
 
@@ -160,6 +163,15 @@ public static class PcbDesigner
 
             var built = await build(plan, knobs, ct);
             if (!built.Installed) return PcbDesignResult.NotInstalled(built.Summary);
+            // Connectivity gate: a named footprint with an unmatched net pin means the board may be mis-wired.
+            // Refuse to route/DRC/export it — a confidently-wrong fab board is worse than no board.
+            if (built.UnmappedPins.Count > 0)
+            {
+                trace.Add($"attempt {attempt}: connectivity unverified — {built.UnmappedPins.Count} unmapped pin(s)");
+                return PcbDesignResult.Failed(
+                    $"Connectivity unverified ({built.UnmappedPins.Count} unmapped pin(s)) — not routing or exporting a board that may be mis-wired.",
+                    trace, built.UnmappedPins);
+            }
             if (!built.Ok || string.IsNullOrEmpty(built.KicadPcbPath))
             {
                 trace.Add($"attempt {attempt}: build failed — {built.Summary}");

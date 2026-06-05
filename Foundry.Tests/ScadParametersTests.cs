@@ -48,3 +48,23 @@ module body() {
         Assert.Equal(1, n.Step);
     }
 }
+
+// ---- ScadSafety: reject file-access directives before they reach OpenSCAD --------------------------
+
+public class ScadSafetyTests
+{
+    [Theory]
+    [InlineData("include <evil.scad>", "include")]
+    [InlineData("use <../secrets.scad>", "use")]
+    [InlineData("import(\"C:/Windows/win.ini\");", "import")]
+    [InlineData("surface(file=\"x.dat\");", "surface")]
+    public void FindUnsafeDirective_FlagsFileAccess(string scad, string token) =>
+        Assert.Equal(token, Foundry.Core.Cad.ScadSafety.FindUnsafeDirective("cube([10,10,10]);\n" + scad));
+
+    [Theory]
+    [InlineData("difference(){ cube([40,30,20]); translate([2,2,2]) cube([36,26,18]); }")]
+    [InlineData("module box(w,h){ cube([w,h,2]); } box(10,10);")]
+    [InlineData("")]
+    public void IsSafe_AllowsLegitimateParametricScad(string scad) =>
+        Assert.True(Foundry.Core.Cad.ScadSafety.IsSafe(scad));
+}

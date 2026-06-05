@@ -25,7 +25,13 @@ public sealed class SidecarClient
         try
         {
             using var resp = await _http.GetAsync($"{BaseUrl}/health", ct);
-            return resp.IsSuccessStatusCode;
+            if (!resp.IsSuccessStatusCode) return false;
+            // Only adopt a listener that identifies as Foundry's CAD sidecar. A different local process that
+            // happens to answer 200 on this port must NOT be mistaken for ours (it could feed back fake
+            // geometry/STL results). The /health body is {"status":"ok","service":"foundry-cad",...}.
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return body.Contains("\"service\"", StringComparison.OrdinalIgnoreCase)
+                && body.Contains("foundry-cad", StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
@@ -52,6 +58,12 @@ public sealed class SidecarClient
     /// <summary>POST a raw OpenSCAD script and return the rendered mesh (PRD v2 Phase A).</summary>
     public async Task<ScadResult> RenderScadAsync(string scad, string format = "stl", CancellationToken ct = default)
     {
+        // Sandbox: refuse scripts with file-access directives before they reach OpenSCAD (defense in depth —
+        // the sidecar rejects them too). AI-SCAD is a render-only preview; it never needs include/use/import.
+        if (Cad.ScadSafety.FindUnsafeDirective(scad) is { } bad)
+            return new ScadResult(false, Array.Empty<byte>(), "",
+                $"Refusing to render — the script uses '{bad}', which can read local files.");
+
         var body = "{\"scad\":" + System.Text.Json.JsonSerializer.Serialize(scad ?? "") +
                    ",\"format\":\"" + (format == "3mf" ? "3mf" : "stl") + "\"}";
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/enclosure/scad")

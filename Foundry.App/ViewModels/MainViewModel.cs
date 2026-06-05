@@ -23,6 +23,13 @@ public sealed partial class MainViewModel : ObservableObject
     private IPipeline _pipeline = new ChatPipeline(new StubAnthropicClient());
 
     [ObservableProperty] private ObservableObject _currentView = null!;
+
+    // Dispose the outgoing view when it's swapped out (e.g. ShellViewModel detaches from the static
+    // AppLog.Logged event) so it — and its whole tab/project graph — can be collected.
+    partial void OnCurrentViewChanging(ObservableObject oldValue, ObservableObject newValue)
+    {
+        if (!ReferenceEquals(oldValue, newValue) && oldValue is IDisposable d) d.Dispose();
+    }
     [ObservableProperty] private IReadOnlyList<string> _crumbs = new[] { "Foundry", "Setup" };
 
     // status-bar state (reflects the active model + whether a key is connected)

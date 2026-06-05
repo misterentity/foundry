@@ -19,7 +19,10 @@ import json
 import os
 import sys
 
-import pcbnew
+try:
+    import pcbnew
+except ImportError:  # the pure helpers (assign_pads) are importable/testable without KiCad's bundled python
+    pcbnew = None
 
 
 def resolve_lib_dir(lib, fp_dirs):
@@ -88,6 +91,73 @@ def measure(job):
     return {"ok": True, "sizes": sizes, "notes": notes}
 
 
+def assign_pads(pad_names, pad_net_list, known_nets, ref, lib_id, is_fallback):
+    """Decide which net each footprint pad carries — PURE (no pcbnew), so it is unit-testable without KiCad.
+
+    Pass 1 matches netlist pins to pads by NAME (case-insensitive). Pass 2 only ORDINAL-maps an unmatched
+    pin when guessing by position is SAFE: either the footprint is a GENERIC PLACEHOLDER Foundry couldn't
+    resolve to a real part (is_fallback — the user will fix it), OR the netlist pin is itself numeric (a
+    positional header reference like J1.1). For a RESOLVED real footprint addressed by a LOGICAL name
+    (GPIO34/VCC/SDA) that matches no pad, position-mapping is a silent mis-wire — record it as unmapped so
+    the build FAILS rather than shipping a confidently-wrong board. (Foundry has no GPIO-name→pad-number
+    map for modules yet, so a real MCU/module addressed by logical name lands here and is refused.)
+
+    Returns (assignments, notes, unmapped, by_position):
+      assignments  [(pad_index, net_name)] the caller applies via pad.SetNet
+      unmapped     [{"ref","pin","net","footprint"}] — connectivity UNVERIFIED; board must not route/export
+      by_position  [{"ref","pin","pad","footprint"}] — pins placed by ordinal (recorded; placeholder/numeric)
+    """
+    assignments = []
+    notes = []
+    unmapped = []
+    by_position = []
+    used = set()  # indices of pads already assigned
+
+    # pass 1: exact pad-name match (case-insensitive)
+    deferred = []
+    for item in pad_net_list:
+        pin = str(item.get("pin", ""))
+        net_name = item.get("net")
+        matched = False
+        for i, pad_name in enumerate(pad_names):
+            if i not in used and pad_name.lower() == pin.lower():
+                if net_name and net_name in known_nets:
+                    assignments.append((i, net_name))
+                    used.add(i)
+                matched = True
+                break
+        if not matched:
+            deferred.append((pin, net_name))
+
+    # pass 2: ordinal fallback — only when SAFE (placeholder footprint, or a numeric positional pin).
+    free = [i for i in range(len(pad_names)) if i not in used]
+    fi = 0
+    named_unmapped = []
+    for pin, net_name in deferred:
+        if not (is_fallback or pin.isdigit()):
+            # logical pin on a resolved real footprint with no pad-name match → refuse to guess by position
+            unmapped.append({"ref": ref, "pin": pin, "net": net_name or "", "footprint": lib_id})
+            named_unmapped.append(pin)
+            continue
+        if fi >= len(free):
+            notes.append("component %s: no free pad for net node '%s' (%s has %d pads)" % (ref, pin, lib_id, len(pad_names)))
+            unmapped.append({"ref": ref, "pin": pin, "net": net_name or "", "footprint": lib_id})
+            continue
+        i = free[fi]
+        fi += 1
+        if net_name and net_name in known_nets:
+            assignments.append((i, net_name))
+            used.add(i)
+        if pad_names[i].lower() != pin.lower():
+            notes.append("component %s: pin '%s' -> pad '%s' by position" % (ref, pin, pad_names[i]))
+            by_position.append({"ref": ref, "pin": pin, "pad": pad_names[i], "footprint": lib_id})
+    if named_unmapped:
+        notes.append("component %s: %d net pin(s) have no matching pad on %s (real footprint — not ordinal-mapped): %s"
+                     % (ref, len(named_unmapped), lib_id, ", ".join(named_unmapped)))
+
+    return assignments, notes, unmapped, by_position
+
+
 def build(job):
     notes = []
     fp_dirs = job.get("footprintDirs") or []
@@ -125,6 +195,8 @@ def build(job):
 
     # 2. components: load footprint, set ref, assign pads, place
     placed = 0
+    unmapped = []     # net pins with no valid pad on a NAMED footprint (or no free pad) — connectivity unverified
+    by_position = []  # header pins placed by ordinal position (recorded, allowed)
     for comp in job["components"]:
         lib_id = comp["footprint"]
         if ":" not in lib_id:
@@ -153,42 +225,14 @@ def build(job):
             pad_net_list = [{"pin": k, "net": v} for k, v in (comp.get("padNets") or {}).items()]
 
         pads = list(fp.Pads())
-        used = set()  # indices of pads already assigned
-
-        def assign(pad, net_name):
-            if net_name and net_name in nets:
-                pad.SetNet(nets[net_name])
-                return True
-            return False
-
-        # pass 1: exact pad-name match (case-insensitive)
-        deferred = []
-        for item in pad_net_list:
-            pin = str(item.get("pin", ""))
-            net_name = item.get("net")
-            matched = False
-            for i, pad in enumerate(pads):
-                if i not in used and pad.GetName().lower() == pin.lower():
-                    if assign(pad, net_name):
-                        used.add(i)
-                    matched = True
-                    break
-            if not matched:
-                deferred.append((pin, net_name))
-
-        # pass 2: ordinal — assign each unmatched (pin, net) to the next free pad in order
-        free = [i for i in range(len(pads)) if i not in used]
-        fi = 0
-        for pin, net_name in deferred:
-            if fi >= len(free):
-                notes.append("component %s: no free pad for net node '%s' (%s has %d pads)" % (comp["ref"], pin, lib_id, len(pads)))
-                continue
-            i = free[fi]
-            fi += 1
-            if assign(pads[i], net_name):
-                used.add(i)
-            if pads[i].GetName().lower() != pin.lower():
-                notes.append("component %s: pin '%s' -> pad '%s' by position" % (comp["ref"], pin, pads[i].GetName()))
+        pad_names = [p.GetName() for p in pads]
+        assignments, pad_notes, pad_unmapped, pad_by_position = assign_pads(
+            pad_names, pad_net_list, set(nets), comp["ref"], lib_id, bool(comp.get("isFallback", False)))
+        for i, net_name in assignments:
+            pads[i].SetNet(nets[net_name])
+        notes.extend(pad_notes)
+        unmapped.extend(pad_unmapped)
+        by_position.extend(pad_by_position)
 
         fp.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(comp["x_mm"]), pcbnew.FromMM(comp["y_mm"])))
         if comp.get("rot"):
@@ -208,7 +252,9 @@ def build(job):
 
     out_path = job["outPath"]
     board.Save(out_path)
-    return {"ok": True, "out": out_path, "components": placed, "nets": len(nets), "notes": notes}
+    ok = len(unmapped) == 0  # any unmapped net pin => connectivity is UNVERIFIED; do not claim success
+    return {"ok": ok, "out": out_path, "components": placed, "nets": len(nets),
+            "unmappedPins": unmapped, "byPosition": by_position, "notes": notes}
 
 
 def main():
