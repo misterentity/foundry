@@ -139,6 +139,16 @@ jobs:
       - name: Install KiCad
         run: choco install kicad -y --no-progress
 
+      # choco installs kicad-cli under C:\Program Files\KiCad\<ver>\bin but does NOT add it to PATH for
+      # subsequent steps — add it explicitly so the sanity-check + live tests can find it.
+      - name: Add KiCad bin to PATH
+        shell: pwsh
+        run: |
+          $bin = (Get-ChildItem 'C:\Program Files\KiCad' -Recurse -Filter 'kicad-cli.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).Directory.FullName
+          if (-not $bin) { Write-Error 'kicad-cli.exe not found after choco install kicad'; exit 1 }
+          Write-Host "KiCad bin: $bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
       - name: Sanity-check kicad-cli is available
         shell: pwsh
         run: kicad-cli version
