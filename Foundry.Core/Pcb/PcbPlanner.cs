@@ -214,13 +214,8 @@ hints / regionOrder). No prose, no fences, no coordinates.
                "Propose the placement plan as the JSON contract.";
     }
 
-    /// <summary>Tolerate accidental markdown fences / leading prose by extracting the outermost JSON object.</summary>
-    private static string? ExtractJson(string raw)
-    {
-        if (string.IsNullOrEmpty(raw)) return null;
-        int start = raw.IndexOf('{');
-        int end = raw.LastIndexOf('}');
-        if (start < 0 || end <= start) return null;
-        return raw[start..(end + 1)];
-    }
+    /// <summary>Tolerate accidental markdown fences / leading prose by extracting the outermost JSON object.
+    /// Shared, hardened implementation (also validates the slice parses). PlacementPlan.Parse(null) and
+    /// Parse(garbage) both degrade to Empty, so adding slice validation here is behavior-equivalent.</summary>
+    private static string? ExtractJson(string raw) => Generation.JsonText.Extract(raw);
 }
