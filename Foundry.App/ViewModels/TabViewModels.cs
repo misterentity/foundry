@@ -74,7 +74,7 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
-        catch { /* best effort */ }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}"); }
     }
 
     /// <summary>Save the current design as a reusable template (PRD v2 G13).</summary>
@@ -107,7 +107,7 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             Foundry.Core.Diagnostics.AppLog.Info("export", $"bundle → {path}");
             Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
         }
-        catch { /* best effort */ }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Bundle export failed: {ex.Message}"); }
     }
 
     /// <summary>Write the DigiKey BOM CSV and open the cart manager.</summary>
@@ -121,7 +121,7 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             File.WriteAllText(Path.Combine(dir, "digikey-bom.csv"), CartLinks.DigiKeyBomCsv(Project.Bom));
             Process.Start(new ProcessStartInfo { FileName = CartLinks.DigiKeyBomManager, UseShellExecute = true });
         }
-        catch { /* best effort */ }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Cart export failed: {ex.Message}"); }
     }
 }
 
@@ -1374,6 +1374,14 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
     {
         if (IsBuilding) return;
         IsBuilding = true;
+        try { await CompileCore(); }
+        finally { IsBuilding = false; }
+    }
+
+    /// <summary>The compile pass itself — does NOT touch IsBuilding, so the fix→re-verify sequence can hold the
+    /// re-entrancy guard across both steps (a shared guard prevents overlapping arduino-cli compiles).</summary>
+    private async Task CompileCore()
+    {
         BuildDiagnostics.Clear();
         BuildStatus = "Compiling…"; BuildSeverity = "info";
         try
@@ -1391,7 +1399,6 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
             CanFixBuild = !r.Ok && r.Diagnostics.Count > 0 && _fixer is not null;
         }
         catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Build failed to run: {ex.Message}"; }
-        finally { IsBuilding = false; }
     }
 
     /// <summary>Have the AI fix the compile errors, then re-verify (PRD v2 G3).</summary>
@@ -1399,22 +1406,22 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
     private async Task FixBuild()
     {
         if (IsBuilding || _fixer is null || BuildDiagnostics.Count == 0) return;
-        IsBuilding = true;
+        IsBuilding = true;   // held across fix AND the re-compile below — no window for a concurrent build
         CanFixBuild = false;
-        BuildSeverity = "info"; BuildStatus = "Asking the AI to fix the build errors…";
         try
         {
+            BuildSeverity = "info"; BuildStatus = "Asking the AI to fix the build errors…";
             var errors = string.Join("\n", BuildDiagnostics.Select(d => d.Display));
             var ok = await _fixer.FixFirmwareAsync(Project, errors);
             if (!ok) { BuildSeverity = "fail"; BuildStatus = "Couldn't generate a firmware fix. Try again or edit manually."; return; }
-            // refresh the file list + active sketch, then re-verify
+            // refresh the file list + active sketch, then re-verify (same guard)
             OnPropertyChanged(nameof(F));
             ActiveFile = Foundry.Core.Generation.ProjectGenerator.PickMainFile(Project.Firmware.Files);
             BuildStatus = "Firmware updated — re-compiling…";
+            await CompileCore();
         }
         catch (Exception ex) { BuildSeverity = "fail"; BuildStatus = $"Fix failed: {ex.Message}"; }
         finally { IsBuilding = false; }
-        await VerifyBuild();   // recompile to confirm
     }
 
     /// <summary>Download arduino-cli into the app tools folder on demand (PRD v2 G1).</summary>
@@ -1693,7 +1700,7 @@ public sealed partial class GuideViewModel : TabViewModelBase
             File.WriteAllBytes(path, PdfExporter.ProjectPdf(Project, Rendering.WiringImage.Render(Project)));
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
-        catch { /* best effort */ }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Guide PDF export failed: {ex.Message}"); }
     }
 
     /// <summary>Export the assembly guide to Markdown in the configured folder (PRD F7).</summary>
@@ -1708,7 +1715,7 @@ public sealed partial class GuideViewModel : TabViewModelBase
             File.WriteAllText(path, Exporters.GuideMarkdown(Project));
             Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
         }
-        catch { /* best effort */ }
+        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Guide Markdown export failed: {ex.Message}"); }
     }
 
     private static string SafeName(string s)
