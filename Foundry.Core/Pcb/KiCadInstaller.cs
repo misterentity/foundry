@@ -35,7 +35,13 @@ public static class KiCadInstaller
     }
 
     /// <summary>Resolved KiCad install: the bin dir, python interpreter, kicad-cli, and footprint lib dir.</summary>
-    public sealed record Install(string BinDir, string PythonPath, string KicadCliPath, string FootprintDir, string Version);
+    public sealed record Install(string BinDir, string PythonPath, string KicadCliPath, string FootprintDir, string Version)
+    {
+        /// <summary>The symbol-library dir (sibling of <see cref="FootprintDir"/>) — source of the authoritative
+        /// pin name→number tables used by <see cref="SymbolPinMap"/> to resolve logical MCU pins to real pads.</summary>
+        public string SymbolDir => System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(FootprintDir.TrimEnd('/', '\\')) ?? FootprintDir, "symbols");
+    }
 
     /// <summary>The located KiCad install (newest version found), or null when KiCad isn't installed.</summary>
     public static Install? Locate()

@@ -498,3 +498,91 @@ public class McuPinMapTests
         }
     }
 }
+
+// ---- RP2040/Pico curated map + cross-check against the authoritative symbol library -------------
+
+public class PicoPinMapTests
+{
+    private const string Pico = "Module:RaspberryPi_Pico_Common_SMD";
+
+    [Fact]
+    public void Pico_ResolvesGpioAndPowerToAuthoritativePads()
+    {
+        Assert.Equal("1", McuPinMap.ResolvePad(Pico, "GPIO0"));
+        Assert.Equal("2", McuPinMap.ResolvePad(Pico, "GPIO1"));
+        Assert.Equal("29", McuPinMap.ResolvePad(Pico, "GPIO22"));
+        Assert.Equal("31", McuPinMap.ResolvePad(Pico, "GPIO26"));   // ADC0
+        Assert.Equal("36", McuPinMap.ResolvePad(Pico, "3V3"));
+        Assert.Equal("40", McuPinMap.ResolvePad(Pico, "VBUS"));
+        Assert.Equal("3", McuPinMap.ResolvePad(Pico, "GND"));
+    }
+
+    [Fact]
+    public void Pico_NormalizesGpSilkscreenNaming()
+    {
+        Assert.Equal("1", McuPinMap.ResolvePad(Pico, "GP0"));    // Pico silkscreen GP0 == GPIO0
+        Assert.Equal("29", McuPinMap.ResolvePad(Pico, "GP22"));
+    }
+
+    [Fact]
+    public void CuratedMaps_AgreeWithSymbolDerived_ForEveryGpioWhereBothResolve()
+    {
+        // Cross-check the hand-curated McuPinMap against the authoritative KiCad symbol library: wherever BOTH
+        // resolve a pin, the pad numbers MUST match — so a transcription typo in the curated map fails the build.
+        var kicad = KiCadInstaller.Locate();
+        if (kicad is null) return;   // needs the symbol library; pcb-live CI runs this for real
+        var dir = kicad.SymbolDir;
+
+        var footprints = new[] { "RF_Module:ESP32-WROOM-32", "Module:RaspberryPi_Pico_Common_SMD" };
+        var pins = new List<string> { "3V3", "GND", "VBUS", "VSYS", "EN", "RUN" };
+        for (int n = 0; n <= 39; n++) pins.Add("GPIO" + n);
+
+        int agreed = 0;
+        foreach (var fp in footprints)
+            foreach (var pin in pins)
+            {
+                var curated = McuPinMap.ResolvePad(fp, pin);
+                var derived = SymbolPinMap.ResolvePad(fp, pin, dir);
+                if (curated is not null && derived is not null)
+                {
+                    Assert.Equal(derived, curated);   // authoritative symbol vs curated table
+                    agreed++;
+                }
+            }
+        Assert.True(agreed >= 30, $"expected the cross-check to verify many pins, only {agreed}");
+    }
+}
+
+public class SymbolPinMapTests
+{
+    [Theory]
+    [InlineData("IO34", "GPIO34")]
+    [InlineData("GPIO26_ADC0", "GPIO26")]
+    [InlineData("GP5", "GPIO5")]
+    [InlineData("VDD", "3V3")]
+    [InlineData("VSS", "GND")]
+    [InlineData("RUN", "RUN")]
+    public void Canonical_NormalizesUniversalNames(string raw, string expected) =>
+        Assert.Equal(expected, SymbolPinMap.Canonical(raw));
+
+    [Fact]
+    public void ResolvePad_NoSymbolDir_ReturnsNull()
+    {
+        Assert.Null(SymbolPinMap.ResolvePad("Module:RaspberryPi_Pico_Common_SMD", "GPIO0", null));
+        Assert.Null(SymbolPinMap.ResolvePad("Module:RaspberryPi_Pico_Common_SMD", "GPIO0", ""));
+    }
+
+    [Fact]
+    public void ResolvePad_DerivesPicoPadsFromRealSymbolLibrary()
+    {
+        var kicad = KiCadInstaller.Locate();
+        if (kicad is null) return;   // needs KiCad's symbol library
+        var dir = kicad.SymbolDir;
+        const string pico = "Module:RaspberryPi_Pico_Common_SMD";
+        Assert.Equal("1", SymbolPinMap.ResolvePad(pico, "GPIO0", dir));
+        Assert.Equal("31", SymbolPinMap.ResolvePad(pico, "GPIO26", dir));   // GPIO26_ADC0 in the symbol
+        Assert.Equal("36", SymbolPinMap.ResolvePad(pico, "3V3", dir));
+        Assert.Equal("40", SymbolPinMap.ResolvePad(pico, "VBUS", dir));
+        Assert.Null(SymbolPinMap.ResolvePad(pico, "GPIO99", dir));          // no such pin → fail closed
+    }
+}

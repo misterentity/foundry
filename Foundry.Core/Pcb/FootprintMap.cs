@@ -74,7 +74,7 @@ public static class FootprintMap
         if (Has("esp8266", "esp-12", "esp12", "nodemcu"))
             return Heur("RF_Module:ESP-12E");
         if (Has("pico", "rp2040"))
-            return Heur("RPi_Pico:RPi_Pico_SMD_TH");
+            return Heur("Module:RaspberryPi_Pico_Common_SMD");   // KiCad 10 id (was RPi_Pico:RPi_Pico_SMD_TH)
 
         if (Has("regulator", "ldo", "7805"))
         {

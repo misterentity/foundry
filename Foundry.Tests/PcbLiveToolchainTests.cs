@@ -147,6 +147,49 @@ public class PcbLiveToolchainTests
         finally { try { Directory.Delete(outDir, true); } catch { } }
     }
 
+    [Fact]
+    public async Task PicoBoard_MappedGpioPins_BuildVerified_OnAuthoritativePads()
+    {
+        if (!KiCadPresent) return;
+
+        // Raspberry Pi Pico wired by GPIO name → resolves to KiCad 10's Module:RaspberryPi_Pico_Common_SMD
+        // footprint and the curated/symbol pin map (GPIO0→pad 1, 3V3→pad 36, GND→pad 3). Exercises both the
+        // pin map AND the KiCad-10 footprint-id fix.
+        var p = new Project
+        {
+            Title = "Pico mapped GPIO",
+            Components = new()
+            {
+                new ComponentSpec { Alias = "U1", Ref = "pico", Name = "Raspberry Pi Pico" },
+                new ComponentSpec { Alias = "C1", Ref = "cap", Name = "100nF capacitor" },
+                new ComponentSpec { Alias = "R1", Ref = "r1", Name = "10k resistor" },
+            },
+            Connections = new()
+            {
+                new Connection { From = "U1.3V3", To = "C1.1", Net = "power" },
+                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },
+                new Connection { From = "U1.GPIO0", To = "R1.1", Net = "sig" },
+                new Connection { From = "R1.2", To = "C1.2", Net = "gnd" },
+            },
+        };
+        var outDir = OutDir();
+        try
+        {
+            var r = await PcbBuilder.BuildAsync(p, outDir);
+            Assert.True(r.Installed);
+            Assert.True(r.Ok);
+            Assert.Empty(r.UnmappedPins);
+            Assert.NotNull(r.KicadPcbPath);
+
+            var padNets = ReadPadNets(await File.ReadAllTextAsync(r.KicadPcbPath!));
+            string Net(string @ref, string pad) => padNets[@ref][pad];
+            Assert.Equal(Net("U1", "36"), Net("C1", "1"));   // 3V3  → pad 36
+            Assert.Equal(Net("U1", "3"), Net("C1", "2"));    // GND  → pad 3
+            Assert.Equal(Net("U1", "1"), Net("R1", "1"));    // GPIO0 → pad 1
+        }
+        finally { try { Directory.Delete(outDir, true); } catch { } }
+    }
+
     // ---- minimal .kicad_pcb readback: ref -> (pad name -> net name) ---------------------------------
 
     /// <summary>Parse footprint blocks into ref → (pad → net name). Paren-matching skips quoted strings so

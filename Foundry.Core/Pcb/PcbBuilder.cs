@@ -67,7 +67,8 @@ public static class PcbBuilder
         // placer packs using true courtyards instead of CourtyardOf approximations.
         realSizes ??= await MeasureAsync(project, footprintDirs, ct);
 
-        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm, realSizes);
+        var symbolDir = System.IO.Directory.Exists(kicad.SymbolDir) ? kicad.SymbolDir : null;
+        var job = PcbJob.Build(project, outPath, footprintDirs, plan, marginMm, gapMm, realSizes, symbolDir);
 
         // Surface job-time diagnostics (unresolved nodes, generic-footprint fallbacks) in the log up front.
         foreach (var d in job.Diagnostics)

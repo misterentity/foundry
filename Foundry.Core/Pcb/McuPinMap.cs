@@ -21,6 +21,7 @@ public static class McuPinMap
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["RF_Module:ESP32-WROOM-32"] = Esp32Wroom32(),
+            ["Module:RaspberryPi_Pico_Common_SMD"] = RaspberryPiPico(),
         };
 
     /// <summary>True when Foundry has an authoritative pin map for this footprint.</summary>
@@ -41,6 +42,8 @@ public static class McuPinMap
         var p = (pin ?? "").Trim();
         var io = Regex.Match(p, @"^IO(\d+)$", RegexOptions.IgnoreCase);
         if (io.Success) return "GPIO" + io.Groups[1].Value;
+        var gp = Regex.Match(p, @"^GP(\d+)$", RegexOptions.IgnoreCase);   // Pico silkscreen GP0 → GPIO0
+        if (gp.Success) return "GPIO" + gp.Groups[1].Value;
         return p.ToUpperInvariant() switch
         {
             "VDD" or "VCC" or "3.3V" or "+3V3" or "3V3" => "3V3",
@@ -98,5 +101,47 @@ public static class McuPinMap
             ["GPIO1"] = "35",   // TXD0
             ["GPIO22"] = "36",
             ["GPIO23"] = "37",
+        };
+
+    /// <summary>
+    /// Raspberry Pi Pico / RP2040 board (Module:RaspberryPi_Pico_Common_SMD, 40 pads). Pad numbers are from KiCad's
+    /// MCU_Module:RaspberryPi_Pico symbol (authoritative); GP0/GPIO0 silkscreen naming is handled by
+    /// <see cref="Normalize"/>. GND uses pad 3 (also on 8/13/18/23/28/38 — one tie suffices). Validated
+    /// against the symbol library by McuPinMapTests so a transcription error can't slip through.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> RaspberryPiPico() =>
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["GPIO0"] = "1",
+            ["GPIO1"] = "2",
+            ["GND"] = "3",
+            ["GPIO2"] = "4",
+            ["GPIO3"] = "5",
+            ["GPIO4"] = "6",
+            ["GPIO5"] = "7",
+            ["GPIO6"] = "9",
+            ["GPIO7"] = "10",
+            ["GPIO8"] = "11",
+            ["GPIO9"] = "12",
+            ["GPIO10"] = "14",
+            ["GPIO11"] = "15",
+            ["GPIO12"] = "16",
+            ["GPIO13"] = "17",
+            ["GPIO14"] = "19",
+            ["GPIO15"] = "20",
+            ["GPIO16"] = "21",
+            ["GPIO17"] = "22",
+            ["GPIO18"] = "24",
+            ["GPIO19"] = "25",
+            ["GPIO20"] = "26",
+            ["GPIO21"] = "27",
+            ["GPIO22"] = "29",
+            ["RUN"] = "30",
+            ["GPIO26"] = "31",
+            ["GPIO27"] = "32",
+            ["GPIO28"] = "34",
+            ["3V3"] = "36",
+            ["VSYS"] = "39",
+            ["VBUS"] = "40",
         };
 }

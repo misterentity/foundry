@@ -62,7 +62,7 @@ public sealed record PcbJob(
     /// approximation, keeping the no-KiCad path and existing tests deterministic.</param>
     public static PcbJob Build(Project.Project project, string outPath, IReadOnlyList<string> footprintDirs,
         PlacementPlan? plan = null, double marginMm = 5.0, double gapMm = 1.5,
-        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null)
+        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null, string? symbolDir = null)
     {
         var diags = new List<PcbDiagnostic>();
         var nets = KiCadNetlist.Nets(project);
@@ -111,11 +111,14 @@ public sealed record PcbJob(
         {
             var pos = placement[alias];
             var libId = choiceByRef[alias].LibId;
-            // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6) via the
-            // authoritative pin map. Pins with no map entry keep their logical name and fall through to the
-            // fail-closed gate in build_board.py (refused), never ordinal-guessed.
+            // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6). Resolution order:
+            // curated McuPinMap (fast, KiCad-free, chip-specific aliases) → symbol-derived SymbolPinMap (any
+            // KiCad part, when a symbol dir is available) → keep the logical name, which then falls through to
+            // the fail-closed gate in build_board.py (refused), never ordinal-guessed.
             var padNetList = FootprintMap.PadNetList(alias, endpointNets)
-                .Select(pn => new PcbPadNet(McuPinMap.ResolvePad(libId, pn.Pin) ?? pn.Pin, pn.Net))
+                .Select(pn => new PcbPadNet(
+                    McuPinMap.ResolvePad(libId, pn.Pin) ?? SymbolPinMap.ResolvePad(libId, pn.Pin, symbolDir) ?? pn.Pin,
+                    pn.Net))
                 .ToList();
             return new PcbJobComponent(alias, libId, pos.XMm, pos.YMm, pos.Rot,
                 FootprintMap.PadNets(alias, endpointNets), padNetList,
