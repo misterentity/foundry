@@ -103,3 +103,35 @@ jobs:
         with:
           files: build/AppPackages/FoundrySetup.exe
           generate_release_notes: true
+
+  # Exercises the auto-PCB moat's POSITIVE path against a real KiCad install — the live build→net/pad
+  # assertions the bare `build` job's `dotnet test` cannot run (those PCB tests skip when KiCad is absent).
+  # Isolated job so the ~1 GB KiCad install cost doesn't slow the build/release path. The headline check:
+  # a real MCU board addressed by logical GPIO names is REFUSED (connectivity unverified), never mis-wired.
+  pcb-live:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install KiCad
+        run: choco install kicad -y --no-progress
+
+      - name: Sanity-check kicad-cli is available
+        shell: pwsh
+        run: kicad-cli version
+
+      - name: build_board.py pad-assignment unit tests (pytest)
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest Foundry.Core/Pcb/KiCadScripts/test_build_board.py -q
+
+      - name: Live PCB toolchain tests (real KiCad → build, DRC, pad→net readback)
+        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLiveToolchainTests"

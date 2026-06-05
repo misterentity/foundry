@@ -109,19 +109,12 @@ public static class FirmwareBuilder
 
             var fqbn = Fqbn(project);
             await EnsureCoreAsync(cli, fqbn, ct);   // install the board core on first use for this vendor
-            var psi = new ProcessStartInfo
-            {
-                FileName = cli,
-                Arguments = $"compile --fqbn {fqbn} --format json --warnings none \"{sketchDir}\"",
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            };
             Diagnostics.AppLog.Info("build", $"compiling firmware · {fqbn}");
-            using var proc = Process.Start(psi)!;
-            var stdout = await proc.StandardOutput.ReadToEndAsync(ct);
-            var stderr = await proc.StandardError.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
+            var run = await Diagnostics.ProcessRunner.RunAsync(cli,
+                $"compile --fqbn {fqbn} --format json --warnings none \"{sketchDir}\"",
+                Diagnostics.ProcessRunner.ArduinoTimeout, ct);
 
-            var (ok, diags) = Parse(stdout, stderr, proc.ExitCode);
+            var (ok, diags) = Parse(run.Stdout, run.Stderr, run.ExitCode);
             var summary = ok
                 ? $"Compiled clean for {fqbn}."
                 : $"{diags.Count(d => d.Severity == "error")} error(s) compiling for {fqbn}.";
@@ -172,19 +165,12 @@ public static class FirmwareBuilder
             }
 
             await EnsureCoreAsync(cli, fqbn, ct);
-            var psi = new ProcessStartInfo
-            {
-                FileName = cli,
-                Arguments = $"compile --fqbn {fqbn} --output-dir \"{outputDir}\" --format json --warnings none \"{sketchDir}\"",
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            };
             Diagnostics.AppLog.Info("build", $"building firmware image · {fqbn}");
-            using var proc = Process.Start(psi)!;
-            var stdout = await proc.StandardOutput.ReadToEndAsync(ct);
-            var stderr = await proc.StandardError.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
+            var run = await Diagnostics.ProcessRunner.RunAsync(cli,
+                $"compile --fqbn {fqbn} --output-dir \"{outputDir}\" --format json --warnings none \"{sketchDir}\"",
+                Diagnostics.ProcessRunner.ArduinoTimeout, ct);
 
-            var (ok, diags) = Parse(stdout, stderr, proc.ExitCode);
+            var (ok, diags) = Parse(run.Stdout, run.Stderr, run.ExitCode);
             var elf = ok ? FindArtifact(outputDir, ".ino.elf") : null;
             var hex = ok ? FindArtifact(outputDir, ".ino.hex") : null;
             var bin = ok ? FindArtifact(outputDir, ".ino.bin") : null;
@@ -360,14 +346,12 @@ public static class FirmwareBuilder
         catch { /* compile will surface a clear "platform not installed" error if this fails */ }
     }
 
+    // Thin adapter over the shared ProcessRunner: concurrent stdout/stderr drain (no pipe-buffer deadlock),
+    // a timeout, and process-tree kill on timeout/cancel. arduino-cli core/compile/upload → ArduinoTimeout.
     private static async Task<(string stdout, string stderr, int code)> RunAsync(string cli, string args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo { FileName = cli, Arguments = args, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        using var p = Process.Start(psi)!;
-        var o = await p.StandardOutput.ReadToEndAsync(ct);
-        var e = await p.StandardError.ReadToEndAsync(ct);
-        await p.WaitForExitAsync(ct);
-        return (o, e, p.ExitCode);
+        var r = await Diagnostics.ProcessRunner.RunAsync(cli, args, Diagnostics.ProcessRunner.ArduinoTimeout, ct);
+        return (r.Stdout, r.Stderr, r.ExitCode);
     }
 
     /// <summary>Download arduino-cli to the app-local tools folder (PRD v2 G1 on-demand install). Returns the path.</summary>

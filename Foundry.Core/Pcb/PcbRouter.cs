@@ -61,7 +61,7 @@ public static class PcbRouter
             var args = $"-jar \"{routing.JarPath}\" --gui.enabled=false --logging.console.level=INFO " +
                        $"-de \"{dsnPath}\" -do \"{sesPath}\" -mp {options.Passes} -mt {options.Threads}";
             AppLog.Info("pcb", $"routing · FreeRouting {FreeRoutingInstaller.Version} ({options.Passes} passes, {options.Threads} thread(s))");
-            var (fro, fre, frc) = await RunAsync(routing.JavaPath, args, ct);
+            var (fro, fre, frc) = await RunAsync(routing.JavaPath, args, ct, Diagnostics.ProcessRunner.RouterTimeout);
             if (!System.IO.File.Exists(sesPath))
                 return RouteResult.Failed("FreeRouting produced no SES output.",
                     new[] { Trimmed(fro, fre) });
@@ -90,18 +90,14 @@ public static class PcbRouter
         finally { try { System.IO.Directory.Delete(work, true); } catch { } }
     }
 
-    private static async Task<(string stdout, string stderr, int code)> RunAsync(string exe, string args, CancellationToken ct)
+    // Thin adapter over the shared ProcessRunner: concurrent stdout/stderr drain (no pipe-buffer deadlock),
+    // a timeout, and process-tree kill on timeout/cancel. A watchdog timeout surfaces as a non-zero exit
+    // code, which the Parse helpers already treat as failure (the loop then keeps the best board).
+    private static async Task<(string stdout, string stderr, int code)> RunAsync(
+        string exe, string args, CancellationToken ct, TimeSpan? timeout = null)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = exe, Arguments = args,
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-        };
-        using var p = Process.Start(psi)!;
-        var o = await p.StandardOutput.ReadToEndAsync(ct);
-        var e = await p.StandardError.ReadToEndAsync(ct);
-        await p.WaitForExitAsync(ct);
-        return (o, e, p.ExitCode);
+        var r = await Diagnostics.ProcessRunner.RunAsync(exe, args, timeout ?? Diagnostics.ProcessRunner.KicadTimeout, ct);
+        return (r.Stdout, r.Stderr, r.ExitCode);
     }
 
     /// <summary>The named embedded pcbnew script source.</summary>

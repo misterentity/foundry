@@ -16,6 +16,13 @@ public sealed record PcbDiagnostic(string Severity, string Message)
 /// </summary>
 public sealed record PcbResult(bool Installed, bool Ok, string Summary, string? KicadPcbPath, IReadOnlyList<string> Notes)
 {
+    /// <summary>Net pins that could not be mapped to a real pad on a NAMED footprint (no ordinal guess was made).
+    /// Non-empty ⇒ connectivity is UNVERIFIED and the board must NOT be routed/exported/fabbed.</summary>
+    public IReadOnlyList<string> UnmappedPins { get; init; } = Array.Empty<string>();
+
+    /// <summary>How many pins were placed on a pad by ordinal position (recorded; only allowed for pure-numeric headers).</summary>
+    public int ByPositionCount { get; init; }
+
     public static PcbResult NotInstalled() =>
         new(false, false,
             $"KiCad isn't installed — install it from {KiCadInstaller.DownloadUrl} to export a PCB.",
@@ -34,6 +41,8 @@ public sealed record PcbResult(bool Installed, bool Ok, string Summary, string? 
     public static PcbResult Parse(string stdout, string stderr, int exitCode, string expectedOut)
     {
         var notes = new List<string>();
+        var unmapped = new List<string>();
+        int byPositionCount = 0;
         bool ok = exitCode == 0;
         string? outPath = null;
         int? comps = null, nets = null;
@@ -56,10 +65,27 @@ public sealed record PcbResult(bool Installed, bool Ok, string Summary, string? 
             if (root.TryGetProperty("notes", out var na) && na.ValueKind == JsonValueKind.Array)
                 foreach (var nn in na.EnumerateArray())
                     if (nn.ValueKind == JsonValueKind.String) notes.Add(nn.GetString() ?? "");
+            if (root.TryGetProperty("unmappedPins", out var up) && up.ValueKind == JsonValueKind.Array)
+                foreach (var u in up.EnumerateArray())
+                {
+                    if (u.ValueKind != JsonValueKind.Object) continue;
+                    string Field(string k) => u.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? (v.GetString() ?? "") : "";
+                    unmapped.Add($"{Field("ref")}.{Field("pin")} (net {Field("net")}) on {Field("footprint")}");
+                }
+            if (root.TryGetProperty("byPosition", out var bp) && bp.ValueKind == JsonValueKind.Array)
+                byPositionCount = bp.GetArrayLength();
         }
         catch
         {
             if (!ok && !string.IsNullOrWhiteSpace(stderr)) notes.Add(stderr.Trim());
+        }
+
+        // Any unmapped net pin means a NAMED footprint had a pin the netlist couldn't place — the board's
+        // connectivity is unverified. Fail BEFORE the file-exists check so a saved-but-miswired board is rejected.
+        if (unmapped.Count > 0)
+        {
+            ok = false;
+            notes.Add($"Connectivity unverified — {unmapped.Count} net pin(s) could not be mapped to a pad: {string.Join("; ", unmapped)}");
         }
 
         if (!ok && notes.Count == 0)
@@ -75,7 +101,11 @@ public sealed record PcbResult(bool Installed, bool Ok, string Summary, string? 
         var summary = ok
             ? $"Built {System.IO.Path.GetFileName(path)} — {comps ?? 0} parts, {nets ?? 0} nets."
             : "Couldn't build the PCB.";
-        return new PcbResult(true, ok, summary, ok ? path : null, notes);
+        return new PcbResult(true, ok, summary, ok ? path : null, notes)
+        {
+            UnmappedPins = unmapped,
+            ByPositionCount = byPositionCount,
+        };
     }
 
     /// <summary>build_board.py prints one JSON line last; tolerate prior log lines on stdout.</summary>

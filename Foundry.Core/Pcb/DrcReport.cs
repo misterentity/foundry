@@ -87,12 +87,10 @@ public sealed record DrcReport(
 
         if (string.IsNullOrWhiteSpace(reportJson))
         {
-            // exit 0 with no report file is reconciled to "clean" (clean boards sometimes write nothing
-            // useful), but a missing file on a violations exit is an IO error.
-            if (exitCode == 0)
-                return new DrcReport(true, true, "DRC clean — 0 errors, fully connected.",
-                    Array.Empty<DrcViolation>(), Array.Empty<DrcViolation>(), 0, 0, 0, Array.Empty<string>());
-            return Failed("DRC reported violations but produced no readable report.",
+            // No report file means DRC did NOT actually check the board — INCONCLUSIVE, never "clean".
+            // Treating exit-0-no-report as clean would let an unchecked board become the authoritative PASS
+            // the fab path trusts. Only an explicit empty-violations JSON (below) maps to clean.
+            return Failed("DRC produced no report — could not verify the board.",
                 string.IsNullOrWhiteSpace(stderr) ? null : new[] { stderr!.Trim() });
         }
 

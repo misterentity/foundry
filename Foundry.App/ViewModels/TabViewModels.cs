@@ -345,10 +345,12 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         OnPropertyChanged(nameof(CanRoutePcb));
         OnPropertyChanged(nameof(CanExportFab));
+        OnPropertyChanged(nameof(CanCancelPcb));
         RoutePcbCommand.NotifyCanExecuteChanged();
         DesignPcbCommand.NotifyCanExecuteChanged();
         ExportFabCommand.NotifyCanExecuteChanged();
         DesignAndExportFabCommand.NotifyCanExecuteChanged();
+        CancelPcbCommand.NotifyCanExecuteChanged();
     }
     public bool CanDesignPcb => !IsExportingPcb;
 
@@ -358,7 +360,33 @@ public sealed partial class WiringViewModel : TabViewModelBase
     [NotifyPropertyChangedFor(nameof(HasFabZip))]
     private string? _lastFabZipPath;
     public bool HasFabZip => !string.IsNullOrEmpty(LastFabZipPath);
-    public bool CanExportFab => !IsExportingPcb && !string.IsNullOrEmpty(LastPcbPath);
+
+    // Fab-gate provenance: a board may be exported only when BOTH its connectivity is verified (P0-1: no
+    // unmapped/ordinal-guessed pins) AND its DRC came back clean (P0-6). Setting a new board path resets both
+    // to "unverified" until the build/route/DRC/design flow explicitly marks them — so a best-effort or
+    // DRC-FAIL board never has the fab button enabled.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExportFab))]
+    private bool _connectivityVerified;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExportFab))]
+    private bool _lastDrcClean;
+    partial void OnConnectivityVerifiedChanged(bool value) => ExportFabCommand.NotifyCanExecuteChanged();
+    partial void OnLastDrcCleanChanged(bool value) => ExportFabCommand.NotifyCanExecuteChanged();
+    partial void OnLastPcbPathChanged(string? value)
+    {
+        ConnectivityVerified = false;
+        LastDrcClean = false;
+    }
+    public bool CanExportFab => !IsExportingPcb && !string.IsNullOrEmpty(LastPcbPath) && ConnectivityVerified && LastDrcClean;
+
+    // P0-3: a fresh CTS per PCB operation so the user can CANCEL a long build/route/DRC/export. The Core
+    // subprocesses honor the token (ProcessRunner kills the whole tree); on cancel they surface "Cancelled".
+    private CancellationTokenSource? _pcbCts;
+    public bool CanCancelPcb => IsExportingPcb;
+    [RelayCommand(CanExecute = nameof(CanCancelPcb))]
+    private void CancelPcb() => _pcbCts?.Cancel();
 
     /// <summary>Live simulation state for this design (RUN/STOP lives by the SCHEMATIC|BREADBOARD toggle).</summary>
     public SimulationViewModel Sim { get; }
@@ -414,13 +442,16 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         if (IsExportingPcb) return;
         IsExportingPcb = true;
+        _pcbCts?.Dispose();
+        _pcbCts = new CancellationTokenSource();
+        var ct = _pcbCts.Token;
         PcbNotes.Clear();
         PcbSeverity = "info"; PcbStatus = "Building the PCB from the netlist…";
         try
         {
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
-            var result = await Foundry.Core.Pcb.PcbBuilder.BuildAsync(Project, dir);
+            var result = await Foundry.Core.Pcb.PcbBuilder.BuildAsync(Project, dir, ct: ct);
 
             foreach (var n in result.Notes) PcbNotes.Add(n);
 
@@ -436,13 +467,15 @@ public sealed partial class WiringViewModel : TabViewModelBase
             if (result.Ok && result.KicadPcbPath is not null)
             {
                 LastPcbPath = result.KicadPcbPath;
+                ConnectivityVerified = true;   // result.Ok ⇒ build_board mapped every net pin to a real pad (no unmapped/ordinal-guess)
                 Foundry.Core.Diagnostics.AppLog.Info("export", $"KiCad PCB → {result.KicadPcbPath}");
                 // Continue straight into routing — copper tracks on the placed board (v2.4).
-                await RouteCore(result.KicadPcbPath);
+                await RouteCore(result.KicadPcbPath, ct);
             }
         }
+        catch (OperationCanceledException) { PcbSeverity = "info"; PcbStatus = "Cancelled."; }
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB export failed: {ex.Message}"; }
-        finally { IsExportingPcb = false; }
+        finally { IsExportingPcb = false; _pcbCts?.Dispose(); _pcbCts = null; }
     }
 
     /// <summary>
@@ -455,14 +488,17 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         if (IsExportingPcb || string.IsNullOrEmpty(LastPcbPath)) return;
         IsExportingPcb = true;
+        _pcbCts?.Dispose();
+        _pcbCts = new CancellationTokenSource();
         PcbNotes.Clear();
-        try { await RouteCore(LastPcbPath); }
+        try { await RouteCore(LastPcbPath, _pcbCts.Token); }
+        catch (OperationCanceledException) { PcbSeverity = "info"; PcbStatus = "Cancelled."; }
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB routing failed: {ex.Message}"; }
-        finally { IsExportingPcb = false; }
+        finally { IsExportingPcb = false; _pcbCts?.Dispose(); _pcbCts = null; }
     }
 
     /// <summary>Shared routing step used by both EXPORT+ROUTE and the standalone ROUTE affordance.</summary>
-    private async Task RouteCore(string pcbPath)
+    private async Task RouteCore(string pcbPath, CancellationToken ct)
     {
         // Java is locate-only; the FreeRouting jar can be fetched on demand (~58 MB, one-time).
         if (Foundry.Core.Pcb.FreeRoutingInstaller.LocateJava() is not null
@@ -474,7 +510,7 @@ public sealed partial class WiringViewModel : TabViewModelBase
         }
 
         PcbSeverity = "info"; PcbStatus = "Routing the PCB with FreeRouting…";
-        var route = await Foundry.Core.Pcb.PcbRouter.RouteAsync(pcbPath);
+        var route = await Foundry.Core.Pcb.PcbRouter.RouteAsync(pcbPath, ct: ct);
 
         foreach (var n in route.Notes) PcbNotes.Add(n);
 
@@ -491,7 +527,7 @@ public sealed partial class WiringViewModel : TabViewModelBase
         {
             Foundry.Core.Diagnostics.AppLog.Info("export", $"routed PCB → {route.RoutedPcbPath}");
             // v2.5: gate the routed board with DRC before revealing it.
-            await DrcCore(route.RoutedPcbPath);
+            await DrcCore(route.RoutedPcbPath, ct);
             Process.Start(new ProcessStartInfo { FileName = route.RoutedPcbPath, UseShellExecute = true });
         }
     }
@@ -500,15 +536,16 @@ public sealed partial class WiringViewModel : TabViewModelBase
     /// Run the v2.5 DRC gate on a routed board and surface the verdict in the PCB status block: PASS (green)
     /// or N violations (severity-colored). Degrades to clear install guidance when KiCad is absent. Never throws.
     /// </summary>
-    private async Task DrcCore(string boardPath)
+    private async Task DrcCore(string boardPath, CancellationToken ct)
     {
         PcbSeverity = "info"; PcbStatus = "Running DRC on the routed board…";
-        var report = await Foundry.Core.Pcb.PcbDrc.CheckAsync(boardPath);
+        var report = await Foundry.Core.Pcb.PcbDrc.CheckAsync(boardPath, ct: ct);
 
         foreach (var n in report.Notes) PcbNotes.Add(n);
 
         if (!report.Installed)
         {
+            LastDrcClean = false;
             PcbSeverity = "info";
             PcbStatus = report.Summary;  // "DRC needs KiCad — install it from … to run kicad-cli pcb drc."
             return;
@@ -516,11 +553,13 @@ public sealed partial class WiringViewModel : TabViewModelBase
 
         if (report.Clean)
         {
+            LastDrcClean = true;
             PcbSeverity = "pass";
             PcbStatus = $"DRC PASS — {report.Summary}";
         }
         else
         {
+            LastDrcClean = false;
             // Errors fail the gate; warning-only with no unconnected nets is a softer "warn".
             PcbSeverity = report.ErrorCount > 0 || report.UnconnectedCount > 0 ? "fail" : "warn";
             PcbStatus = report.Summary;
@@ -547,6 +586,9 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         if (IsExportingPcb) return;
         IsExportingPcb = true;
+        _pcbCts?.Dispose();
+        _pcbCts = new CancellationTokenSource();
+        var ct = _pcbCts.Token;
         PcbNotes.Clear();
         PcbSeverity = "info"; PcbStatus = "Designing the PCB — build → route → DRC fix loop…";
         try
@@ -561,7 +603,7 @@ public sealed partial class WiringViewModel : TabViewModelBase
             var model = ConfigStore.Load().ModelId;
             var options = Foundry.Core.Pcb.DrcOptions.Default;
 
-            var result = await Foundry.Core.Pcb.PcbDesigner.DesignAsync(Project, dir, ai, model, options);
+            var result = await Foundry.Core.Pcb.PcbDesigner.DesignAsync(Project, dir, ai, model, options, ct);
 
             // Per-iteration progress: each Core trace line starts "attempt N: …"; re-badge it as
             // "iteration N/M:" for the UI (drop the redundant "attempt N:" prefix) so the error-count
@@ -593,13 +635,16 @@ public sealed partial class WiringViewModel : TabViewModelBase
             PcbStatus = result.Ok ? $"DRC PASS — {result.Summary}" : verdict;
             if (result.KicadPcbPath is not null)
             {
-                LastPcbPath = result.KicadPcbPath;
+                LastPcbPath = result.KicadPcbPath;   // resets the gate flags; set them from the verdict below
+                ConnectivityVerified = result.Ok;    // the loop returns Ok only when it never hit an unmapped pin
+                LastDrcClean = result.Ok && result.Report?.Clean == true;
                 Foundry.Core.Diagnostics.AppLog.Info("export", $"PCB design {(result.Ok ? "passed" : "best-effort")} after {result.Iterations} iter → {result.KicadPcbPath}");
                 Process.Start(new ProcessStartInfo { FileName = result.KicadPcbPath, UseShellExecute = true });
             }
         }
+        catch (OperationCanceledException) { PcbSeverity = "info"; PcbStatus = "Cancelled."; }
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"PCB design failed: {ex.Message}"; }
-        finally { IsExportingPcb = false; }
+        finally { IsExportingPcb = false; _pcbCts?.Dispose(); _pcbCts = null; }
     }
 
     /// <summary>
@@ -613,20 +658,30 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         if (IsExportingPcb || string.IsNullOrEmpty(LastPcbPath)) return;
         IsExportingPcb = true;
+        _pcbCts?.Dispose();
+        _pcbCts = new CancellationTokenSource();
         PcbNotes.Clear();
-        try { await ExportFabCore(LastPcbPath); }
+        try { await ExportFabCore(LastPcbPath, _pcbCts.Token); }
+        catch (OperationCanceledException) { PcbSeverity = "info"; PcbStatus = "Cancelled."; }
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"Fab export failed: {ex.Message}"; }
-        finally { IsExportingPcb = false; }
+        finally { IsExportingPcb = false; _pcbCts?.Dispose(); _pcbCts = null; }
     }
 
     /// <summary>Shared fab-export step used by EXPORT GERBERS and the one-shot DESIGN + GERBERS path.</summary>
-    private async Task ExportFabCore(string boardPath)
+    private async Task ExportFabCore(string boardPath, CancellationToken ct)
     {
+        // Defense in depth (the command gate already requires this): never package an unverified board.
+        if (!ConnectivityVerified || !LastDrcClean)
+        {
+            PcbSeverity = "fail";
+            PcbStatus = "Refusing to export fab files — run DESIGN/DRC and get a clean, fully-connected board first.";
+            return;
+        }
         PcbSeverity = "info"; PcbStatus = "Exporting Gerbers + drill and packaging the fab ZIP…";
         var dir = ConfigStore.Load().OutputFolder;
         Directory.CreateDirectory(dir);
 
-        var fab = await Foundry.Core.Pcb.Fab.GerberExporter.ExportAsync(boardPath, dir);
+        var fab = await Foundry.Core.Pcb.Fab.GerberExporter.ExportAsync(boardPath, dir, ct: ct);
 
         foreach (var n in fab.Notes) PcbNotes.Add(n);
 
@@ -658,6 +713,9 @@ public sealed partial class WiringViewModel : TabViewModelBase
     {
         if (IsExportingPcb) return;
         IsExportingPcb = true;
+        _pcbCts?.Dispose();
+        _pcbCts = new CancellationTokenSource();
+        var ct = _pcbCts.Token;
         PcbNotes.Clear();
         PcbSeverity = "info"; PcbStatus = "Designing the PCB and exporting fab files — build → route → DRC → Gerbers…";
         try
@@ -671,7 +729,7 @@ public sealed partial class WiringViewModel : TabViewModelBase
             var model = ConfigStore.Load().ModelId;
             var options = Foundry.Core.Pcb.DrcOptions.Default;
 
-            var (design, fab) = await Foundry.Core.Pcb.PcbDesigner.DesignAndExportFabAsync(Project, dir, ai, model, options);
+            var (design, fab) = await Foundry.Core.Pcb.PcbDesigner.DesignAndExportFabAsync(Project, dir, ai, model, options, ct: ct);
 
             int n = 0;
             foreach (var line in design.Trace)
@@ -685,7 +743,12 @@ public sealed partial class WiringViewModel : TabViewModelBase
                 return;
             }
 
-            if (design.KicadPcbPath is not null) LastPcbPath = design.KicadPcbPath;
+            if (design.KicadPcbPath is not null)
+            {
+                LastPcbPath = design.KicadPcbPath;   // resets gate flags; set them from the verdict
+                ConnectivityVerified = design.Ok;
+                LastDrcClean = design.Ok && design.Report?.Clean == true;
+            }
 
             // The DRC gate must pass before there's a board worth fabbing.
             if (!design.Ok)
@@ -706,8 +769,9 @@ public sealed partial class WiringViewModel : TabViewModelBase
                 Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
             }
         }
+        catch (OperationCanceledException) { PcbSeverity = "info"; PcbStatus = "Cancelled."; }
         catch (Exception ex) { PcbSeverity = "fail"; PcbStatus = $"Design + fab export failed: {ex.Message}"; }
-        finally { IsExportingPcb = false; }
+        finally { IsExportingPcb = false; _pcbCts?.Dispose(); _pcbCts = null; }
     }
 
     /// <summary>Reveal the last-produced fab ZIP in Explorer (selects the file).</summary>

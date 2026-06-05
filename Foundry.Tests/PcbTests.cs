@@ -367,6 +367,63 @@ public class PcbResultTests
         Assert.False(r.Ok);
         Assert.Contains(r.Notes, n => n.Contains("pcbnew"));
     }
+
+    [Fact]
+    public void Parse_UnmappedPins_BlocksOk_AndSurfacesThem()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "foundry_pcb_test_" + Guid.NewGuid().ToString("N")[..8] + ".kicad_pcb");
+        File.WriteAllText(tmp, "(kicad_pcb)");
+        try
+        {
+            // The board file exists and the script even said ok:true, but a NAMED footprint had an
+            // unmatched net pin — connectivity is UNVERIFIED, so the C# side must fail the build.
+            var json = "{\"ok\":true,\"out\":\"" + tmp.Replace("\\", "\\\\") +
+                       "\",\"components\":1,\"nets\":3,\"unmappedPins\":[{\"ref\":\"U1\",\"pin\":\"SDA\",\"net\":\"I2C_SDA\",\"footprint\":\"Sensor:BME280\"}],\"byPosition\":[],\"notes\":[]}";
+            var r = PcbResult.Parse(json, "", 0, tmp);
+            Assert.False(r.Ok);
+            Assert.Null(r.KicadPcbPath);
+            Assert.NotEmpty(r.UnmappedPins);
+            Assert.Contains(r.UnmappedPins, u => u.Contains("SDA"));
+            Assert.Contains(r.Notes, n => n.Contains("Connectivity unverified"));
+        }
+        finally { File.Delete(tmp); }
+    }
+
+    [Fact]
+    public void Parse_ByPositionOnHeader_StaysOk()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "foundry_pcb_test_" + Guid.NewGuid().ToString("N")[..8] + ".kicad_pcb");
+        File.WriteAllText(tmp, "(kicad_pcb)");
+        try
+        {
+            // A pure-numeric header placed pins by ordinal position — allowed; no unmapped pins -> Ok stays true.
+            var json = "{\"ok\":true,\"out\":\"" + tmp.Replace("\\", "\\\\") +
+                       "\",\"components\":1,\"nets\":3,\"unmappedPins\":[],\"byPosition\":[{\"ref\":\"J1\",\"pin\":\"VCC\",\"pad\":\"1\",\"footprint\":\"Connector:Header\"}],\"notes\":[]}";
+            var r = PcbResult.Parse(json, "", 0, tmp);
+            Assert.True(r.Ok);
+            Assert.Equal(tmp, r.KicadPcbPath);
+            Assert.Empty(r.UnmappedPins);
+            Assert.Equal(1, r.ByPositionCount);
+        }
+        finally { File.Delete(tmp); }
+    }
+
+    [Fact]
+    public void Parse_NoUnmapped_BackCompat()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "foundry_pcb_test_" + Guid.NewGuid().ToString("N")[..8] + ".kicad_pcb");
+        File.WriteAllText(tmp, "(kicad_pcb)");
+        try
+        {
+            // Legacy script output with no unmappedPins/byPosition fields still parses clean.
+            var json = "{\"ok\":true,\"out\":\"" + tmp.Replace("\\", "\\\\") + "\",\"components\":2,\"nets\":4,\"notes\":[]}";
+            var r = PcbResult.Parse(json, "", 0, tmp);
+            Assert.True(r.Ok);
+            Assert.Empty(r.UnmappedPins);
+            Assert.Equal(0, r.ByPositionCount);
+        }
+        finally { File.Delete(tmp); }
+    }
 }
 
 public class PcbBuilderTests

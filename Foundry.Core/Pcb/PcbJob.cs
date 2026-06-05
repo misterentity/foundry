@@ -22,7 +22,11 @@ public sealed record PcbJobComponent(
     [property: JsonPropertyName("y_mm")] double YMm,
     [property: JsonPropertyName("rot")] double Rot,
     [property: JsonPropertyName("padNets")] IReadOnlyDictionary<string, string> PadNets,
-    [property: JsonPropertyName("padNetList")] IReadOnlyList<PcbPadNet> PadNetList);
+    [property: JsonPropertyName("padNetList")] IReadOnlyList<PcbPadNet> PadNetList,
+    // True when FootprintMap couldn't resolve a real footprint and dropped in a generic placeholder header.
+    // build_board.py only ordinal-maps logical pins onto a placeholder; a resolved real footprint addressed
+    // by a logical name with no pad match is left UNMAPPED (connectivity unverified) rather than mis-wired.
+    [property: JsonPropertyName("isFallback")] bool IsFallback = false);
 
 /// <summary>One net (name only — pad membership lives on each component's <see cref="PcbJobComponent.PadNets"/>).</summary>
 public sealed record PcbJobNet([property: JsonPropertyName("name")] string Name);
@@ -107,7 +111,8 @@ public sealed record PcbJob(
         {
             var pos = placement[alias];
             return new PcbJobComponent(alias, choiceByRef[alias].LibId, pos.XMm, pos.YMm, pos.Rot,
-                FootprintMap.PadNets(alias, endpointNets), FootprintMap.PadNetList(alias, endpointNets));
+                FootprintMap.PadNets(alias, endpointNets), FootprintMap.PadNetList(alias, endpointNets),
+                choiceByRef[alias].IsFallback);
         }).ToList();
 
         // Validate every net node resolves to a pad in its component.
