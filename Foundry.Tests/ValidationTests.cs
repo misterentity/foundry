@@ -137,6 +137,20 @@ public class ValidationTests
     }
 
     [Fact]
+    public void SupplyVoltage_SourceIdentifiedByOutputV_NotEndpointOrder()
+    {
+        // The 5V regulator is the To side and the 3.3V-only sink is the From side — the rule must still treat
+        // the part with OutputV as the SOURCE (5V) and flag it against the sink's 3.0–3.6V range.
+        var reg = new ComponentSpec { Ref = "reg", Alias = "REG", Name = "5V Reg", OutputV = 5.0,
+            Pins = new() { new PinSpec { Name = "VOUT", Kind = PinKind.Power } } };
+        var sink = new ComponentSpec { Ref = "s", Alias = "DEV", Name = "3V3 Dev", InputVRange = new[] { 3.0, 3.6 },
+            Pins = new() { new PinSpec { Name = "VCC", Kind = PinKind.Power } } };
+        var conns = new List<Connection> { new() { From = "DEV.VCC", To = "REG.VOUT", Net = "power" } };
+        Assert.Contains(RulesEngine.Validate(conns, new ComponentKb(new[] { reg, sink })),
+            x => x.Code == "VLT-SUP" && x.Severity == "fail");
+    }
+
+    [Fact]
     public void PinConflict_SharedI2cBus_IsNotFlagged()
     {
         // The MCU's SDA/SCL fan out to multiple devices on one shared bus — that is BY DESIGN, not a pin

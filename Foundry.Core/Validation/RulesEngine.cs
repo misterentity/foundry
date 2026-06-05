@@ -155,9 +155,12 @@ public static class RulesEngine
             }
             else if (c.Net is "power")
             {
-                // supply voltage: source voltage must fall within sink's input range
-                double? sourceV = ca.OutputV ?? (kb.ByAlias(a.Alias)!.Pin(a.Pin)?.Kind == PinKind.Power ? null : null);
-                var (src, sink) = ca.OutputV is not null ? (ca, cb) : (cb, ca);
+                // Identify SOURCE vs SINK by who actually supplies a voltage (OutputV), not by endpoint order:
+                // when exactly one side has OutputV it is the source; otherwise fall back to the From side.
+                var (src, sink) =
+                    ca.OutputV is not null && cb.OutputV is null ? (ca, cb) :
+                    cb.OutputV is not null && ca.OutputV is null ? (cb, ca) :
+                    ca.OutputV is not null ? (ca, cb) : (cb, ca);
                 if (src.OutputV is double v && sink.InputVRange is { Length: 2 } r && (v < r[0] || v > r[1]))
                 {
                     mismatch = true;
