@@ -19,20 +19,35 @@ public static class PinMap
 {
     private static readonly Regex GpioNum = new(@"(\d+)\s*$", RegexOptions.Compiled);
 
-    /// <summary>The alias acting as MCU = the component whose KB spec exposes GPIO-named pins.</summary>
+    // GPIO-style pin names across the boards Foundry targets: GPIOn / GPn (Pico) / IOn / P0.n (nRF/STM) / Dn / An (Arduino).
+    private static readonly Regex McuPinName = new(@"^(GPIO|GP|IO|P\d+[._]|D|A)\d", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>The alias acting as MCU = the netlist component with the MOST GPIO-style pins. Counting (rather
+    /// than "has a pin starting with GPIO") catches Pico/AVR/nRF naming and avoids mis-picking a small part that
+    /// happens to carry a D1/A0-style pad.</summary>
     public static string? DetectMcuAlias(IReadOnlyList<Connection> connections, ComponentKb kb)
     {
-        var aliases = connections
+        return connections
             .SelectMany(c => new[] { Alias(c.From), Alias(c.To) })
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-        return aliases.FirstOrDefault(a =>
-            kb.ByAlias(a)?.Pins.Any(p => p.Name.StartsWith("GPIO", StringComparison.OrdinalIgnoreCase)) == true);
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(a => (alias: a, gpios: kb.ByAlias(a)?.Pins.Count(p => McuPinName.IsMatch(p.Name)) ?? 0))
+            .Where(x => x.gpios > 0)
+            .OrderByDescending(x => x.gpios)
+            .Select(x => x.alias)
+            .FirstOrDefault();
     }
 
     public static IReadOnlyList<PinMapEntry> Build(IReadOnlyList<Connection> connections, ComponentKb kb)
     {
+        bool hasSignalNets = connections.Any(c => c.Net is "signal" or "i2c");
         var mcu = DetectMcuAlias(connections, kb);
-        if (mcu is null) return Array.Empty<PinMapEntry>();
+        if (mcu is null)
+        {
+            // Don't fail silently: the "pins derived from the netlist" moat produced nothing.
+            if (hasSignalNets)
+                Diagnostics.AppLog.Warn("firmware", "no MCU detected in the netlist — the generated pin map is empty (firmware will have no pin defines).");
+            return Array.Empty<PinMapEntry>();
+        }
 
         var entries = new List<PinMapEntry>();
         foreach (var c in connections.Where(c => c.Net is "signal" or "i2c"))
@@ -55,6 +70,8 @@ public static class PinMap
                 : "input";
             entries.Add(new PinMapEntry(macro, gpio.Value, mcuEp, periphEp, c.Net, strapping, dir));
         }
+        if (entries.Count == 0 && hasSignalNets)
+            Diagnostics.AppLog.Warn("firmware", $"MCU '{mcu}' detected but no signal/I²C net resolved to a GPIO pin — the generated pin map is empty.");
         // stable order by GPIO number for deterministic output
         return entries.OrderBy(e => e.Gpio).ToList();
     }
