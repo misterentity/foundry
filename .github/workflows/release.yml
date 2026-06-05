@@ -25,6 +25,21 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The avr8js runtime ships as a COMMITTED bundle (sidecar-avr/dist/avr8js-runtime.js). Re-build it and
+      # fail if it differs from what's committed — otherwise an index.js edit that wasn't re-bundled ships green.
+      - name: avr8js bundle is fresh
+        working-directory: sidecar-avr
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build
+          git diff --exit-code -- dist/avr8js-runtime.js
+          if ($LASTEXITCODE -ne 0) { Write-Error "dist/avr8js-runtime.js is STALE — run 'npm run build' in sidecar-avr and commit it." }
+
       # Clean build first so the publish can't reuse a stale project-reference DLL
       # (a prior `dotnet test` build left MSBuild thinking Foundry.Core was up to date,
       #  which shipped a Core.dll without ProjectGenerator in v0.4.2–v0.4.4).

@@ -25,7 +25,13 @@ public sealed class SidecarClient
         try
         {
             using var resp = await _http.GetAsync($"{BaseUrl}/health", ct);
-            return resp.IsSuccessStatusCode;
+            if (!resp.IsSuccessStatusCode) return false;
+            // Only adopt a listener that identifies as Foundry's CAD sidecar. A different local process that
+            // happens to answer 200 on this port must NOT be mistaken for ours (it could feed back fake
+            // geometry/STL results). The /health body is {"status":"ok","service":"foundry-cad",...}.
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return body.Contains("\"service\"", StringComparison.OrdinalIgnoreCase)
+                && body.Contains("foundry-cad", StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }

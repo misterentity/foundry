@@ -57,6 +57,10 @@ function parseIntelHex(text, size) {
       bytes.push(parseInt(line.substr(i, 2), 16));
     }
     if (bytes.length < 5) continue;
+    // Intel HEX record checksum: the sum of ALL record bytes (incl. the trailing checksum byte) is 0 mod 256.
+    // A mismatch (or a non-hex pair → NaN) means corrupt data — refuse it rather than simulating garbage.
+    const sum = bytes.reduce((a, b) => (a + b) & 0xff, 0);
+    if (sum !== 0) throw new Error("invalid Intel HEX: record checksum mismatch");
     const len = bytes[0];
     const addr = (bytes[1] << 8) | bytes[2];
     const type = bytes[3];

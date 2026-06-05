@@ -2026,6 +2026,8 @@ var Avr8Module = (() => {
         bytes.push(parseInt(line.substr(i, 2), 16));
       }
       if (bytes.length < 5) continue;
+      const sum = bytes.reduce((a, b) => a + b & 255, 0);
+      if (sum !== 0) throw new Error("invalid Intel HEX: record checksum mismatch");
       const len = bytes[0];
       const addr = bytes[1] << 8 | bytes[2];
       const type = bytes[3];
