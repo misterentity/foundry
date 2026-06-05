@@ -153,23 +153,69 @@ public class SimulationTests
 
     // ---- Pure Renode generators (FQBN-driven platform selection) ----
 
-    [Theory]
-    [InlineData("STM32:stm32:genericSTM32F407VGTx", "gpioPortA", "stm32f4.repl")]
-    [InlineData("rp2040:rp2040:rpipico", "gpio", "rp2040.repl")]
-    public void ReplPlatform_RoutesByFqbn(string fqbn, string node, string includeFragment)
+    [Fact]
+    public void ReplPlatform_Stm32_IsPerPort_WithStockInclude()
     {
-        var (gpioNode, include) = RenodeReplGenerator.Platform(fqbn);
-        Assert.Equal(node, gpioNode);
-        Assert.NotNull(include);
-        Assert.Contains(includeFragment, include);
+        var (gpioNode, include, perPort) = RenodeReplGenerator.Platform("STM32:stm32:genericSTM32F407VGTx");
+        Assert.Equal("gpioPort", gpioNode);   // node = gpioPort + <PortLetter> per pin
+        Assert.True(perPort);
+        Assert.Contains("stm32f4.repl", include);   // stock Renode platform
+    }
+
+    [Fact]
+    public void ReplPlatform_Rp2040_HasNoBundledPlatform_FailsLoud()
+    {
+        // Stock Renode doesn't ship rp2040.repl (community matgla model) — emit no include so a future
+        // un-gated run errors with "no platform" instead of silently mis-wiring.
+        var (gpioNode, include, perPort) = RenodeReplGenerator.Platform("rp2040:rp2040:rpipico");
+        Assert.Equal("gpio", gpioNode);
+        Assert.Null(include);
+        Assert.False(perPort);
     }
 
     [Fact]
     public void ReplPlatform_UnknownFqbn_FallsBackToGenericGpio()
     {
-        var (gpioNode, include) = RenodeReplGenerator.Platform("arduino:avr:uno");
+        var (gpioNode, include, perPort) = RenodeReplGenerator.Platform("arduino:avr:uno");
         Assert.Equal("gpio", gpioNode);
         Assert.Null(include);
+        Assert.False(perPort);
+    }
+
+    [Fact]
+    public void ReplGenerator_Stm32_WiresEachPinOnItsOwnPort_NoCollision()
+    {
+        // PA5 and PB5 share pin number 5 — the old generator hardwired both onto gpioPortA (collision).
+        var pins = new List<SimPin>
+        {
+            new(5, "ledA5", "X.A", "signal", Port: "A"),
+            new(5, "ledB5", "Y.B", "signal", Port: "B"),
+        };
+        var repl = RenodeReplGenerator.Build("STM32:stm32:genericSTM32F407VGTx", pins);
+        Assert.Contains("5 -> ledA5@0", repl);
+        Assert.Contains("ledA5: Miscellaneous.LED @ gpioPortA 5", repl);
+        Assert.Contains("5 -> ledB5@0", repl);
+        Assert.Contains("ledB5: Miscellaneous.LED @ gpioPortB 5", repl);
+        Assert.DoesNotContain("gpioPortA 5\n", repl.Replace("ledA5: Miscellaneous.LED @ gpioPortA 5", "")); // B5 not on portA
+    }
+
+    [Fact]
+    public void GpioPinMap_Stm32_KeepsPortDistinctPins()
+    {
+        var mcu = new Foundry.Core.Kb.ComponentSpec { Ref = "u", Alias = "MCU", Name = "STM32F407", LogicV = 3.3,
+            Pins = new() { new Foundry.Core.Kb.PinSpec { Name = "PA5", Kind = Foundry.Core.Kb.PinKind.Bidir },
+                           new Foundry.Core.Kb.PinSpec { Name = "PB5", Kind = Foundry.Core.Kb.PinKind.Bidir } } };
+        var d1 = new Foundry.Core.Kb.ComponentSpec { Ref = "d1", Alias = "D1", Name = "Dev1", Pins = new() { new Foundry.Core.Kb.PinSpec { Name = "IN", Kind = Foundry.Core.Kb.PinKind.Input } } };
+        var d2 = new Foundry.Core.Kb.ComponentSpec { Ref = "d2", Alias = "D2", Name = "Dev2", Pins = new() { new Foundry.Core.Kb.PinSpec { Name = "IN", Kind = Foundry.Core.Kb.PinKind.Input } } };
+        var conns = new List<Foundry.Core.Project.Connection>
+        {
+            new() { From = "MCU.PA5", To = "D1.IN", Net = "signal" },
+            new() { From = "MCU.PB5", To = "D2.IN", Net = "signal" },
+        };
+        var pins = GpioPinMap.Build(conns, new Foundry.Core.Kb.ComponentKb(new[] { mcu, d1, d2 }));
+        Assert.Equal(2, pins.Count);   // not collapsed by the shared pin number 5
+        Assert.Contains(pins, p => p.Port == "A" && p.Gpio == 5 && p.LedName == "ledA5");
+        Assert.Contains(pins, p => p.Port == "B" && p.Gpio == 5 && p.LedName == "ledB5");
     }
 
     [Fact]

@@ -19,8 +19,9 @@ public static class PinMap
 {
     private static readonly Regex GpioNum = new(@"(\d+)\s*$", RegexOptions.Compiled);
 
-    // GPIO-style pin names across the boards Foundry targets: GPIOn / GPn (Pico) / IOn / P0.n (nRF/STM) / Dn / An (Arduino).
-    private static readonly Regex McuPinName = new(@"^(GPIO|GP|IO|P\d+[._]|D|A)\d", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // GPIO-style pin names across the boards Foundry targets: GPIOn / GPn (Pico) / IOn / P0.n (nRF) /
+    // PA5,PB5… (STM32 port+pin) / Dn / An (Arduino).
+    private static readonly Regex McuPinName = new(@"^(GPIO|GP|IO|P[A-K]|P\d+[._]|D|A)\d", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>The alias acting as MCU = the netlist component with the MOST GPIO-style pins. Counting (rather
     /// than "has a pin starting with GPIO") catches Pico/AVR/nRF naming and avoids mis-picking a small part that

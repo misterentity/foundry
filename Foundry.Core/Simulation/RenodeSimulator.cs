@@ -40,18 +40,13 @@ public sealed class RenodeSimulator : ISimulator
         if (fqbn.Contains("avr") || fqbn.Contains("uno") || fqbn.Contains("nano") || fqbn.Contains("mega"))
             return SimCapability.No("AVR isn't emulated by Renode — the avr8js engine handles AVR boards.");
 
-        var supported = fqbn.Contains("stm32") || fqbn.Contains("rp2040") || fqbn.Contains("pico");
-        if (!supported)
-            return SimCapability.No("No live simulation model for this board — flash to run.");
-
-        var pins = GpioPinMap.Build(project.Connections, _kb);
-        if (pins.Count == 0)
-            return SimCapability.No("No MCU GPIO outputs in the netlist to simulate.");
-
-        if (!RenodeInstaller.IsInstalled)
-            return new SimCapability(true, Engine, "Renode not installed — install it to run live simulation.");
-
-        return SimCapability.Yes(Engine);
+        // HONEST GATE — still CLOSED. The STM32 generator bug is now fixed and unit-tested (GpioPinMap is
+        // port-aware; RenodeReplGenerator emits per-port gpioPort<X> nodes — see SimulationTests), but the LIVE
+        // path remains unproven: it has never been observed to run end-to-end (Renode isn't installed in dev/CI),
+        // and RP2040 has no bundled platform .repl at all (stock Renode lacks rp2040.repl). Keep it gated rather
+        // than letting RUN start and fail with a confusing Renode error. Lift this ONLY when
+        // RenodeLiveSmokeTest is observed green on a machine with Renode + the STM32 arduino core.
+        return SimCapability.No("Live simulation for STM32/RP2040 isn't wired up yet — flash to run. (AVR boards do simulate live.)");
     }
 
     public async Task<SimSession> StartAsync(Project.Project project, CancellationToken ct = default)

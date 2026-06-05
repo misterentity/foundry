@@ -95,7 +95,9 @@ public class FirmwareTests
     [InlineData("GP5")]      // Raspberry Pi Pico silkscreen
     [InlineData("D13")]      // Arduino digital
     [InlineData("A0")]       // Arduino analog
-    [InlineData("P0.28")]    // nRF / STM port.pin
+    [InlineData("P0.28")]    // nRF port.pin
+    [InlineData("PA5")]      // STM32 port A pin 5
+    [InlineData("PB5")]      // STM32 port B pin 5 (shares the pin number with PA5 — must still detect)
     public void DetectMcuAlias_FindsNonGpioNamedMcus(string mcuPinName)
     {
         // Before the fix only pins literally starting with "GPIO" were recognized, so Pico/AVR/nRF MCUs went
