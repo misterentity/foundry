@@ -27,8 +27,8 @@ public sealed partial class ProjectGenerator
     }
 
     private const string SystemPrompt = """
-You are Foundry, an AI hardware-design studio. Given a maker's request, design a complete, buildable
-electronics project and return it as ONE JSON object — no prose, no markdown fences. Use this exact shape:
+You are Foundry, an AI hardware-design studio. Given a maker's request, design a complete, buildable,
+electrically-correct electronics project and return it as ONE JSON object. Use this exact shape:
 
 {
  "title": "short product name",
@@ -39,10 +39,14 @@ electronics project and return it as ONE JSON object — no prose, no markdown f
                  "inputV":[3.0,5.5],"currentMa":80,
                  "pins":[{"name":"3V3","kind":"power"},{"name":"GND","kind":"ground"},
                          {"name":"GPIO34","kind":"analog","inputOnly":true},
-                         {"name":"GPIO0","kind":"bidir","strapping":true}]}],
+                         {"name":"GPIO0","kind":"bidir","strapping":true}]},
+                {"alias":"REG","ref":"ldo_3v3","name":"3.3 V LDO (AMS1117-3.3)","outputV":3.3,
+                 "inputV":[4.5,12.0],"currentMa":1,
+                 "pins":[{"name":"VIN","kind":"power"},{"name":"GND","kind":"ground"},{"name":"VOUT","kind":"power"}]}],
  "bom": [{"qty":1,"name":"ESP32 DevKit v1","mpn":"ESP32-DEVKITC-32E","price":8.5,"stock":1442,
           "lead":"Stock","dist":"DigiKey","note":"Wi-Fi MCU"}],
- "connections": [{"from":"MCU.GPIO34","to":"SENSOR.AOUT","net":"signal"}],
+ "connections": [{"from":"MCU.GPIO34","to":"SENSOR.AOUT","net":"signal"},
+                 {"from":"MCU.GPIO21","to":"SENSOR.SDA","net":"i2c"}],
  "enclosure": {"inner":[62,48,26],"wall":2.0,"lid":"screw","standoffs":4,"mount":"wall-tabs",
                "cutouts":[{"face":"front","shape":"rect","size":[9.5,3.5],"pos":[0,-6],"label":"USB-C"},
                           {"face":"top","shape":"circle","d":6,"pos":[40,10],"label":"Reset button"},
@@ -52,19 +56,37 @@ electronics project and return it as ONE JSON object — no prose, no markdown f
  "assembly": [{"title":"Prepare the enclosure","body":"...","chips":["enclosure.stl"]}]
 }
 
-Rules: connection endpoints are "ALIAS.PIN" using the component aliases and pin names you define in
-"components". Net is one of power|ground|signal|i2c. Every component needs power and ground nets where
-applicable. Pin kind is power|ground|input|output|bidir|analog. Mark input-only and strapping pins.
+OUTPUT CONTRACT — read this first, it is the most common failure:
+- Return the JSON object and NOTHING else. No prose before or after, no markdown fences, no comments.
+- Emit STRICT, valid JSON: double-quote every key and string, no trailing commas, no single quotes, no
+  // or /* */ comments, no NaN/Infinity, no unquoted identifiers, numbers as plain JSON (3.3 not "3.3 V").
+- Escape characters inside strings (\", \\, \n). Keep it compact — finish the object; never stop mid-token.
+- Use only the fields shown. Do not wrap the object in another key.
 
-Power source — ALWAYS include it (never omit it):
-- Portable/battery designs: add the battery as a component AND a BOM line, with realistic "capacityMah"
-  (e.g. a single 18650 ≈ 3000), plus its charger/regulator (e.g. TP4056 + 3.3 V LDO) as components/BOM.
+ELECTRICAL RULES:
+- Connection endpoints are "ALIAS.PIN" using the aliases and pin names you define in "components". Every
+  endpoint pin MUST exist on its component. Net is one of power|ground|signal|i2c.
+- Pin kind is power|ground|input|output|bidir|analog. Mark input-only pins ("inputOnly":true) and strapping
+  pins ("strapping":true) so validation can avoid them. Never wire a sensed input to an input-only or
+  strapping pin if a normal GPIO is free.
+- Voltage: a component's "logicV" is its I/O level; "inputV":[min,max] is its supply tolerance. For any part
+  that SOURCES a rail (battery, regulator, AC-DC module, USB/DC input) set "outputV" to the rail voltage it
+  produces — validation identifies supplies by outputV, so omitting it breaks the power check. Don't drive a
+  3.3 V logic input directly from a 5 V output; add a level shifter or divider as a real part when levels differ.
+- Shared buses: put every device on one I²C bus on the SAME two nets (one SDA net, one SCL net) — don't
+  duplicate per-device. Add ONE pair of pull-up resistors (e.g. 4.7 kΩ) to the bus as components + BOM.
+- Add the passives a real board needs: a series resistor for every indicator LED, decoupling where it matters,
+  and the I²C pull-ups above — as components AND BOM lines. These are checked by validation.
+
+POWER SOURCE — ALWAYS include it (never omit it):
+- Portable/battery: add the battery as a component AND BOM line with realistic "capacityMah" (a single
+  18650 ≈ 3000), plus its charger/regulator (e.g. TP4056 + 3.3 V LDO) as components/BOM, regulator "outputV" set.
 - USB- or DC-jack-powered: add the input (USB-C / DC jack) + regulator as components and BOM lines.
-- Mains/AC-powered (relays, triacs, AC loads): add an ISOLATED AC-DC supply (e.g. HLK-PM01 5 V module)
-  as a component and BOM line — never leave a mains design without its low-voltage supply.
+- Mains/AC-powered (relays, triacs, AC loads): add an ISOLATED AC-DC supply (e.g. HLK-PM01 5 V module) as a
+  component and BOM line — never leave a mains design without its low-voltage supply.
 - Wire the power/ground rails from the source through the regulator to each component.
 
-Enclosure — design it for THIS device, not a generic box:
+ENCLOSURE — design it for THIS device, not a generic box:
 - Size inner [L,W,H] (mm) to the actual parts plus ~3–5 mm clearance and the standoff height; don't guess round numbers.
 - Add a cutout for EVERY external interface: USB/DC-power, each connector/header, buttons, status LEDs (small
   circle d≈3 as a light pipe), displays, sensor windows/probes, antenna. Put each on the face it naturally exits;
@@ -75,6 +97,7 @@ Enclosure — design it for THIS device, not a generic box:
   >300 mA draw, or a sealed warm part); omit for cool/low-power designs.
 - "mount": "none" | "wall-tabs" (flanged screw tabs) | "flange" — pick for how it installs (a wall sensor → wall-tabs).
 - "lid": "snap" for easy indoor access, "screw" for outdoor/secure/vibration. "standoffs": PCB mount-hole count (0–4).
+
 Output ONLY the JSON object.
 """;
 
@@ -95,7 +118,9 @@ Output ONLY the JSON object.
         for (int attempt = 1; attempt <= 2 && json is null; attempt++)
         {
             var user = attempt == 1 ? prompt
-                : prompt + "\n\n(Return the COMPLETE JSON object only — no prose, no markdown fences, and keep it compact enough to finish.)";
+                : prompt + "\n\n(Your previous reply was not parseable JSON. Return ONE complete, strictly-valid JSON "
+                    + "object and nothing else: no prose, no markdown fences, no comments, no trailing commas, all "
+                    + "keys and strings double-quoted, numbers plain. Keep it compact enough to finish the object.)";
             string raw;
             try { raw = await _ai.CompleteAsync(SystemPrompt, user, _model, ct); }
             catch (Exception ex)
@@ -104,7 +129,10 @@ Output ONLY the JSON object.
                 return new GenerationResult(false, null, $"Generation failed: {ex.Message}");
             }
             json = ExtractJson(raw);
-            if (json is null) Diagnostics.AppLog.Warn("generation", $"attempt {attempt}: invalid/truncated JSON ({raw.Length} chars)");
+            // Don't guess the cause here: AnthropicClient already emits an authoritative "TRUNCATED" WARN when
+            // the model hit the token cap (stop_reason=max_tokens). If you see ONLY this line, the model stopped
+            // normally but emitted unparseable JSON (stray prose, a syntax slip) — the retry usually recovers it.
+            if (json is null) Diagnostics.AppLog.Warn("generation", $"attempt {attempt}: could not parse JSON from the response ({raw.Length} chars) — retrying");
         }
         if (json is null) return new GenerationResult(false, null, "The model did not return valid JSON after a retry. Try simplifying the prompt.");
 

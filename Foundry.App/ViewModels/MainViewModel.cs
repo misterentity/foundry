@@ -100,7 +100,7 @@ public sealed partial class MainViewModel : ObservableObject
         KeyDotSeverity = hasKey ? "ok" : "warn";
     }
 
-    /// <summary>"claude-opus-4-7" → "CLAUDE · OPUS 4.7" (prefers the catalog display name).</summary>
+    /// <summary>"claude-opus-4-8" → "CLAUDE · OPUS 4.8" (prefers the catalog display name).</summary>
     private static string FormatModel(string id)
     {
         var dn = ModelCatalog.Fallback.FirstOrDefault(m => m.Id == id)?.DisplayName;

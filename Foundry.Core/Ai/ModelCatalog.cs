@@ -12,7 +12,7 @@ public static class ModelCatalog
 
     public static readonly IReadOnlyList<ClaudeModel> Fallback = new[]
     {
-        new ClaudeModel("claude-opus-4-6",          "Claude Opus 4.6",   "Most capable; best for complex full designs"),
+        new ClaudeModel("claude-opus-4-8",          "Claude Opus 4.8",   "Most capable; best for complex full designs + long structured JSON"),
         new ClaudeModel("claude-sonnet-4-6",        "Claude Sonnet 4.6", "Recommended default; fast + strong"),
         new ClaudeModel("claude-haiku-4-5-20251001","Claude Haiku 4.5",  "Fastest/cheapest; good for small chat edits"),
     };

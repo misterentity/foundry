@@ -39,9 +39,9 @@ public sealed partial class ProjectGenerator
             var json = ExtractJson(raw);
             if (json is null)
             {
-                // Don't silently keep the stub: a null result here is usually a truncated/invalid AI response
-                // (see the max_tokens WARN in AnthropicClient). Make the fallback visible.
-                Diagnostics.AppLog.Warn("generation", $"firmware pass returned no usable JSON ({raw.Length} chars, likely truncated) — keeping the deterministic firmware.");
+                // Don't silently keep the stub: a null result here means unparseable JSON. If it was a token-cap
+                // truncation, AnthropicClient already logged the authoritative "TRUNCATED" WARN; make the fallback visible either way.
+                Diagnostics.AppLog.Warn("generation", $"firmware pass returned no usable JSON ({raw.Length} chars) — keeping the deterministic firmware.");
                 return;
             }
 
@@ -112,22 +112,32 @@ public sealed partial class ProjectGenerator
     }
 
     private const string FirmwareSystemPrompt = """
-You are a senior embedded-firmware engineer. Write COMPLETE, working firmware for the exact device
-described — real application logic, not a skeleton: initialize every peripheral, implement the
+You are a senior embedded-firmware engineer. Write COMPLETE, working, COMPILABLE firmware for the exact
+device described — real application logic, not a skeleton: initialize every peripheral, implement the
 protocols it needs (Wi-Fi/MQTT/HTTP/BLE/I2C/SPI/ADC as appropriate), the main control loop, timing,
-and sensible defaults. The primary sketch MUST be named exactly "main.ino" (Arduino C++) or "main.py"
-(MicroPython) — name it nothing else. The main file MUST include the supplied pin map
-(`#include "pinmap.h"` for Arduino, `from pinmap import *` for MicroPython) and use its PIN_* macros
-verbatim for every pin — never hard-code, rename, redefine, or invent pin macros not in the supplied map.
-Put secrets (Wi-Fi creds, tokens) as clearly-marked #define/constant placeholders in a separate config
-file. Use only widely-available libraries. Return ONLY one JSON object, no prose:
+debouncing/error handling, and sensible defaults. Code must compile cleanly against the standard core for
+the board (no invented APIs, no pseudo-code, no TODO stubs in the control path).
+
+Pin + structure rules:
+- The primary sketch MUST be named exactly "main.ino" (Arduino C++) or "main.py" (MicroPython) — nothing else.
+- The main file MUST include the supplied pin map (`#include "pinmap.h"` for Arduino, `from pinmap import *`
+  for MicroPython) and use its PIN_* macros verbatim for every pin — never hard-code, rename, redefine, or
+  invent pin macros not in the supplied map. Do NOT emit the pin-map file yourself; it is supplied.
+- Put secrets (Wi-Fi creds, tokens, broker host) as clearly-marked #define/constant placeholders in a SEPARATE
+  config file (config.h / config.py), and reference them from main — never inline real credentials.
+- Use only widely-available, named libraries; list each in "libraries" with the version you target.
+
+OUTPUT CONTRACT — return ONE strictly-valid JSON object and NOTHING else (no prose, no markdown fences):
 {
  "platform": "Arduino C++" | "MicroPython",
  "board": "esp32:esp32:esp32",
  "files": [{"name":"main.ino","content":"<full source>"}, {"name":"config.h","content":"..."}],
  "libraries": [["WiFi","built-in"], ["PubSubClient","2.8"]]
 }
-Include the main sketch and any helper/config files. Do NOT include the pin-map file (it is supplied).
+Source goes in the "content" string: escape it as valid JSON (\" for quotes, \\ for backslashes, \n for
+newlines) — never use raw newlines or unescaped quotes inside a JSON string. No trailing commas, no comments
+in the JSON itself (code comments inside "content" are fine). Keep the whole object compact enough to finish;
+do not stop mid-file. Include the main sketch plus any helper/config files; omit the supplied pin-map file.
 """;
 
     /// <summary>The sketch to show/flash first: a main.* file if present, else the largest source file.</summary>
