@@ -49,3 +49,45 @@ public class CredentialMaskTests
         Assert.True(revealed <= Math.Max(0, len - 4), $"len {len}: revealed {revealed}");
     }
 }
+
+// Round-trips a secret through the REAL Windows Credential Manager (per-user, DPAPI) — the storage path that
+// was previously green-by-omission. Windows-only; uses a unique throwaway target and always cleans up.
+public class CredentialStoreRoundTripTests
+{
+    [Fact]
+    public void SaveReadDelete_RoundTrips()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var store = new CredentialStore();
+        var target = $"Foundry:Test:{Guid.NewGuid():N}";
+        var secret = "sk-ant-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            Assert.Null(store.Read(target));            // not there yet
+            store.Save(target, secret);
+            Assert.Equal(secret, store.Read(target));   // exact round-trip
+            Assert.True(store.Exists(target));
+            store.Delete(target);
+            Assert.Null(store.Read(target));            // gone
+            Assert.False(store.Exists(target));
+        }
+        finally { try { store.Delete(target); } catch { } }
+    }
+
+    [Fact]
+    public void Save_OverwritesExistingSecret()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var store = new CredentialStore();
+        var target = $"Foundry:Test:{Guid.NewGuid():N}";
+        try
+        {
+            store.Save(target, "first");
+            store.Save(target, "second");
+            Assert.Equal("second", store.Read(target));
+        }
+        finally { try { store.Delete(target); } catch { } }
+    }
+}

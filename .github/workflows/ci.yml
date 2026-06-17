@@ -33,8 +33,8 @@ jobs:
           git diff --exit-code -- dist/avr8js-runtime.js
           if ($LASTEXITCODE -ne 0) { Write-Error "dist/avr8js-runtime.js is STALE — run 'npm run build' in sidecar-avr and commit it." }
 
-      - name: Unit tests
-        run: dotnet test Foundry.Tests -c Release --nologo
+      - name: Unit tests (Core + App ViewModels)
+        run: dotnet test Foundry.sln -c Release --nologo
 
       - name: build_board.py pad-assignment unit tests (pytest, no KiCad)
         run: |

@@ -92,8 +92,8 @@ jobs:
         shell: pwsh
         run: ./build/sign.ps1 -Target "build/publish/Foundry.exe"
 
-      - name: Test
-        run: dotnet test Foundry.Tests -c Release
+      - name: Test (Core + App ViewModels)
+        run: dotnet test Foundry.sln -c Release
 
       - uses: actions/setup-python@v5
         with:
