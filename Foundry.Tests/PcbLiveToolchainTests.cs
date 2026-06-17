@@ -287,6 +287,53 @@ public class PcbLiveToolchainTests
         finally { try { Directory.Delete(outDir, true); } catch { } }
     }
 
+    [Fact]
+    public async Task Stm32BluePill_BareChipInGenericPackage_ResolvesByPartIdentity()
+    {
+        if (!KiCadPresent) return;
+
+        // An STM32F103C8 lives in the GENERIC Package_QFP:LQFP-48 footprint (shared by many chips), so the pin
+        // map can't be keyed on the footprint — ChipCatalog identifies the PART and points SymbolPinMap at the
+        // STM32F103C8Tx symbol. Authoritative unique pads: PA0→10, PB1→19 (3V3/GND have multiple pads → we only
+        // assert the single-pad signals + that nothing is left unmapped). This is the part-identity path.
+        var p = new Project
+        {
+            Title = "STM32 Blue Pill board",
+            Components = new()
+            {
+                new ComponentSpec { Alias = "U1", Ref = "stm32", Name = "STM32F103C8 (Blue Pill)" },
+                new ComponentSpec { Alias = "R1", Ref = "r1", Name = "10k resistor" },
+                new ComponentSpec { Alias = "R2", Ref = "r2", Name = "10k resistor" },
+                new ComponentSpec { Alias = "C1", Ref = "cap", Name = "100nF capacitor" },
+            },
+            Connections = new()
+            {
+                new Connection { From = "U1.PA0", To = "R1.1", Net = "a" },
+                new Connection { From = "U1.PB1", To = "R2.1", Net = "b" },
+                new Connection { From = "U1.3V3", To = "C1.1", Net = "pwr" },   // 3V3 → VDD pad
+                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },   // GND → VSS pad
+                new Connection { From = "R1.2", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R2.2", To = "C1.2", Net = "gnd" },
+            },
+        };
+        var outDir = OutDir();
+        try
+        {
+            var r = await PcbBuilder.BuildAsync(p, outDir);
+            Assert.True(r.Installed);
+            Assert.True(r.Ok, $"STM32 board not verified: {r.Summary}; unmapped=[{string.Join(",", r.UnmappedPins)}]");
+            Assert.Empty(r.UnmappedPins);
+            Assert.NotNull(r.KicadPcbPath);
+
+            var padNets = ReadPadNets(await File.ReadAllTextAsync(r.KicadPcbPath!));
+            string Net(string @ref, string pad) => padNets[@ref][pad];
+            Assert.Equal(Net("U1", "10"), Net("R1", "1"));   // PA0 → pad 10
+            Assert.Equal(Net("U1", "19"), Net("R2", "1"));   // PB1 → pad 19
+            Assert.NotEqual(Net("U1", "10"), Net("U1", "19"));   // distinct signals on distinct pads
+        }
+        finally { try { Directory.Delete(outDir, true); } catch { } }
+    }
+
     // ---- minimal .kicad_pcb readback: ref -> (pad name -> net name) ---------------------------------
 
     /// <summary>Parse footprint blocks into ref → (pad → net name). Paren-matching skips quoted strings so

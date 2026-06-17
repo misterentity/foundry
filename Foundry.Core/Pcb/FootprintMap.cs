@@ -39,6 +39,11 @@ public static class FootprintMap
         if (!string.IsNullOrWhiteSpace(spec.Footprint))
             return new FootprintChoice(spec.Footprint!.Trim(), false, "explicit");
 
+        // A known bare chip in a generic package (e.g. STM32F103C8 → LQFP-48): use its real package footprint
+        // so its pins resolve via the chip's symbol (ChipCatalog/SymbolPinMap), not the fail-closed placeholder.
+        if (ChipCatalog.Match(spec.Name) is { } chip)
+            return new FootprintChoice(chip.FootprintLibId, false, "chip-catalog");
+
         var n = Math.Max(1, pinCount);
         var hay = (spec.Name + " " + spec.Ref).ToLowerInvariant();
         var sizeId = SizeMetric.TryGetValue(SizeToken.Match(hay).Value, out var m) ? m : null;

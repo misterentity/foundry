@@ -41,6 +41,18 @@ public static class SymbolPinMap
         return map is not null && map.TryGetValue(Canonical(logicalPin), out var pad) ? pad : null;
     }
 
+    /// <summary>Resolve a logical pin to a pad using an EXPLICIT KiCad symbol (lib + name), not the footprint —
+    /// for bare chips in a generic package where the part identity (not the footprint) selects the pinout
+    /// (see <see cref="ChipCatalog"/>). Null when the symbol/pin can't be resolved (caller fails closed).</summary>
+    public static string? ResolvePadBySymbol(string symbolLib, string symbolName, string logicalPin, string? symbolDir)
+    {
+        if (string.IsNullOrEmpty(symbolDir) || string.IsNullOrEmpty(symbolLib) ||
+            string.IsNullOrEmpty(symbolName) || string.IsNullOrEmpty(logicalPin))
+            return null;
+        var map = Cache.GetOrAdd($"{symbolDir}|{symbolLib}|{symbolName}", _ => Parse(symbolDir, symbolLib, symbolName));
+        return map is not null && map.TryGetValue(Canonical(logicalPin), out var pad) ? pad : null;
+    }
+
     private static IReadOnlyDictionary<string, string>? MapFor(string footprintLibId, string symbolDir)
     {
         (string Lib, string Name) sym;

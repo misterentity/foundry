@@ -111,13 +111,19 @@ public sealed record PcbJob(
         {
             var pos = placement[alias];
             var libId = choiceByRef[alias].LibId;
+            // A bare chip in a GENERIC package is identified by the PART (ChipCatalog), not the footprint.
+            var chip = ChipCatalog.Match(SpecFor(project, alias).Name);
             // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6). Resolution order:
-            // curated McuPinMap (fast, KiCad-free, chip-specific aliases) → symbol-derived SymbolPinMap (any
-            // KiCad part, when a symbol dir is available) → keep the logical name, which then falls through to
-            // the fail-closed gate in build_board.py (refused), never ordinal-guessed.
+            // curated McuPinMap (fast, KiCad-free, chip-specific aliases) → SymbolPinMap by FOOTPRINT (part-
+            // specific module footprints) → SymbolPinMap by PART identity (ChipCatalog, for chips in generic
+            // packages) → keep the logical name, which falls through to the fail-closed gate in build_board.py
+            // (refused), never ordinal-guessed.
             var padNetList = FootprintMap.PadNetList(alias, endpointNets)
                 .Select(pn => new PcbPadNet(
-                    McuPinMap.ResolvePad(libId, pn.Pin) ?? SymbolPinMap.ResolvePad(libId, pn.Pin, symbolDir) ?? pn.Pin,
+                    McuPinMap.ResolvePad(libId, pn.Pin)
+                        ?? SymbolPinMap.ResolvePad(libId, pn.Pin, symbolDir)
+                        ?? (chip is not null ? SymbolPinMap.ResolvePadBySymbol(chip.SymbolLib, chip.SymbolName, pn.Pin, symbolDir) : null)
+                        ?? pn.Pin,
                     pn.Net))
                 .ToList();
             return new PcbJobComponent(alias, libId, pos.XMm, pos.YMm, pos.Rot,
