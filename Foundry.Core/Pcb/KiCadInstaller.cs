@@ -195,7 +195,22 @@ public static class KiCadInstaller
         proc.Start();
         var stdout = proc.StandardOutput.ReadToEndAsync(ct);
         var stderr = proc.StandardError.ReadToEndAsync(ct);
-        await proc.WaitForExitAsync(ct);
+
+        // Bound the installer: a wedged winget/NSIS run (stalled download, unexpected prompt) must not hang
+        // the install forever, and must not leave the installer process running when we give up.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(20));
+        try
+        {
+            await proc.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            if (!ct.IsCancellationRequested)   // our timeout fired (not the caller's cancellation)
+                throw new TimeoutException($"{System.IO.Path.GetFileName(fileName)} did not finish within 20 minutes.");
+            throw;
+        }
         var err = (await stderr).Trim();
         if (!string.IsNullOrEmpty(err)) AppLog.Warn("pcb", $"{System.IO.Path.GetFileName(fileName)}: {err}");
         return proc.ExitCode;

@@ -15,6 +15,10 @@ public sealed class SidecarHost : IDisposable
 
     private Process? _process;
     private SidecarClient? _client;
+    // Bounded tail of the child's stderr, surfaced if it fails to come up. Draining the pipes is what prevents
+    // the deadlock — a long-lived child whose redirected stdout/stderr is never read blocks once the OS pipe
+    // buffer fills (uvicorn logs every request), wedging the CAD sidecar with no error.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _stderrTail = new();
 
     public static SidecarHost Shared { get; } = new();
 
@@ -52,16 +56,31 @@ public sealed class SidecarHost : IDisposable
 
             try
             {
-                _process = Process.Start(new ProcessStartInfo
+                _process = new Process
                 {
-                    FileName = fileName,
-                    Arguments = args!,
-                    WorkingDirectory = workDir!,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardError = true,
-                    RedirectStandardOutput = true,
-                });
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = fileName,
+                        Arguments = args!,
+                        WorkingDirectory = workDir!,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true,
+                    },
+                };
+                // Drain both pipes asynchronously so the child can never block writing to a full buffer.
+                // stdout is discarded (uvicorn access logs); a bounded tail of stderr is kept for diagnostics.
+                _process.OutputDataReceived += (_, _) => { };
+                _process.ErrorDataReceived += (_, e) =>
+                {
+                    if (e.Data is null) return;
+                    _stderrTail.Enqueue(e.Data);
+                    while (_stderrTail.Count > 30) _stderrTail.TryDequeue(out string _);
+                };
+                _process.Start();
+                _process.BeginOutputReadLine();
+                _process.BeginErrorReadLine();
             }
             catch (Exception ex)
             {
@@ -69,26 +88,36 @@ public sealed class SidecarHost : IDisposable
                 return null;
             }
 
-            // Poll /health until ready (~10s).
-            for (int i = 0; i < 40; i++)
+            try
             {
-                if (_process is { HasExited: true })
+                // Poll /health until ready (~10s).
+                for (int i = 0; i < 40; i++)
                 {
-                    StatusMessage = $"sidecar exited (code {_process.ExitCode})";
-                    return null;
+                    if (_process is { HasExited: true })
+                    {
+                        StatusMessage = $"sidecar exited (code {_process.ExitCode})";
+                        Diagnostics.AppLog.Warn("sidecar", $"exited (code {_process.ExitCode}){StderrTail()}");
+                        return null;
+                    }
+                    if (await probe.HealthAsync(ct))
+                    {
+                        _client = probe;
+                        StatusMessage = $"{kind} · {baseUrl}";
+                        Diagnostics.AppLog.Info("sidecar", $"online · {kind} · {baseUrl}");
+                        return _client;
+                    }
+                    await Task.Delay(250, ct);
                 }
-                if (await probe.HealthAsync(ct))
-                {
-                    _client = probe;
-                    StatusMessage = $"{kind} · {baseUrl}";
-                    Diagnostics.AppLog.Info("sidecar", $"online · {kind} · {baseUrl}");
-                    return _client;
-                }
-                await Task.Delay(250, ct);
+                StatusMessage = "sidecar health-check timed out";
+                Diagnostics.AppLog.Warn("sidecar", $"health-check timed out{StderrTail()}");
+                return null;
             }
-            StatusMessage = "sidecar health-check timed out";
-            Diagnostics.AppLog.Warn("sidecar", "health-check timed out");
-            return null;
+            catch (OperationCanceledException)
+            {
+                // The caller cancelled mid-startup — don't orphan the half-started child until app exit.
+                KillProcess();
+                throw;
+            }
         }
         finally { Gate.Release(); }
     }
@@ -158,12 +187,21 @@ public sealed class SidecarHost : IDisposable
         return null;
     }
 
-    public void Dispose()
+    /// <summary>Last few stderr lines (if any), formatted for a log line.</summary>
+    private string StderrTail() =>
+        _stderrTail.IsEmpty ? "" : " — last stderr:\n" + string.Join("\n", _stderrTail);
+
+    private void KillProcess()
     {
         try { if (_process is { HasExited: false }) _process.Kill(entireProcessTree: true); }
         catch { /* best effort */ }
         _process?.Dispose();
         _process = null;
+    }
+
+    public void Dispose()
+    {
+        KillProcess();
         _client = null;
     }
 }

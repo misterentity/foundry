@@ -83,3 +83,25 @@ jobs:
 
       - name: Live PCB toolchain tests (real KiCad/FreeRouting -> pad->net readback, fail-closed refusal, DRC-clean gerber ZIP)
         run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLive"
+
+  # The avr8js live-sim chain: compile a real Uno blink sketch with arduino-cli and run it through avr8js in V8,
+  # asserting real D13 edges surface through the same SimSession contract the breadboard uses. Without arduino-cli
+  # installed the smoke test self-skips, so CI never exercised the live AVR sim — this lane makes it real.
+  live-sim:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install arduino-cli + AVR core
+        shell: pwsh
+        run: |
+          choco install arduino-cli -y --no-progress
+          arduino-cli core update-index
+          arduino-cli core install arduino:avr
+
+      - name: avr8js live-sim smoke test (real Uno blink -> D13 edges through V8)
+        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~Avr8jsLiveSmokeTest"
