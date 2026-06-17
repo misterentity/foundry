@@ -195,13 +195,13 @@ public partial class App : Application
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     /// <summary>
-    /// Trust gate for an auto-downloaded installer (FAIL-CLOSED). Resolves the running app's and the installer's
-    /// Authenticode certs, then defers the decision to the pure, unit-tested <see cref="Foundry.Core.Update.UpdateTrustPolicy"/>.
-    /// When the app is SIGNED the installer must carry a valid Authenticode signature from the SAME publisher
-    /// (thumbprint pin via WinVerifyTrust). When the app is UNSIGNED — the current state — there is no publisher
-    /// to pin to, so the update is REFUSED rather than run unverified; the caller then offers a manual install
-    /// from the releases page. Code-sign the app + installer (SIGN_PFX_BASE64/SIGN_PASSWORD) to enable seamless
-    /// auto-update.
+    /// Trust gate for an auto-downloaded installer (STRICT-WHEN-SIGNED). Resolves the running app's and the
+    /// installer's Authenticode certs, then defers the decision to the pure, unit-tested
+    /// <see cref="Foundry.Core.Update.UpdateTrustPolicy"/>. When the app is SIGNED the installer must carry a
+    /// valid Authenticode signature from the SAME publisher (thumbprint pin via WinVerifyTrust) or it is refused.
+    /// When the app is UNSIGNED — the current distribution choice — there is no publisher to pin to, so the
+    /// update is allowed (the user still confirms the install) to keep one-click auto-update working. Code-sign
+    /// the app + installer (SIGN_PFX_BASE64/SIGN_PASSWORD) to automatically engage the strict publisher-pinned gate.
     /// </summary>
     private static bool InstallerTrusted(string path)
     {

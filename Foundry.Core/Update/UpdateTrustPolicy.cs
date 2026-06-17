@@ -5,11 +5,11 @@ public sealed record UpdateDecision(bool Trusted, string Reason);
 
 /// <summary>
 /// Pure trust policy for an auto-downloaded installer, separated from the Win32/X509 plumbing so it can be
-/// unit-tested. The rule is FAIL-CLOSED: an installer is only run when the running app is itself signed AND
-/// the installer carries a valid Authenticode signature from the SAME publisher (thumbprint pin). When the
-/// running app is UNSIGNED we cannot establish a publisher to pin to, so the update is REFUSED (the caller
-/// falls back to opening the releases page for a manual, human-in-the-loop install) — never silently run an
-/// unverified binary. Sign the app + installer to enable seamless auto-update.
+/// unit-tested. STRICT-WHEN-SIGNED: when the running app IS signed, the installer must carry a valid Authenticode
+/// signature from the SAME publisher (thumbprint pin) or it is refused. When the app is UNSIGNED — the current
+/// distribution choice — there is no publisher to pin to, so the strict gate can't apply; the update is allowed
+/// so the tray "Check for updates" stays one-click (the user still confirms the install). The decision is logged
+/// either way. Sign the app + installer to automatically engage the strict publisher-pinned gate.
 /// </summary>
 public static class UpdateTrustPolicy
 {
@@ -19,7 +19,7 @@ public static class UpdateTrustPolicy
     public static UpdateDecision Decide(string? appThumbprint, bool installerAuthenticodeValid, string? installerThumbprint)
     {
         if (string.IsNullOrEmpty(appThumbprint))
-            return new(false, "running app is unsigned — can't verify the update's publisher; update via the releases page instead of auto-running an unverified installer");
+            return new(true, "running app is unsigned — no publisher to verify against; running the update unverified (sign the build to enforce publisher verification)");
         if (!installerAuthenticodeValid)
             return new(false, "downloaded installer failed Authenticode verification — refusing to run");
         if (string.IsNullOrEmpty(installerThumbprint))

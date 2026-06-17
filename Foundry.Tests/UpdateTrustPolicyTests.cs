@@ -4,13 +4,14 @@ namespace Foundry.Tests;
 
 public class UpdateTrustPolicyTests
 {
-    // The headline fix: an UNSIGNED running app must REFUSE the update (fail-closed), not run an unverified
-    // installer. This is the case that was previously fail-open (auto-run an unverified binary = RCE exposure).
+    // Unsigned build (the current distribution choice): there's no publisher to pin to, so the strict gate
+    // can't apply — allow the auto-update so the tray "Check for updates" stays one-click. The strict path
+    // below auto-engages the moment the app IS signed. The reason is logged so the unverified run is visible.
     [Fact]
-    public void UnsignedApp_IsRefused()
+    public void UnsignedApp_IsAllowed_NoPublisherToVerify()
     {
-        var d = UpdateTrustPolicy.Decide(appThumbprint: null, installerAuthenticodeValid: true, installerThumbprint: "ABC123");
-        Assert.False(d.Trusted);
+        var d = UpdateTrustPolicy.Decide(appThumbprint: null, installerAuthenticodeValid: false, installerThumbprint: null);
+        Assert.True(d.Trusted);
         Assert.Contains("unsigned", d.Reason);
     }
 
