@@ -82,8 +82,17 @@ public sealed class GitHubUpdater
         }
     }
 
-    public async Task<string> DownloadAsync(string url, string fileName, IProgress<double>? progress = null, CancellationToken ct = default)
+    /// <summary>
+    /// Stream the installer to a temp file. Because we read with <see cref="HttpCompletionOption.ResponseHeadersRead"/>,
+    /// the <see cref="HttpClient.Timeout"/> only bounds the header fetch — the body copy is NOT timed by it, so a
+    /// wedged connection mid-download would otherwise hang the update forever. A per-read STALL WATCHDOG aborts
+    /// with <see cref="TimeoutException"/> when no bytes arrive within <paramref name="stallTimeout"/> (default 60s),
+    /// without capping a legitimately slow-but-progressing download.
+    /// </summary>
+    public async Task<string> DownloadAsync(string url, string fileName, IProgress<double>? progress = null,
+        TimeSpan? stallTimeout = null, CancellationToken ct = default)
     {
+        var stall = stallTimeout ?? TimeSpan.FromSeconds(60);
         var dest = Path.Combine(Path.GetTempPath(), fileName);
         using var resp = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
@@ -93,9 +102,23 @@ public sealed class GitHubUpdater
         await using var dst = File.Create(dest);
         var buffer = new byte[81920];
         long read = 0;
-        int n;
-        while ((n = await src.ReadAsync(buffer, ct)) > 0)
+        while (true)
         {
+            // Reset the watchdog each read: it fires only when NO progress is made for `stall`, so a slow link
+            // that keeps delivering bytes is fine while a fully stalled one is aborted.
+            using var stallCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            stallCts.CancelAfter(stall);
+            int n;
+            try
+            {
+                n = await src.ReadAsync(buffer, stallCts.Token);
+            }
+            catch (OperationCanceledException) when (stallCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                try { File.Delete(dest); } catch { /* best-effort cleanup of the partial file */ }
+                throw new TimeoutException($"Update download stalled — no data for {stall.TotalSeconds:0}s. Try again or update from the releases page.");
+            }
+            if (n <= 0) break;
             await dst.WriteAsync(buffer.AsMemory(0, n), ct);
             read += n;
             if (total > 0) progress?.Report((double)read / total);

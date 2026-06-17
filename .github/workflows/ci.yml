@@ -68,5 +68,18 @@ jobs:
         shell: pwsh
         run: kicad-cli version
 
-      - name: Live PCB toolchain tests (real KiCad -> build, pad->net readback, fail-closed refusal)
-        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLiveToolchainTests"
+      # FreeRouting (Java 25 + the pinned jar) so the fab e2e test routes a real board to DRC-clean + gerber ZIP.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Fetch FreeRouting jar
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Foundry\tools\freerouting'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/freerouting/freerouting/releases/download/v2.2.4/freerouting-2.2.4.jar' -OutFile (Join-Path $dir 'freerouting-2.2.4.jar')
+
+      - name: Live PCB toolchain tests (real KiCad/FreeRouting -> pad->net readback, fail-closed refusal, DRC-clean gerber ZIP)
+        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLive"

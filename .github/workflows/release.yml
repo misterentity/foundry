@@ -161,5 +161,19 @@ jobs:
           python -m pip install --quiet pytest
           python -m pytest Foundry.Core/Pcb/KiCadScripts/test_build_board.py -q
 
-      - name: Live PCB toolchain tests (real KiCad → build, DRC, pad→net readback)
-        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLiveToolchainTests"
+      # The fab e2e test routes with FreeRouting (Java 25 + the pinned jar) — install both so the route→DRC→
+      # gerber half of the moat (the orderable artifact) is exercised against real tools, not just fakes.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Fetch FreeRouting jar
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Foundry\tools\freerouting'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/freerouting/freerouting/releases/download/v2.2.4/freerouting-2.2.4.jar' -OutFile (Join-Path $dir 'freerouting-2.2.4.jar')
+
+      - name: Live PCB toolchain tests (real KiCad/FreeRouting → build, pad→net readback, DRC-clean, gerber ZIP)
+        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLive"
