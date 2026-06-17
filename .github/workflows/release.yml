@@ -13,6 +13,9 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    # GATE: the release artifact is published inside this job, so it must NOT run until the auto-PCB moat's
+    # real-KiCad correctness lane (pcb-live) is green — otherwise a net→pad regression could ship to users.
+    needs: pcb-live
     # Code-signing is optional: add repo secrets SIGN_PFX_BASE64 (base64 of your .pfx) and
     # SIGN_PASSWORD to sign the app exe + installer. Without them, signing steps are skipped.
     env:

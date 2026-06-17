@@ -1,0 +1,72 @@
+name: ci
+
+# Verify every change to main BEFORE a release tag is cut — the release workflow only runs on v* tags, so
+# without this a regression sits on main unverified until release time. Runs the full unit suite + the
+# pure-python pad-assignment tests on every push/PR, and the real-KiCad moat lane on PRs + main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The avr8js runtime ships as a COMMITTED bundle — fail if an index.js edit wasn't re-bundled.
+      - name: avr8js bundle is fresh
+        working-directory: sidecar-avr
+        shell: pwsh
+        run: |
+          npm ci
+          npm run build
+          git diff --exit-code -- dist/avr8js-runtime.js
+          if ($LASTEXITCODE -ne 0) { Write-Error "dist/avr8js-runtime.js is STALE — run 'npm run build' in sidecar-avr and commit it." }
+
+      - name: Unit tests
+        run: dotnet test Foundry.Tests -c Release --nologo
+
+      - name: build_board.py pad-assignment unit tests (pytest, no KiCad)
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest Foundry.Core/Pcb/KiCadScripts/test_build_board.py -q
+
+  # The auto-PCB moat's correctness gate: build real boards on a real KiCad and read pad->net back to assert
+  # it equals intent (incl. the fail-closed refusal of an unmapped logical pin). Gates merges so a net->pad
+  # regression cannot reach main. Mirrors the release workflow's pcb-live lane.
+  pcb-live:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install KiCad
+        run: choco install kicad -y --no-progress
+
+      - name: Add KiCad bin to PATH
+        shell: pwsh
+        run: |
+          $bin = (Get-ChildItem 'C:\Program Files\KiCad' -Recurse -Filter 'kicad-cli.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).Directory.FullName
+          if (-not $bin) { Write-Error 'kicad-cli.exe not found after choco install kicad'; exit 1 }
+          Write-Host "KiCad bin: $bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
+      - name: Sanity-check kicad-cli is available
+        shell: pwsh
+        run: kicad-cli version
+
+      - name: Live PCB toolchain tests (real KiCad -> build, pad->net readback, fail-closed refusal)
+        run: dotnet test Foundry.Tests -c Release --filter "FullyQualifiedName~PcbLiveToolchainTests"

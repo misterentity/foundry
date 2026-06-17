@@ -195,41 +195,29 @@ public partial class App : Application
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     /// <summary>
-    /// Trust policy for an auto-downloaded installer. When the running app is SIGNED, the installer must carry a
-    /// valid, trusted Authenticode signature (full chain via WinVerifyTrust) from the SAME publisher as the app
-    /// (thumbprint pin). When the app is UNSIGNED — the current state, code-signing not enabled yet — there's no
-    /// publisher to pin to, so the update is allowed to run but logged as unverified. Code-sign the app +
-    /// installer (SIGN_PFX_BASE64/SIGN_PASSWORD) to automatically enforce the strict gate.
+    /// Trust gate for an auto-downloaded installer (FAIL-CLOSED). Resolves the running app's and the installer's
+    /// Authenticode certs, then defers the decision to the pure, unit-tested <see cref="Foundry.Core.Update.UpdateTrustPolicy"/>.
+    /// When the app is SIGNED the installer must carry a valid Authenticode signature from the SAME publisher
+    /// (thumbprint pin via WinVerifyTrust). When the app is UNSIGNED — the current state — there is no publisher
+    /// to pin to, so the update is REFUSED rather than run unverified; the caller then offers a manual install
+    /// from the releases page. Code-sign the app + installer (SIGN_PFX_BASE64/SIGN_PASSWORD) to enable seamless
+    /// auto-update.
     /// </summary>
     private static bool InstallerTrusted(string path)
     {
         var appCert = SignerCert(Process.GetCurrentProcess().MainModule?.FileName);
-        if (appCert is null)
-        {
-            // Unsigned app: can't verify the update's publisher. Allow it (pre-signing behavior) but make the
-            // gap visible — signing the build flips this to full Authenticode + publisher-pin verification.
-            Foundry.Core.Diagnostics.AppLog.Warn("update",
-                "running app is unsigned — can't verify the update's publisher; running it unverified. Sign the build to enforce verification.");
-            return true;
-        }
-        // Signed app → require a valid, trusted Authenticode signature (not merely an extractable cert: this
-        // catches untrusted/expired/revoked or tampered installers)…
-        if (!Foundry.Core.Provisioning.DownloadVerifier.VerifyAuthenticode(path))
-        {
-            Foundry.Core.Diagnostics.AppLog.Error("update", "downloaded installer failed Authenticode verification — refusing to run");
-            return false;
-        }
-        // …from the SAME publisher as the running app.
-        var fileCert = SignerCert(path);
-        if (fileCert is null)
-        {
-            Foundry.Core.Diagnostics.AppLog.Error("update", "downloaded installer is not signed — refusing to run");
-            return false;
-        }
-        var match = string.Equals(fileCert.Thumbprint, appCert.Thumbprint, StringComparison.OrdinalIgnoreCase);
-        if (!match)
-            Foundry.Core.Diagnostics.AppLog.Error("update", $"installer signer {fileCert.Thumbprint} ≠ app signer {appCert.Thumbprint} — refusing to run");
-        return match;
+        var appTp = appCert?.Thumbprint;
+        // Only probe the installer's signature when the app itself is signed (otherwise the decision is "refuse"
+        // regardless, and we avoid a needless WinVerifyTrust on every unsigned-build update check).
+        var installerValid = appTp is not null && Foundry.Core.Provisioning.DownloadVerifier.VerifyAuthenticode(path);
+        var installerTp = appTp is not null ? SignerCert(path)?.Thumbprint : null;
+
+        var decision = Foundry.Core.Update.UpdateTrustPolicy.Decide(appTp, installerValid, installerTp);
+        if (decision.Trusted)
+            Foundry.Core.Diagnostics.AppLog.Info("update", decision.Reason);
+        else
+            Foundry.Core.Diagnostics.AppLog.Warn("update", decision.Reason);
+        return decision.Trusted;
     }
 
     private static System.Security.Cryptography.X509Certificates.X509Certificate2? SignerCert(string? path)
