@@ -8,7 +8,12 @@ public sealed record ClaudeModel(string Id, string DisplayName, string Note);
 /// </summary>
 public static class ModelCatalog
 {
+    /// <summary>Generic fallback model (offline / when no model is specified): fast + strong.</summary>
     public const string DefaultModelId = "claude-sonnet-4-6";
+
+    /// <summary>Default model for full project GENERATION — the most capable, for complex designs + long
+    /// structured JSON (matches the shipped "Opus 4.8" framing). Chat/edits use the faster <see cref="DefaultModelId"/>.</summary>
+    public const string GenerationModelId = "claude-opus-4-8";
 
     public static readonly IReadOnlyList<ClaudeModel> Fallback = new[]
     {

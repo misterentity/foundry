@@ -9,7 +9,9 @@ namespace Foundry.Core.Config;
 /// </summary>
 public sealed class AppConfig
 {
-    public string ModelId { get; set; } = ModelCatalog.DefaultModelId;
+    /// <summary>Model used for full project generation. Defaults to Opus 4.8 (the shipped headline) for the
+    /// most capable designs + long structured JSON; users can switch to a faster model in Settings.</summary>
+    public string ModelId { get; set; } = ModelCatalog.GenerationModelId;
     /// <summary>Model used for chat iteration + validation fixes (kept fast/cheap vs. full generation).</summary>
     public string ChatModelId { get; set; } = "claude-sonnet-4-6";
     public int MaxOutputTokens { get; set; } = 16384;

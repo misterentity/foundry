@@ -123,6 +123,16 @@ Output ONLY the JSON object.
                     + "keys and strings double-quoted, numbers plain. Keep it compact enough to finish the object.)";
             string raw;
             try { raw = await _ai.CompleteAsync(SystemPrompt, user, _model, ct); }
+            catch (Ai.TruncatedResponseException tex)
+            {
+                // Token-cap cutoff: the compact-JSON nudge on the retry often recovers it; only fail honestly
+                // if the last attempt also truncates — never accept a half-built design.
+                Diagnostics.AppLog.Warn("generation", $"attempt {attempt}: response truncated at the {tex.MaxTokens}-token cap — retrying compact");
+                if (attempt == 2)
+                    return new GenerationResult(false, null,
+                        "The design response was cut off at the output-token cap. Raise the output-token limit in Settings or simplify the prompt.");
+                continue;
+            }
             catch (Exception ex)
             {
                 Diagnostics.AppLog.Error("generation", $"design pass failed: {ex.Message}");

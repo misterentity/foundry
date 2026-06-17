@@ -109,16 +109,18 @@ public sealed partial class BomViewModel : TabViewModelBase
         IsRefreshing = true;
         try
         {
+            int applied = 0;
             foreach (var row in Rows)
             {
                 var q = await svc.GetQuoteAsync(row.Mpn);
-                if (q is not null) row.Apply(q);
+                if (q is not null) { row.Apply(q); applied++; }
             }
             OnPropertyChanged(nameof(Total));
             OnPropertyChanged(nameof(TotalText));
             OnPropertyChanged(nameof(ByDistributor));
             OnPropertyChanged(nameof(LowStockCount));
-            SourcingStatus = $"live pricing via {svc.ProviderName} · updated {DateTime.Now:HH:mm}";
+            // Honest status: only claim live pricing for rows that actually got a live quote (see BomPricing).
+            SourcingStatus = BomPricing.RefreshStatus(svc.ProviderName, applied, Rows.Count, DateTime.Now.ToString("HH:mm"));
         }
         finally { IsRefreshing = false; }
     }

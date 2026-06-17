@@ -33,7 +33,7 @@ public class ConfigStoreTests
     public void Load_MissingFile_ReturnsDefaults()
     {
         var cfg = ConfigStore.Load(Path.Combine(Path.GetTempPath(), $"nope_{Guid.NewGuid():N}.json"));
-        Assert.Equal(ModelCatalog.DefaultModelId, cfg.ModelId);
+        Assert.Equal(ModelCatalog.GenerationModelId, cfg.ModelId);   // generation defaults to Opus 4.8
         Assert.Equal(16384, cfg.MaxOutputTokens);
     }
 }

@@ -30,11 +30,13 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     private readonly bool _ownsHttp;
     private readonly string _apiKey;
     private readonly int _maxTokens;
+    private readonly double _temperature;
 
-    public AnthropicClient(string apiKey, int maxTokens = 16384, HttpClient? http = null)
+    public AnthropicClient(string apiKey, int maxTokens = 16384, HttpClient? http = null, double temperature = 1.0)
     {
         _apiKey = apiKey;
         _maxTokens = maxTokens;
+        _temperature = temperature;
         _http = http ?? SharedHttp;     // default to the shared client
         _ownsHttp = http is not null;   // only dispose a caller-injected client
     }
@@ -97,6 +99,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
             {
                 Model = model,
                 MaxTokens = _maxTokens,
+                Temperature = _temperature,
                 System = new[] { new SystemBlock { Text = systemPrompt, CacheControl = new CacheControl() } },
                 Messages = new[] { new RequestMessage { Role = "user", Content = userPrompt } },
             };
@@ -121,16 +124,21 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
                 .Where(b => b.Type == "text" && b.Text is not null)
                 .Select(b => b.Text)
                 .FirstOrDefault() ?? "";
-            // Never let a max_tokens truncation be silent: a complex design/firmware pass that overruns the
-            // cap returns partial JSON the caller will reject — surface WHY so it isn't read as a clean fallback.
+            // Never let a max_tokens truncation be silent: a complex design/firmware pass that overruns the cap
+            // returns INCOMPLETE output. Throw rather than return the partial text so no caller (firmware
+            // enrichment especially) can mistake it for a complete reply — the generator retries/falls back honestly.
             if (IsTruncated(message?.StopReason))
+            {
                 Diagnostics.AppLog.Warn("ai",
                     $"Claude hit the {_maxTokens}-token output cap and the response was TRUNCATED ({text.Length} chars) — " +
                     "output is incomplete. Raise the output-token limit in Settings or simplify the request.");
+                Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, text.Length, sw.ElapsedMilliseconds, false, "truncated (max_tokens)");
+                throw new TruncatedResponseException(text, _maxTokens);
+            }
             Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, text.Length, sw.ElapsedMilliseconds, true);
             return text;
         }
-        catch (Exception ex) when (ex is not HttpRequestException)
+        catch (Exception ex) when (ex is not HttpRequestException && ex is not TruncatedResponseException)
         {
             Diagnostics.AppLog.Ai("messages", model, systemPrompt.Length + userPrompt.Length, 0, sw.ElapsedMilliseconds, false, ex.Message);
             throw;
@@ -170,6 +178,7 @@ public sealed class AnthropicClient : IAnthropicClient, IDisposable
     {
         [JsonPropertyName("model")] public string Model { get; set; } = "";
         [JsonPropertyName("max_tokens")] public int MaxTokens { get; set; }
+        [JsonPropertyName("temperature")] public double Temperature { get; set; } = 1.0;
         [JsonPropertyName("system")] public SystemBlock[]? System { get; set; }
         [JsonPropertyName("messages")] public RequestMessage[] Messages { get; set; } = Array.Empty<RequestMessage>();
     }

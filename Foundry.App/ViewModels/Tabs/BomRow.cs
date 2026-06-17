@@ -38,7 +38,12 @@ public sealed partial class BomRow : ObservableObject
     public double Extended => Qty * Price;
     partial void OnPriceChanged(double value) => OnPropertyChanged(nameof(Extended));
 
-    public void Apply(SourcingQuote q) { Dist = q.Distributor; Price = q.UnitPrice; Stock = q.Stock; Lead = q.Lead; }
+    /// <summary>True once a live sourcing quote has been applied to this row; until then Price is a generated estimate.</summary>
+    [ObservableProperty] private bool _isLivePrice;
+    public string PriceSourceTag => IsLivePrice ? "LIVE" : "EST";
+    partial void OnIsLivePriceChanged(bool value) => OnPropertyChanged(nameof(PriceSourceTag));
+
+    public void Apply(SourcingQuote q) { Dist = q.Distributor; Price = q.UnitPrice; Stock = q.Stock; Lead = q.Lead; IsLivePrice = true; }
 
     // v2 G10: substitutes
     [ObservableProperty] private bool _showAlternates;
