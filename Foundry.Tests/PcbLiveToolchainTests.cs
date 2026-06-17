@@ -334,6 +334,53 @@ public class PcbLiveToolchainTests
         finally { try { Directory.Delete(outDir, true); } catch { } }
     }
 
+    [Fact]
+    public async Task AtmegaBareChip_InGenericDip28_ResolvesByPartIdentity()
+    {
+        if (!KiCadPresent) return;
+
+        // A bare ATmega328P in the GENERIC Package_DIP:DIP-28 footprint (shared by countless 28-pin DIPs) —
+        // identified by part (ChipCatalog) and resolved against the ATmega symbol (which extends a parent).
+        // Authoritative unique pads: PB5→19 (Arduino D13), PD2→4, VCC→7.
+        var p = new Project
+        {
+            Title = "Bare ATmega328P board",
+            Components = new()
+            {
+                new ComponentSpec { Alias = "U1", Ref = "mcu", Name = "ATmega328P" },
+                new ComponentSpec { Alias = "R1", Ref = "r1", Name = "10k resistor" },
+                new ComponentSpec { Alias = "R2", Ref = "r2", Name = "10k resistor" },
+                new ComponentSpec { Alias = "C1", Ref = "cap", Name = "100nF capacitor" },
+            },
+            Connections = new()
+            {
+                new Connection { From = "U1.PB5", To = "R1.1", Net = "led" },
+                new Connection { From = "U1.PD2", To = "R2.1", Net = "btn" },
+                new Connection { From = "U1.VCC", To = "C1.1", Net = "pwr" },
+                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R1.2", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R2.2", To = "C1.2", Net = "gnd" },
+            },
+        };
+        var outDir = OutDir();
+        try
+        {
+            var r = await PcbBuilder.BuildAsync(p, outDir);
+            Assert.True(r.Installed);
+            Assert.True(r.Ok, $"ATmega board not verified: {r.Summary}; unmapped=[{string.Join(",", r.UnmappedPins)}]");
+            Assert.Empty(r.UnmappedPins);
+            Assert.NotNull(r.KicadPcbPath);
+
+            var padNets = ReadPadNets(await File.ReadAllTextAsync(r.KicadPcbPath!));
+            string Net(string @ref, string pad) => padNets[@ref][pad];
+            Assert.Equal(Net("U1", "19"), Net("R1", "1"));   // PB5 → pad 19
+            Assert.Equal(Net("U1", "4"), Net("R2", "1"));    // PD2 → pad 4
+            Assert.Equal(Net("U1", "7"), Net("C1", "1"));    // VCC → pad 7
+            Assert.Equal(3, new[] { Net("U1", "19"), Net("U1", "4"), Net("U1", "7") }.Distinct().Count());
+        }
+        finally { try { Directory.Delete(outDir, true); } catch { } }
+    }
+
     // ---- minimal .kicad_pcb readback: ref -> (pad name -> net name) ---------------------------------
 
     /// <summary>Parse footprint blocks into ref → (pad → net name). Paren-matching skips quoted strings so

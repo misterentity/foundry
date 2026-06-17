@@ -8,12 +8,24 @@ public class ChipCatalogTests
     [InlineData("STM32F103C8T6")]
     [InlineData("STM32F103C8 (Blue Pill)")]
     [InlineData("Blue Pill board")]
-    public void Match_KnownChip_ReturnsItsSymbolAndPackage(string name)
+    public void Match_KnownStm32_ReturnsItsSymbolAndPackage(string name)
     {
         var chip = ChipCatalog.Match(name);
         Assert.NotNull(chip);
         Assert.Equal("STM32F103C8Tx", chip!.SymbolName);
         Assert.Contains("LQFP-48", chip.FootprintLibId);
+    }
+
+    [Theory]
+    [InlineData("ATmega328P")]
+    [InlineData("ATmega328P-PU")]
+    [InlineData("Custom board with an ATmega328")]
+    public void Match_KnownAtmega_ReturnsItsSymbolAndPackage(string name)
+    {
+        var chip = ChipCatalog.Match(name);
+        Assert.NotNull(chip);
+        Assert.Equal("ATmega328-P", chip!.SymbolName);
+        Assert.Contains("DIP-28", chip.FootprintLibId);
     }
 
     // The SAFETY property: a DIFFERENT chip that merely shares a package must NOT be mapped onto the F103
@@ -23,6 +35,7 @@ public class ChipCatalogTests
     [InlineData("STM32F407VGT6")]       // a different STM32 (LQFP-100) — must NOT match F103
     [InlineData("STM32F411")]           // different STM32 — no match
     [InlineData("ATSAMD21G18 (LQFP-48)")] // a different chip in the SAME LQFP-48 package — must NOT match F103
+    [InlineData("ATmega2560")]          // a different ATmega — must NOT match the 328P pinout
     [InlineData("ACME-1234 op-amp")]
     [InlineData("")]
     [InlineData(null)]

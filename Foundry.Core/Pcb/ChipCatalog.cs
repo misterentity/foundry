@@ -19,6 +19,10 @@ public static class ChipCatalog
     {
         (new[] { "stm32f103c8", "stm32f103", "blue pill", "bluepill" },
             new Chip("Package_QFP:LQFP-48_7x7mm_P0.5mm", "MCU_ST_STM32F1", "STM32F103C8Tx", "STM32F103C8 (Blue Pill)")),
+        // Bare ATmega328P (the chip at the heart of the Uno/Nano, common on custom boards) in the generic
+        // 28-pin DIP. Pins via the MCU_Microchip_ATmega symbol (extends ATmega48PV-10P — extends-followed).
+        (new[] { "atmega328p", "atmega328", "atmega 328" },
+            new Chip("Package_DIP:DIP-28_W7.62mm", "MCU_Microchip_ATmega", "ATmega328-P", "ATmega328P (DIP-28)")),
     };
 
     /// <summary>The known chip whose identity matches <paramref name="name"/> (component name/MPN), or null.</summary>
