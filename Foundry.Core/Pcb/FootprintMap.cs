@@ -75,6 +75,14 @@ public static class FootprintMap
             return Heur("RF_Module:ESP-12E");
         if (Has("pico", "rp2040"))
             return Heur("Module:RaspberryPi_Pico_Common_SMD");   // KiCad 10 id (was RPi_Pico:RPi_Pico_SMD_TH)
+        // Arduino Uno R3 (ATmega328 dev board) — a real KiCad module footprint whose 1..32 pads match the
+        // MCU_Module:Arduino_UNO_R3 symbol, so SymbolPinMap resolves D13/A0/3V3/5V/GND to authoritative pads.
+        if (Has("arduino uno", "uno r3", "uno r2"))
+            return Heur("Module:Arduino_UNO_R3");
+        // Arduino Nano (ATmega328) — checked AFTER esp32/rp2040 so "Nano ESP32"/"Nano RP2040" map to their MCU.
+        // Pads via the MCU_Module:Arduino_Nano_v3.x symbol (which extends v2.x — SymbolPinMap follows extends).
+        if (Has("arduino nano", "nano v3", "nano v2"))
+            return Heur("Module:Arduino_Nano");
 
         if (Has("regulator", "ldo", "7805"))
         {

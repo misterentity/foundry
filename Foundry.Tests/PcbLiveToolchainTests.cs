@@ -190,6 +190,103 @@ public class PcbLiveToolchainTests
         finally { try { Directory.Delete(outDir, true); } catch { } }
     }
 
+    [Fact]
+    public async Task ArduinoUnoBoard_AddressedByHeaderLabels_BuildsVerified_OnAuthoritativePads()
+    {
+        if (!KiCadPresent) return;
+
+        // An Arduino Uno R3 wired by its header labels (D13/A0/3V3/5V/GND) resolves — via SymbolPinMap reading
+        // KiCad's authoritative MCU_Module:Arduino_UNO_R3 symbol — to the datasheet pads (D13→28, A0→9, 3V3→4,
+        // 5V→5). GND has several pads; we assert only the single-pad signals so the check is unambiguous.
+        var p = new Project
+        {
+            Title = "Uno header-label board",
+            Components = new()
+            {
+                new ComponentSpec { Alias = "U1", Ref = "uno", Name = "Arduino Uno R3" },
+                new ComponentSpec { Alias = "R1", Ref = "r1", Name = "10k resistor" },
+                new ComponentSpec { Alias = "R2", Ref = "r2", Name = "10k resistor" },
+                new ComponentSpec { Alias = "C1", Ref = "cap", Name = "100nF capacitor" },
+            },
+            Connections = new()
+            {
+                new Connection { From = "U1.D13", To = "R1.1", Net = "sig" },
+                new Connection { From = "U1.A0", To = "R2.1", Net = "analog" },
+                new Connection { From = "U1.5V", To = "C1.1", Net = "vcc5" },
+                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R1.2", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R2.2", To = "C1.2", Net = "gnd" },
+            },
+        };
+        var outDir = OutDir();
+        try
+        {
+            var r = await PcbBuilder.BuildAsync(p, outDir);
+            Assert.True(r.Installed);
+            Assert.True(r.Ok, $"Uno board not verified: {r.Summary}; unmapped=[{string.Join(",", r.UnmappedPins)}]");
+            Assert.Empty(r.UnmappedPins);
+            Assert.NotNull(r.KicadPcbPath);
+
+            var padNets = ReadPadNets(await File.ReadAllTextAsync(r.KicadPcbPath!));
+            string Net(string @ref, string pad) => padNets[@ref][pad];
+
+            Assert.Equal(Net("U1", "28"), Net("R1", "1"));   // D13 → pad 28
+            Assert.Equal(Net("U1", "9"), Net("R2", "1"));    // A0  → pad 9
+            Assert.Equal(Net("U1", "5"), Net("C1", "1"));    // 5V  → pad 5
+            // the three distinct signals must land on three distinct nets (not collapsed)
+            Assert.Equal(3, new[] { Net("U1", "28"), Net("U1", "9"), Net("U1", "5") }.Distinct().Count());
+        }
+        finally { try { Directory.Delete(outDir, true); } catch { } }
+    }
+
+    [Fact]
+    public async Task ArduinoNanoBoard_AddressedByHeaderLabels_BuildsVerified_ViaExtendsSymbol()
+    {
+        if (!KiCadPresent) return;
+
+        // The Nano exercises SymbolPinMap's EXTENDS-following: MCU_Module:Arduino_Nano_v3.x carries no pins of
+        // its own (it extends Arduino_Nano_v2.x), so the pads come from the parent symbol: D13→16, 3V3→17,
+        // A0→19, +5V→27 (the "5V" net canonicalizes to the "+5V" symbol pin).
+        var p = new Project
+        {
+            Title = "Nano header-label board",
+            Components = new()
+            {
+                new ComponentSpec { Alias = "U1", Ref = "nano", Name = "Arduino Nano" },
+                new ComponentSpec { Alias = "R1", Ref = "r1", Name = "10k resistor" },
+                new ComponentSpec { Alias = "R2", Ref = "r2", Name = "10k resistor" },
+                new ComponentSpec { Alias = "C1", Ref = "cap", Name = "100nF capacitor" },
+            },
+            Connections = new()
+            {
+                new Connection { From = "U1.D13", To = "R1.1", Net = "sig" },
+                new Connection { From = "U1.A0", To = "R2.1", Net = "analog" },
+                new Connection { From = "U1.5V", To = "C1.1", Net = "vcc5" },
+                new Connection { From = "U1.GND", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R1.2", To = "C1.2", Net = "gnd" },
+                new Connection { From = "R2.2", To = "C1.2", Net = "gnd" },
+            },
+        };
+        var outDir = OutDir();
+        try
+        {
+            var r = await PcbBuilder.BuildAsync(p, outDir);
+            Assert.True(r.Installed);
+            Assert.True(r.Ok, $"Nano board not verified: {r.Summary}; unmapped=[{string.Join(",", r.UnmappedPins)}]");
+            Assert.Empty(r.UnmappedPins);
+            Assert.NotNull(r.KicadPcbPath);
+
+            var padNets = ReadPadNets(await File.ReadAllTextAsync(r.KicadPcbPath!));
+            string Net(string @ref, string pad) => padNets[@ref][pad];
+
+            Assert.Equal(Net("U1", "16"), Net("R1", "1"));   // D13 → pad 16
+            Assert.Equal(Net("U1", "19"), Net("R2", "1"));   // A0  → pad 19
+            Assert.Equal(Net("U1", "27"), Net("C1", "1"));   // 5V  → pad 27 (+5V)
+            Assert.Equal(3, new[] { Net("U1", "16"), Net("U1", "19"), Net("U1", "27") }.Distinct().Count());
+        }
+        finally { try { Directory.Delete(outDir, true); } catch { } }
+    }
+
     // ---- minimal .kicad_pcb readback: ref -> (pad name -> net name) ---------------------------------
 
     /// <summary>Parse footprint blocks into ref → (pad → net name). Paren-matching skips quoted strings so

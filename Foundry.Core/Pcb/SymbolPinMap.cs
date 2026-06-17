@@ -24,6 +24,8 @@ public static class SymbolPinMap
         {
             ["Module:RaspberryPi_Pico_Common_SMD"] = ("MCU_Module", "RaspberryPi_Pico"),
             ["RF_Module:ESP32-WROOM-32"] = ("RF_Module", "ESP32-WROOM-32"),
+            ["Module:Arduino_UNO_R3"] = ("MCU_Module", "Arduino_UNO_R3"),
+            ["Module:Arduino_Nano"] = ("MCU_Module", "Arduino_Nano_v3.x"),   // extends Arduino_Nano_v2.x (followed)
         };
 
     // "<symbolDir>|<lib>|<name>" -> (canonical pin -> pad). Parsed once per symbol per session.
@@ -48,8 +50,9 @@ public static class SymbolPinMap
         return Cache.GetOrAdd($"{symbolDir}|{sym.Lib}|{sym.Name}", _ => Parse(symbolDir, sym.Lib, sym.Name));
     }
 
-    private static IReadOnlyDictionary<string, string>? Parse(string symbolDir, string lib, string name)
+    private static IReadOnlyDictionary<string, string>? Parse(string symbolDir, string lib, string name, int depth = 0)
     {
+        if (depth > 4) return null;   // guard against an extends cycle / pathological chain
         try
         {
             var path = System.IO.Path.Combine(symbolDir, lib + ".kicad_sym");
@@ -76,7 +79,13 @@ public static class SymbolPinMap
                     if (key.Length > 0 && !map.ContainsKey(key)) map[key] = pad;   // first-seen pad wins
                 }
             }
-            return map.Count > 0 ? map : null;
+            if (map.Count > 0) return map;
+
+            // A DERIVED symbol (e.g. Arduino_Nano_v3.x, ATmega328-P) carries no pins of its own — it inherits
+            // them from its parent via (extends "Parent"). Follow the pointer (same lib) so these resolve to
+            // the parent's authoritative pin name→number table instead of failing closed.
+            var ext = Regex.Match(block, "\\(extends \"([^\"]+)\"");
+            return ext.Success ? Parse(symbolDir, lib, ext.Groups[1].Value, depth + 1) : null;
         }
         catch { return null; }
     }
@@ -97,6 +106,7 @@ public static class SymbolPinMap
         return p.ToUpperInvariant() switch
         {
             "VDD" or "VCC" or "3.3V" or "+3V3" => "3V3",
+            "+5V" or "5V" or "VCC5" => "5V",   // a Uno's "+5V" symbol pin ↔ a netlist "5V"
             "VSS" or "GROUND" => "GND",
             _ => p.ToUpperInvariant(),
         };
