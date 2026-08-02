@@ -212,6 +212,67 @@ def test_a_malformed_board_never_breaks_the_build(bad):
     assert mesh.volume > 0
 
 
+# lid_style was accepted by the schema and then never read, so "snap" and "screw" produced
+# byte-identical meshes — four screw bosses and four clearance holes through a lid the UI labelled
+# snap-fit. The field has to mean something.
+def test_snap_and_screw_lids_are_different_solids():
+    snap, _ = _mesh(_base_schema(lid="snap"))
+    screw, _ = _mesh(_base_schema(lid="screw"))
+    assert snap.volume != pytest.approx(screw.volume), "lid style changed nothing"
+
+
+def test_screw_lid_has_bosses_and_a_drilled_lid():
+    screw, _ = _mesh(_base_schema(lid="screw"))
+    no_bosses, _ = _mesh(_base_schema(lid="screw", standoffs=0))
+    # bosses add material to the base; their absence must be visible
+    assert screw.volume > no_bosses.volume
+
+
+def test_snap_lid_has_no_screw_bosses():
+    snap, _ = _mesh(_base_schema(lid="snap"))
+    snap_no_standoffs, _ = _mesh(_base_schema(lid="snap", standoffs=0))
+    # a snap lid ignores the standoff count entirely — there is nothing to screw into
+    assert snap.volume == pytest.approx(snap_no_standoffs.volume)
+
+
+def test_snap_lid_carries_a_retention_bead():
+    snap, _ = _mesh(_base_schema(lid="snap"))
+    lid = min(snap.split(only_watertight=False), key=lambda b: b.volume)
+    base_inner = INNER[0]
+    # the bead is wider than the cavity, which is what makes it snap
+    assert lid.bounds[1][0] - lid.bounds[0][0] > base_inner
+
+
+@pytest.mark.parametrize("lid", ["snap", "screw", {"style": "snap"}, {"style": "screw"}, None])
+def test_lid_field_accepts_both_shapes(lid):
+    mesh, _ = _mesh(_base_schema(lid=lid))
+    assert mesh.volume > 0
+
+
+# clamp() pulls an out-of-bounds feature back inside the face. That is the right geometry — a hole
+# hanging off the edge is not a hole — but it was SILENT: ask for a port near a corner and you get one
+# somewhere else, with nothing anywhere saying so.
+def test_a_cutout_that_fits_is_not_reported_as_moved():
+    _, stats = enclosure.build_stl(_base_schema(cutouts=[
+        {"face": "front", "shape": "rect", "size": [9.5, 3.5], "pos": [0, 0], "label": "USB-C"}]))
+    assert stats.get("movedCutouts") == []
+
+
+def test_a_cutout_pushed_off_the_face_is_reported():
+    _, stats = enclosure.build_stl(_base_schema(cutouts=[
+        {"face": "front", "shape": "rect", "size": [9.5, 3.5], "pos": [900, 0], "label": "USB-C"}]))
+    moved = stats.get("movedCutouts")
+    assert moved, "a port pushed far off the face was clamped silently"
+    assert moved[0]["label"] == "USB-C"
+    assert moved[0]["requested"] != moved[0]["applied"]
+
+
+def test_moved_report_names_the_face():
+    _, stats = enclosure.build_stl(_base_schema(cutouts=[
+        {"face": "right", "shape": "circle", "d": 12, "pos": [0, 900], "label": "gland"}]))
+    assert stats["movedCutouts"][0]["face"] == "right"
+
+
 def test_a_bad_cutout_does_not_break_the_build():
     mesh, _ = _mesh(_base_schema(cutouts=[
         {"face": "nonsense", "shape": "??", "size": ["x", None]},

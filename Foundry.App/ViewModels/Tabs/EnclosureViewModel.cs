@@ -81,7 +81,11 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             SidecarOnline = true;
             IsLoading = false;
             MeshReady = true;
-            SidecarStatus = $"{mesh.Kernel} · {mesh.Triangles} tris · {client.BaseUrl}";
+            // A clamped port is a hole that is NOT where the design asked for it — say so on the model
+            // badge rather than letting the geometry quietly disagree with the cutout table beside it.
+            SidecarStatus = mesh.MovedCutouts > 0
+                ? $"{mesh.Kernel} · {mesh.Triangles} tris · {mesh.MovedCutouts} port(s) moved to fit the face · {client.BaseUrl}"
+                : $"{mesh.Kernel} · {mesh.Triangles} tris · {client.BaseUrl}";
         }
         catch (Exception ex)
         {

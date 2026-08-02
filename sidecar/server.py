@@ -72,6 +72,9 @@ def build_enclosure(schema: EnclosureSchema) -> StreamingResponse:
         "X-Foundry-Triangles": str(stats["triangles"]),
         "X-Foundry-Bytes": str(stats["bytes"]),
         "X-Foundry-Outer": ",".join(str(x) for x in stats["outer_mm"]),
+        # Features the face bounds forced out of position. Clamping is silent in the geometry, so it has
+        # to travel with the response or a corner port quietly ends up somewhere else.
+        "X-Foundry-Moved": str(len(stats.get("movedCutouts") or [])),
         "Content-Disposition": f'attachment; filename="enclosure.{fmt}"',
     }
     return StreamingResponse(io.BytesIO(data), media_type=media, headers=headers)

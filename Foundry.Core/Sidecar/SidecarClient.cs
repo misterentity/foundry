@@ -3,7 +3,10 @@ using System.Text;
 
 namespace Foundry.Core.Sidecar;
 
-public sealed record EnclosureMesh(byte[] Stl, string Kernel, int Triangles, string OuterMm);
+/// <param name="MovedCutouts">Ports the face bounds forced out of the position that was asked for.
+/// Non-zero means a hole is not where the design put it — the sidecar clamps silently, so this is the
+/// only signal.</param>
+public sealed record EnclosureMesh(byte[] Stl, string Kernel, int Triangles, string OuterMm, int MovedCutouts = 0);
 
 /// <summary>HTTP client for the CAD sidecar on 127.0.0.1 (PRD §5).</summary>
 public sealed class SidecarClient
@@ -53,7 +56,8 @@ public sealed class SidecarClient
         string Header(string name) =>
             resp.Headers.TryGetValues(name, out var v) ? string.Join(",", v) : "";
         int.TryParse(Header("X-Foundry-Triangles"), out var tris);
-        return new EnclosureMesh(stl, Header("X-Foundry-Kernel"), tris, Header("X-Foundry-Outer"));
+        int.TryParse(Header("X-Foundry-Moved"), out var moved);
+        return new EnclosureMesh(stl, Header("X-Foundry-Kernel"), tris, Header("X-Foundry-Outer"), moved);
     }
 
     public sealed record ScadResult(bool Ok, byte[] Bytes, string Format, string Error);

@@ -61,6 +61,36 @@ Vents are expanded into thin slot cutouts by `_vent_cutouts` (`:149`) *before* t
 
 A part with no model resolves to `PartHeight.Unknown` — never to zero, which would read as "flat".
 
+## Board mounting
+
+`_pcb_standoffs` builds posts at the board's **own** mounting holes, with M3 pilots, rising from the inner floor to the standoff height the fit math proved. Those holes come from `PcbPlacer`, which **reserves** the corner keep-outs — the border is widened to `MinMarginMm` (inset + keep-out radius) so no component can sit where a boss must go. Reserving is what lets the holes be reported as fact.
+
+Before this the case had no board mounting at all: `_standoff_posts` builds **lid screw bosses**, positioned from the *case* corners and running nearly the full cavity height, so a printed enclosure held a loose PCB — and a port's height above the floor was undefined, which blocked cutout derivation entirely.
+
+## Cutout derivation
+
+`Foundry.Core/Cad/CutoutFit.cs` derives a port's face, position and size from where its component actually sits. `Cutout.Ref` names the part a port exposes; the face is the nearest board edge. The transform is fully determined:
+
+| face | `pos[0]` | `pos[1]` |
+|---|---|---|
+| `front` / `back` | board X − W/2 | `wall + standoff + pcb + h/2 − oz/2` |
+| `left` / `right` | board **Y** − D/2 | same |
+| `top` / `bottom` | board X − W/2 | board Y − D/2 |
+
+Side faces measure the vertical from `oz/2` because that is what `_cutout_solid` expects. Getting the left/right axis wrong puts the port on the wrong axis entirely, which is why it is encoded once and unit-tested rather than inlined.
+
+Derivation happens inside `EnclosureSchema.ToJson`, so **the preview and the export are the same geometry** — a hole that lines up on screen but not in the print would be worse than no derivation.
+
+**It refuses rather than guesses.** A cutout that names no component, names an unplaced one, sits more than `EdgeProximityMm` from any edge, or lacks a height for a side face keeps its authored value and reports `CUT-POS` **unproven**. On the shipped sample that is 2 derived and 3 refused — there is genuinely no USB, LED or gland component (the TP4056 is BOM-only).
+
+### Clamped ports are reported
+
+`clamp()` pulls an out-of-bounds feature back inside its face. That is the right geometry, but it was silent — ask for a port near a corner and you got one somewhere else. The build now returns `movedCutouts`, surfaced as `X-Foundry-Moved` and shown on the model badge.
+
+## Lid style
+
+`lid_style` was accepted and never read, so `snap` and `screw` produced **byte-identical** meshes: four screw bosses and four clearance holes through a lid the UI labelled snap-fit. A screw lid gets bosses and clearance holes; a snap lid gets neither, plus a retention bead around the bottom of its lip that flexes past the cavity wall.
+
 ## Fit checks
 
 `Foundry.Core/Cad/EnclosureFit.cs` is pure: numbers in, `Finding`s out. No KiCad, no sidecar, no I/O.

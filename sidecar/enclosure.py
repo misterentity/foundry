@@ -63,6 +63,7 @@ def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="no
 
     through = max(4.0, t * 4)
     margin = 2.0
+    moved = []   # features the face bounds forced out of position — reported, not swallowed
 
     # port/control cutouts + ventilation slots (expanded into many thin slot cutouts)
     all_cuts = list(cutouts or []) + _vent_cutouts(vents or [], ox, oy, oz)
@@ -72,14 +73,19 @@ def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="no
     top_cuts = [c for c in all_cuts if str(c.get("face", "")).lower() == "top"]
     for c in (c for c in all_cuts if str(c.get("face", "")).lower() != "top"):
         try:
-            solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin)
+            solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin, moved)
             if solid is not None:
                 base = base.difference(solid, engine="manifold")
         except Exception:
             continue  # a bad cutout never breaks the whole build
 
+    # lid_style was accepted and then never read, so "snap" and "screw" produced byte-identical meshes —
+    # four screw bosses and four clearance holes through a lid the UI labelled snap-fit. A snap lid has
+    # neither: it is retained by a bead on its lip, so the bosses are omitted entirely.
+    screw_lid = _lid_style(lid_style) == "screw"
+
     n = standoffs if isinstance(standoffs, int) else (len(standoffs) if standoffs else 0)
-    boss_xy = _boss_positions(n, L, Wd)
+    boss_xy = _boss_positions(n, L, Wd) if screw_lid else []
     for post in _standoff_posts(trimesh, boss_xy, t, H):
         try:
             base = base.union(post, engine="manifold")
@@ -104,7 +110,8 @@ def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="no
             continue
 
     # ----- LID: rounded cap + locating lip + screw clearance -----
-    lid_mesh = _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts, margin)
+    lid_mesh = _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts, margin,
+                          screw_lid, moved)
 
     # ARRANGEMENT. "exploded" stacks the lid above the base for the 3D preview; "print" lays both flat
     # on the plate, side by side.
@@ -135,11 +142,20 @@ def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="no
         "triangles": int(len(model.faces)),
         "outer_mm": [round(ox, 2), round(oy, 2), round(oz, 2)],
         "bytes": len(data),
+        "movedCutouts": moved,
     }
     return bytes(data), stats
 
 
-def _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts=None, margin=2.0):
+def _lid_style(lid):
+    """Normalise the lid field, which arrives as either a bare string or {"style": ...}."""
+    if isinstance(lid, dict):
+        lid = lid.get("style")
+    return "snap" if str(lid or "snap").strip().lower() == "snap" else "screw"
+
+
+def _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts=None, margin=2.0,
+               screw_lid=True, moved=None):
     """Cap that overlaps the wall tops, with a downward locating lip, top-face ports, and screw holes."""
     capT = max(2.0, t)
     lipH = max(2.0, t + 1.0)
@@ -148,6 +164,17 @@ def _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_
     lip.apply_translation([0, 0, -lipH])                       # hangs below the cap
     lid = cap.union(lip, engine="manifold")
 
+    # A SNAP lid is retained by a bead around the bottom of its lip that flexes past the cavity wall.
+    # Without it "snap" was just "screw minus the screws" — a lid that would fall off.
+    if not screw_lid:
+        bead_h = 0.8
+        bead = _rounded_box(trimesh, L + 0.3, Wd + 0.3, bead_h, max(0.0, corner - t))
+        bead.apply_translation([0, 0, -lipH])                  # at the very bottom of the lip
+        try:
+            lid = lid.union(bead, engine="manifold")
+        except Exception:
+            pass
+
     # face:"top" ports and vents are cut HERE, in lid-local coordinates. The lid spans z [-lipH, capT],
     # so the cutter is centred on that span and made long enough to clear both cap and lip — the same
     # geometry the screw holes below already use.
@@ -155,13 +182,13 @@ def _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_
     for c in top_cuts or []:
         try:
             solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy,
-                                  (capT - lipH) / 2.0, lid_through, margin)
+                                  (capT - lipH) / 2.0, lid_through, margin, moved)
             if solid is not None:
                 lid = lid.difference(solid, engine="manifold")
         except Exception:
             continue  # a bad cutout never breaks the lid
 
-    # screw clearance holes (Ø3.4) above each standoff
+    # screw clearance holes (Ø3.4) above each standoff — a screw lid only; boss_xy is empty for snap
     for (px, py) in boss_xy:
         try:
             hole = trimesh.creation.cylinder(radius=1.7, height=capT + lipH + 2, sections=24)
@@ -217,8 +244,13 @@ def _boss_positions(n, L, Wd):
     return corners[: min(n, 4)]
 
 
-def _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin):
-    """A prism/cylinder positioned to pierce the named face. pos = offset (mm) from face center."""
+def _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin, moved=None):
+    """A prism/cylinder positioned to pierce the named face. pos = offset (mm) from face center.
+
+    `moved` collects any feature whose requested position had to be pulled back inside the face. That
+    clamping is silent otherwise: ask for a port near a corner and you get a hole somewhere else, with
+    nothing anywhere saying so.
+    """
     import math
 
     face = str(c.get("face", "side")).lower()
@@ -236,7 +268,15 @@ def _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin):
 
     def clamp(val, half, feat):
         lim = max(0.0, half - feat / 2 - margin)
-        return max(-lim, min(lim, val))
+        out = max(-lim, min(lim, val))
+        if moved is not None and abs(out - val) > 1e-6:
+            moved.append({
+                "label": c.get("label") or c.get("for") or "cutout",
+                "face": face,
+                "requested": round(val, 2),
+                "applied": round(out, 2),
+            })
+        return out
 
     if face in ("top", "bottom"):
         # hole through Z; u=x, v=y
