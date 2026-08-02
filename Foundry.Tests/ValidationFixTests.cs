@@ -167,6 +167,100 @@ public class ValidationFixTests
         Assert.Contains(p.Connections, c => c.Net == "power" && (c.From == "REG.VOUT" || c.To == "REG.VOUT"));
     }
 
+    // The exact shape of the ESP32 DevKit in Foundry's OWN generation system prompt
+    // (ProjectGenerator.cs: "inputV":[3.0,5.5] with a single "3V3" power pin). The component-level range
+    // legitimately spans 3.0–5.5 V because the BOARD accepts 5 V on VIN — but the only power pin declared
+    // is the 3.3 V rail, and putting 5 V on it destroys the part. Before the pin-accurate check this
+    // auto-fix wired USB.VBUS -> MCU.3V3 and the re-validation then reported "safe to power on".
+    [Fact]
+    public void ConnectRail_Power_RefusesFiveVoltSupplyOntoA3V3Pin()
+    {
+        var mcu = new ComponentSpec { Ref = "esp32", Alias = "MCU", Name = "ESP32 DevKit v1", LogicV = 3.3,
+            InputVRange = new[] { 3.0, 5.5 },
+            Pins = new() { new PinSpec { Name = "3V3", Kind = PinKind.Power }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } };
+        var usb = new ComponentSpec { Ref = "usb", Alias = "USB", Name = "USB 5V", OutputV = 5.0,
+            Pins = new() { new PinSpec { Name = "VBUS", Kind = PinKind.Power }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } };
+        var p = new Project
+        {
+            Components = new() { mcu, usb },
+            Connections = new() { new Connection { From = "USB.GND", To = "MCU.GND", Net = "ground" } },
+        };
+        ProjectValidator.Revalidate(p);
+
+        Assert.False(ProjectValidator.TryAutoFix(p, new Finding { Code = "PWR-NC", Refs = new() { "MCU" } }));
+        Assert.DoesNotContain(p.Connections, c => c.Net == "power");
+
+        // And the refusal must not be laundered into a pass: the rail is still unconnected.
+        ProjectValidator.Revalidate(p);
+        Assert.NotEqual("pass", p.Validation);
+    }
+
+    // Same board, but a real 3.3 V supply is present — the fix must still work.
+    [Fact]
+    public void ConnectRail_Power_AcceptsMatchingRailOnANamedPin()
+    {
+        var mcu = new ComponentSpec { Ref = "esp32", Alias = "MCU", Name = "ESP32 DevKit v1", LogicV = 3.3,
+            InputVRange = new[] { 3.0, 5.5 },
+            Pins = new() { new PinSpec { Name = "3V3", Kind = PinKind.Power }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } };
+        var reg = new ComponentSpec { Ref = "reg", Alias = "REG", Name = "AMS1117-3.3", OutputV = 3.3,
+            Pins = new() { new PinSpec { Name = "VOUT", Kind = PinKind.Power }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } };
+        var p = new Project
+        {
+            Components = new() { mcu, reg },
+            Connections = new() { new Connection { From = "REG.GND", To = "MCU.GND", Net = "ground" } },
+        };
+        ProjectValidator.Revalidate(p);
+
+        Assert.True(ProjectValidator.TryAutoFix(p, new Finding { Code = "PWR-NC", Refs = new() { "MCU" } }));
+        Assert.Contains(p.Connections, c => c.Net == "power" && c.From == "REG.VOUT" && c.To == "MCU.3V3");
+    }
+
+    // A 5 V supply IS correct when the board exposes a pin that accepts it.
+    [Fact]
+    public void ConnectRail_Power_PrefersThePinThatAcceptsTheSupply()
+    {
+        var mcu = new ComponentSpec { Ref = "esp32", Alias = "MCU", Name = "ESP32 DevKit v1", LogicV = 3.3,
+            InputVRange = new[] { 3.0, 5.5 },
+            Pins = new()
+            {
+                new PinSpec { Name = "3V3", Kind = PinKind.Power },
+                new PinSpec { Name = "VIN", Kind = PinKind.Power },
+                new PinSpec { Name = "GND", Kind = PinKind.Ground },
+            } };
+        var usb = new ComponentSpec { Ref = "usb", Alias = "USB", Name = "USB 5V", OutputV = 5.0,
+            Pins = new() { new PinSpec { Name = "VBUS", Kind = PinKind.Power }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } };
+        var p = new Project
+        {
+            Components = new() { mcu, usb },
+            Connections = new() { new Connection { From = "USB.GND", To = "MCU.GND", Net = "ground" } },
+        };
+        ProjectValidator.Revalidate(p);
+
+        Assert.True(ProjectValidator.TryAutoFix(p, new Finding { Code = "PWR-NC", Refs = new() { "MCU" } }));
+        Assert.Contains(p.Connections, c => c.Net == "power" && c.To == "MCU.VIN");   // never MCU.3V3
+        Assert.DoesNotContain(p.Connections, c => c.Net == "power" && c.To == "MCU.3V3");
+    }
+
+    [Theory]
+    [InlineData("3V3", 3.3)]
+    [InlineData("3.3V", 3.3)]
+    [InlineData("+5V", 5.0)]
+    [InlineData("5V", 5.0)]
+    [InlineData("1V8", 1.8)]
+    [InlineData("12V", 12.0)]
+    [InlineData("VBUS", 5.0)]
+    public void RailVoltageOf_ParsesDeclaredRails(string pin, double expected) =>
+        Assert.Equal(expected, ProjectValidator.RailVoltageOf(pin)!.Value, 3);
+
+    [Theory]
+    [InlineData("VIN")]
+    [InlineData("VCC")]
+    [InlineData("VDD")]
+    [InlineData("VBAT")]
+    [InlineData("")]
+    public void RailVoltageOf_TreatsGenericSupplyPinsAsUnconstrained(string pin) =>
+        Assert.Null(ProjectValidator.RailVoltageOf(pin));
+
     [Fact]
     public void ConnectRail_AddsMissingGround()
     {

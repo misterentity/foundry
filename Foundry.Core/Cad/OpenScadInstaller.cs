@@ -12,6 +12,13 @@ public static class OpenScadInstaller
 {
     private const string PortableUrl = "https://files.openscad.org/OpenSCAD-2021.01-x86-64.zip";
 
+    /// <summary>
+    /// Pinned SHA-256 of the portable zip, computed from the official files.openscad.org asset over TLS.
+    /// OpenSCAD does NOT Authenticode-sign openscad.exe (verified: Get-AuthenticodeSignature reports
+    /// NotSigned), so a signature gate here can never pass — the archive hash is the only real anchor.
+    /// </summary>
+    public const string PortableSha256 = "FB0CAABF5BBC89F8F2F80C10B79AE64D697AAFF6EFD58B2756F5D6270EDB7BA7";
+
     public static string ToolsDir => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Foundry", "tools", "openscad");
 
@@ -39,15 +46,20 @@ public static class OpenScadInstaller
     /// <summary>Download the portable OpenSCAD zip into ToolsDir and extract. Returns the exe path.</summary>
     public static async Task<string> DownloadAsync(CancellationToken ct = default)
     {
-        System.IO.Directory.CreateDirectory(ToolsDir);
-        var zip = System.IO.Path.Combine(ToolsDir, "openscad.zip");
+        var parent = System.IO.Path.GetDirectoryName(ToolsDir)!;
+        System.IO.Directory.CreateDirectory(parent);
+        var zip = System.IO.Path.Combine(parent, "openscad.zip");
+        // Fail-closed on the ARCHIVE hash (the publisher ships no signature), then quarantine-then-promote so
+        // a rejected payload never lands where Locate() would later report it as installed.
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
-            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, PortableUrl, zip, null, ct);
-        Provisioning.DownloadVerifier.ExtractZipSafe(zip, ToolsDir, overwrite: true);
-        try { System.IO.File.Delete(zip); } catch { }
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, PortableUrl, zip, PortableSha256, ct);
+        try
+        {
+            Provisioning.DownloadVerifier.ExtractVerifiedZip(zip, ToolsDir);
+        }
+        finally { try { System.IO.File.Delete(zip); } catch { } }
+
         var exe = Locate() ?? throw new InvalidOperationException("openscad.exe not found after download.");
-        // Fail-closed: refuse to run an openscad.exe that isn't validly publisher-signed.
-        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded openscad.exe");
         Diagnostics.AppLog.Info("cad", $"OpenSCAD installed at {exe}");
         return exe;
     }

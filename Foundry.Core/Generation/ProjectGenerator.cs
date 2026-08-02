@@ -173,7 +173,10 @@ Output ONLY the JSON object.
         if (!_ai.HasKey) return new GenerationResult(false, null, "Add your Anthropic API key in Settings to edit the design by chat.");
         if (string.IsNullOrWhiteSpace(request)) return new GenerationResult(false, null, "Tell me what to change.");
 
-        Diagnostics.AppLog.Info("revise", $"revise pass started · model {_model}{(forceEdit ? " · force-edit" : "")}", request);
+        // Log only the request's length, never its body — AppLog persists to disk and is documented to
+        // never contain prompts (a chat request can carry proprietary/PII content, same as a design prompt).
+        Diagnostics.AppLog.Info("revise", $"revise pass started · model {_model}{(forceEdit ? " · force-edit" : "")}",
+            $"request: {request.Length} chars");
         string raw;
         try
         {
@@ -318,7 +321,10 @@ Output ONLY the JSON object.
 
         var project = new Project.Project
         {
-            Id = "p_" + DateTime.Now.ToString("HHmmss"),
+            // Collision-free: a clock-based id (p_HHmmss) repeats every 24h, and SaveToLibrary keys the
+            // library file AND the revision folder off it — a repeat silently overwrote an existing project
+            // and inherited its history. Matches ProjectStore.SaveToLibrary's own scheme.
+            Id = "p_" + Guid.NewGuid().ToString("N")[..8],
             Title = Str(root, "title", "Untitled project"),
             Prompt = prompt,
             Status = "READY",
@@ -337,8 +343,7 @@ Output ONLY the JSON object.
 
         project.Firmware = FirmwareGenerator.Generate(project.Connections, kb, platform);
         project.Findings = RulesEngine.Validate(project.Connections, kb, batteryGoalDays: 0);
-        project.Validation = project.Findings.Any(f => f.Severity == "fail") ? "fail"
-            : project.Findings.Any(f => f.Severity == "warn") ? "warn" : "pass";
+        project.Validation = Validation.ProjectValidator.Rollup(project.Findings);
 
         var peakMa = kb.All.Sum(c => c.CurrentMaActive);
         project.Kpis = new ProjectKpis

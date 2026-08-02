@@ -41,18 +41,32 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     public int FailCount => Project.Findings.Count(f => f.Severity == "fail");
     public int WarnCount => Project.Findings.Count(f => f.Severity == "warn");
     public int PassCount => Project.Findings.Count(f => f.Severity == "pass");
-    public string OverallStatus => FailCount > 0 ? "FAIL" : WarnCount > 0 ? "WARN" : "PASS";
+    /// <summary>Checks the engine could not complete — it lacked a fact, so it reached no verdict.</summary>
+    public int UnprovenCount => Project.Findings.Count(f => f.Severity == "unproven");
+    public string OverallStatus => FailCount > 0 ? "FAIL"
+        : WarnCount > 0 ? "WARN"
+        : UnprovenCount > 0 ? "UNPROVEN" : "PASS";
     public string PassText => $"{PassCount} / {Project.Findings.Count}";
     public string ChecksLabel => $"DETERMINISTIC RULES ENGINE · {Project.Findings.Count} CHECKS";
 
     // v2 G9: report card — a grade + a plain "safe to power on?" verdict.
-    public string Grade => FailCount > 0 ? "F" : WarnCount == 0 ? "A" : WarnCount <= 2 ? "B" : WarnCount <= 5 ? "C" : "D";
-    public string GradeSeverity => FailCount > 0 ? "fail" : WarnCount > 0 ? "warn" : "pass";
+    //
+    // An UNPROVEN check is not a passed check. Grading on fails and warns alone meant a design whose
+    // checks could not be completed still scored "A" and was told it was safe to power on — the engine
+    // certifying exactly what it had not looked at. There is no letter for "I don't know", so it says so.
+    public string Grade => FailCount > 0 ? "F"
+        : UnprovenCount > 0 ? "?"
+        : WarnCount == 0 ? "A" : WarnCount <= 2 ? "B" : WarnCount <= 5 ? "C" : "D";
+    public string GradeSeverity => FailCount > 0 ? "fail"
+        : WarnCount > 0 ? "warn"
+        : UnprovenCount > 0 ? "unproven" : "pass";
     public string Verdict => FailCount > 0
         ? "Not yet — resolve the failures before applying power."
         : WarnCount > 0
             ? "Likely OK — review the warnings, then verify before powering on."
-            : "Deterministic checks pass — safe to power on (still verify before building).";
+            : UnprovenCount > 0
+                ? $"Can't say — {UnprovenCount} check{(UnprovenCount == 1 ? "" : "s")} couldn't be completed. Nothing here failed, but nothing here proves it's safe either."
+                : "Deterministic checks pass — safe to power on (still verify before building).";
 
     private void Refresh()
     {
@@ -61,6 +75,7 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         OnPropertyChanged(nameof(FailCount));
         OnPropertyChanged(nameof(WarnCount));
         OnPropertyChanged(nameof(PassCount));
+        OnPropertyChanged(nameof(UnprovenCount));
         OnPropertyChanged(nameof(OverallStatus));
         OnPropertyChanged(nameof(PassText));
         OnPropertyChanged(nameof(ChecksLabel));

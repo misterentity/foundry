@@ -26,7 +26,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     // Dispose the outgoing view when it's swapped out (e.g. ShellViewModel detaches from the static
     // AppLog.Logged event) so it — and its whole tab/project graph — can be collected.
-    partial void OnCurrentViewChanging(ObservableObject oldValue, ObservableObject newValue)
+    partial void OnCurrentViewChanging(ObservableObject? oldValue, ObservableObject newValue)
     {
         if (!ReferenceEquals(oldValue, newValue) && oldValue is IDisposable d) d.Dispose();
     }
@@ -143,6 +143,10 @@ public sealed partial class MainViewModel : ObservableObject
     public void OpenSample()
     {
         Project = DemoData.CreateSoilMoistureProject();
+        // Run the real engine over the sample. Its findings were hard-coded, so the report card showed
+        // numbers no rule had produced — and one click of "Re-run checks" silently replaced them with
+        // different ones. A sample that displays canned results is the same lie the engine exists to stop.
+        Foundry.Core.Validation.ProjectValidator.Revalidate(Project);
         _tracked = false;   // the sample is ephemeral, never written to the library
         AppLog.Info("project", "opened the sample project");
         ShowWorkspace();

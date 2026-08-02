@@ -23,6 +23,23 @@ public static class FootprintMap
 
     private static readonly Regex SizeToken = new(@"\b(0402|0603|0805|1206)\b", RegexOptions.Compiled);
 
+    /// <summary>A capacitance value written as a number + unit ("100nF", "10 uF") — the token form of the
+    /// old bare "uf"/"nf"/"pf" substring keys, which could never survive boundary matching.</summary>
+    private static readonly Regex CapValue =
+        new(@"\b\d+(?:\.\d+)?\s*(?:u|µ|n|p)f\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Keyword match at TOKEN boundaries. The heuristics below are substring keys ("led", "cap", "res"),
+    /// and a bare <c>Contains</c> silently mis-resolves any part whose name merely embeds one: "SSD1306
+    /// OLED" matched "led" and was handed a two-pad LED footprint, whose pads then cannot carry SDA/SCL,
+    /// so the fail-closed gate refused the board and the user was dead-ended by a substring. A boundary is
+    /// any non-alphanumeric character or the string edge, so multi-token keys ("sot-223", "arduino uno")
+    /// and hyphenated part names keep working.
+    /// </summary>
+    internal static bool HasToken(string hay, string word) =>
+        !string.IsNullOrEmpty(word) &&
+        Regex.IsMatch(hay, $@"(?<![a-z0-9]){Regex.Escape(word)}(?![a-z0-9])", RegexOptions.IgnoreCase);
+
     /// <summary>
     /// The chosen footprint lib id for a component plus a flag indicating it fell through to the generic
     /// header fallback (the caller emits a warning diagnostic when <see cref="IsFallback"/> is true).
@@ -48,7 +65,7 @@ public static class FootprintMap
         var hay = (spec.Name + " " + spec.Ref).ToLowerInvariant();
         var sizeId = SizeMetric.TryGetValue(SizeToken.Match(hay).Value, out var m) ? m : null;
 
-        bool Has(params string[] words) => words.Any(w => hay.Contains(w));
+        bool Has(params string[] words) => words.Any(w => HasToken(hay, w));
         bool Smd() => Has("smd", "sod", "sot", "0402", "0603", "0805", "1206");
 
         // ---- passives ----
@@ -58,7 +75,7 @@ public static class FootprintMap
                 return Heur("Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal");
             return Heur(SwapSize("Resistor_SMD:R_0805_2012Metric", "2012", sizeId));
         }
-        if (Has("capacitor", "cap ", " cap", "uf", "nf", "pf") || hay.EndsWith("cap"))
+        if (Has("capacitor", "cap", "decoupling", "bypass") || CapValue.IsMatch(hay))
         {
             if (Has("electrolytic"))
                 return Heur("Capacitor_THT:CP_Radial_D5.0mm_P2.50mm");

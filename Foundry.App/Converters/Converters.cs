@@ -27,7 +27,7 @@ public sealed class NetBrushConverter : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
 }
 
-/// <summary>severity (info/warn/fail/pass/ok) → brush.</summary>
+/// <summary>severity (info/warn/fail/pass/ok/unproven) → brush.</summary>
 public sealed class SeverityBrushConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c) =>
@@ -36,6 +36,7 @@ public sealed class SeverityBrushConverter : IValueConverter
             "warn" => Brushes.Res("Brush.Warn"),
             "fail" => Brushes.Res("Brush.Fail"),
             "info" => Brushes.Res("Brush.Info"),
+            "unproven" => Brushes.Res("Brush.Unproven"),
             "pass" or "ok" => Brushes.Res("Brush.Ok"),
             _ => Brushes.Res("Brush.InkSoft"),
         };
@@ -52,6 +53,7 @@ public sealed class SeverityTagBgConverter : IValueConverter
             "warn" => Brushes.Res("Brush.TagWarnBg"),
             "fail" => Brushes.Res("Brush.TagFailBg"),
             "info" => Brushes.Res("Brush.TagInfoBg"),
+            "unproven" => Brushes.Res("Brush.TagUnprovenBg"),
             "pass" or "ok" => Brushes.Res("Brush.TagOkBg"),
             "accent" => Brushes.Res("Brush.TagAccentBg"),
             _ => Brushes.Res("Brush.Surface1"),
@@ -69,6 +71,7 @@ public sealed class SeverityTagBorderConverter : IValueConverter
             "warn" => Brushes.Res("Brush.TagWarnBorder"),
             "fail" => Brushes.Res("Brush.TagFailBorder"),
             "info" => Brushes.Res("Brush.TagInfoBorder"),
+            "unproven" => Brushes.Res("Brush.TagUnprovenBorder"),
             "pass" or "ok" => Brushes.Res("Brush.TagOkBorder"),
             "accent" => Brushes.Res("Brush.TagAccentBorder"),
             _ => Brushes.Res("Brush.Hairline3"),
@@ -86,6 +89,7 @@ public sealed class SeverityFindingBgConverter : IValueConverter
             "warn" => Brushes.Res("Brush.FindWarnBg"),
             "fail" => Brushes.Res("Brush.FindFailBg"),
             "info" => Brushes.Res("Brush.FindInfoBg"),
+            "unproven" => Brushes.Res("Brush.FindUnprovenBg"),
             "pass" or "ok" => Brushes.Res("Brush.FindPassBg"),
             _ => Brushes.Res("Brush.Surface0"),
         };

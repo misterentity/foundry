@@ -41,6 +41,16 @@ jobs:
           python -m pip install --quiet pytest
           python -m pytest Foundry.Core/Pcb/KiCadScripts/test_build_board.py -q
 
+      # The CAD sidecar produces a physical object; these assert the SOLID (watertight, and every face's
+      # cutout actually removes material) rather than that the call returned bytes. Without this lane a
+      # face:"top" port silently vanished and the lid printed sealed.
+      - name: CAD sidecar geometry tests (real trimesh + manifold3d CSG)
+        env:
+          FOUNDRY_REQUIRE_CSG: '1'   # a missing kernel must FAIL this lane, never skip it green
+        run: |
+          python -m pip install --quiet -r sidecar/requirements.txt
+          python -m pytest sidecar/test_enclosure.py -q
+
   # The auto-PCB moat's correctness gate: build real boards on a real KiCad and read pad->net back to assert
   # it equals intent (incl. the fail-closed refusal of an unmapped logical pin). Gates merges so a net->pad
   # regression cannot reach main. Mirrors the release workflow's pcb-live lane.

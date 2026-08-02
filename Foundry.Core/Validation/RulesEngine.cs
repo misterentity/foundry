@@ -24,6 +24,7 @@ public static class RulesEngine
             .ToList();
         var aliases = eps.Select(e => e.Alias).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
+        Referential(eps, kb, findings);
         PinConflicts(connections, kb, findings);
         StrappingPins(eps, kb, findings);
         InputOnlyMisuse(connections, kb, findings);
@@ -42,6 +43,46 @@ public static class RulesEngine
         return dot < 0
             ? new Endpoint(endpoint, "", net)
             : new Endpoint(endpoint[..dot], endpoint[(dot + 1)..], net);
+    }
+
+    // ---- Rule: a net references a part or a pin that the design never declared ----
+    // Every other rule reaches the KB via kb.ByAlias(..)?.Pin(..) and silently skips a miss, so a netlist
+    // naming parts or pins that don't exist used to produce ZERO findings and roll up to "pass" — the engine
+    // reporting a clean bill of health precisely where it had nothing to check. An endpoint that cannot be
+    // resolved is not a passing endpoint; it is an unvalidatable one, and it fails.
+    private static void Referential(List<Endpoint> eps, ComponentKb kb, List<Finding> findings)
+    {
+        foreach (var alias in eps.Select(e => e.Alias)
+                     .Where(a => a.Length > 0)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Where(a => kb.ByAlias(a) is null))
+            findings.Add(new Finding
+            {
+                Severity = "fail", Code = "NET-REF",
+                Title = $"Net references undeclared part “{alias}”",
+                Description = $"The netlist wires {alias}, but no component with that alias is declared, so none of "
+                            + "its connections can be checked for voltage, direction or current. Declare the part or "
+                            + "correct the alias.",
+                Refs = new() { alias },
+                Fix = "Declare the missing part",
+            });
+
+        foreach (var e in eps.Where(e => e.Pin.Length > 0).DistinctBy(e => e.Full, StringComparer.OrdinalIgnoreCase))
+        {
+            var spec = kb.ByAlias(e.Alias);
+            // A part declared with NO pin table makes no pin claims to contradict (common for passives), so it
+            // is not evidence of an error — only a populated table that lacks this pin is.
+            if (spec is null || spec.Pins.Count == 0 || spec.Pin(e.Pin) is not null) continue;
+            findings.Add(new Finding
+            {
+                Severity = "fail", Code = "NET-PIN",
+                Title = $"{e.Alias} has no pin “{e.Pin}”",
+                Description = $"The netlist wires {e.Full}, but {spec.Name} declares no such pin. Its level and "
+                            + "direction cannot be checked, and the PCB build will refuse to place it.",
+                Refs = new() { e.Full },
+                Fix = "Correct the pin",
+            });
+        }
     }
 
     // ---- Rule: two distinct signal nets claim the same MCU pin ----
@@ -400,18 +441,21 @@ public static class RulesEngine
     }
 
     // ---- ordering + numbering (fail → warn → info → pass), to match the UI ----
-    private static List<Finding> Order(List<Finding> findings)
+    internal static List<Finding> Order(List<Finding> findings)
     {
-        int Rank(string s) => s switch { "fail" => 0, "warn" => 1, "info" => 2, _ => 3 };
+        int Rank(string s) => s switch { "fail" => 0, "warn" => 1, "unproven" => 2, "info" => 3, _ => 4 };
+        // (internal so callers that ADD findings after Validate — e.g. mechanical fit — can re-sort and
+        //  re-number the combined set; appending afterwards otherwise leaves them unranked and unnumbered)
         var ordered = Collapse(findings).OrderBy(f => Rank(f.Severity)).ToList();
 
-        int w = 0, fail = 0, info = 0;
+        int w = 0, fail = 0, info = 0, unproven = 0;
         foreach (var f in ordered)
         {
             f.Num = f.Severity switch
             {
                 "fail" => $"F·{++fail:00}",
                 "warn" => $"W·{++w:00}",
+                "unproven" => $"?·{++unproven:00}",
                 "info" => $"i·{++info:00}",
                 _ => "OK",
             };

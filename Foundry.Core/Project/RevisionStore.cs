@@ -54,6 +54,21 @@ public static class RevisionStore
         return list.OrderByDescending(r => r.RevId).ToList();
     }
 
+    /// <summary>
+    /// Remove every revision snapshot for a project. Called when the project is deleted so its history
+    /// doesn't outlive it: an orphaned <c>&lt;id&gt;.rev</c> folder is silently adopted by the next project
+    /// that happens to be created with the same id, presenting another design's history as your own.
+    /// </summary>
+    public static void DeleteAll(string id)
+    {
+        try
+        {
+            var dir = RevDir(id);
+            if (System.IO.Directory.Exists(dir)) System.IO.Directory.Delete(dir, recursive: true);
+        }
+        catch (Exception ex) { Diagnostics.AppLog.Warn("revision", $"couldn't remove revisions for {id}: {ex.Message}"); }
+    }
+
     /// <summary>Load a snapshot back into a Project (for restore).</summary>
     public static Project? Load(string id, string revId)
     {

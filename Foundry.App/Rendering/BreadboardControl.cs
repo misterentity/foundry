@@ -53,7 +53,7 @@ public sealed class BreadboardControl : FrameworkElement
 
     private sealed class Chip { public required string Title; public double X, Y, W, H; public readonly List<(string pin, double x, double y, string net, string endpoint)> Pins = new(); }
 
-    private const double Margin = 50, ChipW = 150, ChipGap = 56, ChipH = 96, BoardTop = 96;
+    private const double BoardMargin = 50, ChipW = 150, ChipGap = 56, ChipH = 96, BoardTop = 96;
     private double _w = 1000, _h = 520;
     private readonly List<Chip> _chips = new();
     private readonly List<(Point a, Point b, Color c, string epA, string epB)> _jumpers = new();
@@ -78,7 +78,7 @@ public sealed class BreadboardControl : FrameworkElement
         if (aliases.Count == 0) { _w = 1000; _h = 520; return; }
 
         int n = aliases.Count;
-        _w = Math.Max(960, Margin * 2 + n * ChipW + (n - 1) * ChipGap);
+        _w = Math.Max(960, BoardMargin * 2 + n * ChipW + (n - 1) * ChipGap);
         _h = 560;
         double chipY = BoardTop + 150;
 
@@ -96,7 +96,7 @@ public sealed class BreadboardControl : FrameworkElement
                 .GroupBy(t => t.pin, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
                 .ToList();
 
-            var chip = new Chip { Title = spec?.Name ?? alias, X = Margin + i * (ChipW + ChipGap), Y = chipY, W = ChipW, H = ChipH };
+            var chip = new Chip { Title = spec?.Name ?? alias, X = BoardMargin + i * (ChipW + ChipGap), Y = chipY, W = ChipW, H = ChipH };
             int pc = Math.Max(1, pins.Count);
             for (int p = 0; p < pins.Count; p++)
             {

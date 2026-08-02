@@ -104,24 +104,69 @@ public static class FreeRoutingInstaller
     /// </summary>
     public static async Task<string> DownloadJreAsync(CancellationToken ct = default)
     {
-        System.IO.Directory.CreateDirectory(JavaToolsDir);
-        var zip = System.IO.Path.Combine(JavaToolsDir, "jre.zip");
+        var parent = System.IO.Path.GetDirectoryName(JavaToolsDir)!;
+        System.IO.Directory.CreateDirectory(parent);
+        var zip = System.IO.Path.Combine(parent, "jre.zip");
         AppLog.Info("pcb", "downloading Temurin 25 JRE (portable)…");
-        // The Adoptium 'latest' endpoint has no stable hash, so verify integrity via Authenticode on the
-        // extracted java.exe (Eclipse Adoptium embed-signs Windows binaries) rather than a pinned SHA.
+
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(15) })
-            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, JreUrl, zip, null, ct);
-        Provisioning.DownloadVerifier.ExtractZipSafe(zip, JavaToolsDir, overwrite: true);
-        try { System.IO.File.Delete(zip); } catch { }
-        var java = LocateJava() ?? throw new InvalidOperationException("java.exe not found after JRE download.");
-        // Fail-closed: an unsigned/tampered JRE is deleted and the install throws.
-        if (!Provisioning.DownloadVerifier.VerifyAuthenticode(java))
         {
-            try { System.IO.Directory.Delete(JavaToolsDir, recursive: true); } catch { }
-            throw new Provisioning.IntegrityException("downloaded JRE java.exe failed Authenticode verification — refusing to use it.");
+            // Anchor on the checksum Adoptium PUBLISHES for the exact asset, resolved over TLS at install
+            // time. The rolling 'latest' URL has no stable hash to pin, and pinning a publisher-NAME token
+            // instead is guesswork about certificate wording that silently bricks the install when it drifts.
+            var (link, sha256) = await ResolveJreAssetAsync(http, ct);
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, link, zip, sha256, ct);
         }
+        try
+        {
+            Provisioning.DownloadVerifier.ExtractVerifiedZip(zip, JavaToolsDir);
+        }
+        finally { try { System.IO.File.Delete(zip); } catch { } }
+
+        var java = LocateJava() ?? throw new InvalidOperationException("java.exe not found after JRE download.");
         AppLog.Info("pcb", $"Java (JRE 25) installed at {java}");
         return java;
+    }
+
+    /// <summary>Adoptium metadata endpoint returning the exact asset link + its published SHA-256.</summary>
+    public const string JreMetadataUrl =
+        "https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre&os=windows";
+
+    /// <summary>
+    /// Resolve the current Temurin 25 JRE download link and its published SHA-256 from the Adoptium API.
+    /// Throws <see cref="Provisioning.IntegrityException"/> rather than falling back to an unverified
+    /// download — no checksum means no install.
+    /// </summary>
+    private static async Task<(string Link, string Sha256)> ResolveJreAssetAsync(HttpClient http, CancellationToken ct)
+    {
+        string body;
+        try { body = await http.GetStringAsync(JreMetadataUrl, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new Provisioning.IntegrityException(
+                $"couldn't reach the Adoptium release metadata to verify the JRE download: {ex.Message}");
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            foreach (var asset in doc.RootElement.EnumerateArray())
+            {
+                if (!asset.TryGetProperty("binary", out var bin) ||
+                    !bin.TryGetProperty("package", out var pkg)) continue;
+                var link = pkg.TryGetProperty("link", out var l) ? l.GetString() : null;
+                var sum = pkg.TryGetProperty("checksum", out var c) ? c.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(link) && !string.IsNullOrWhiteSpace(sum) &&
+                    link!.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                    return (link, sum!);
+            }
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new Provisioning.IntegrityException($"Adoptium release metadata was not valid JSON: {ex.Message}");
+        }
+        throw new Provisioning.IntegrityException(
+            "Adoptium release metadata listed no Windows x64 JRE zip with a published checksum — refusing to download unverified.");
     }
 
     /// <summary>Download the single FreeRouting jar into ToolsDir on demand. Returns the jar path.</summary>

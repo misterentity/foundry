@@ -16,7 +16,7 @@ public sealed record BuildResult(bool Installed, bool Compiled, bool Ok, string 
 }
 
 /// <summary>
-/// A compiled firmware image on disk for the inferred board. Consumed by the emulator (Renode loads the
+/// A compiled firmware image on disk for a resolved board FQBN. Consumed by the emulator (Renode loads the
 /// ELF) and the one-click flasher (arduino-cli uploads from <see cref="BuildDir"/>). <see cref="BuildDir"/>
 /// is owned by the caller (NOT deleted) so it survives long enough to be flashed/loaded.
 /// </summary>
@@ -46,6 +46,12 @@ public sealed record UploadResult(bool Installed, bool Ok, string Summary, strin
 /// </summary>
 public static class FirmwareBuilder
 {
+    public const string ArduinoCliVersion = "1.5.1";
+    public const string ArduinoCliZipName = "arduino-cli_1.5.1_Windows_64bit.zip";
+    public const string ArduinoCliSha256 = "FABE42E0EB04D00E776A66178299FF95A46C623DBC260F997E58FD514853DD40";
+    public const string ArduinoCliUrl =
+        "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_64bit.zip";
+
     public static string LocalToolPath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Foundry", "tools", "arduino-cli.exe");
 
@@ -116,7 +122,9 @@ public static class FirmwareBuilder
             // unvalidated value (Fqbn already sanitises, but guard the exec site against any future regression).
             if (!IsValidFqbn(fqbn))
                 return new BuildResult(true, true, false, $"Refusing to compile — unsafe board id '{fqbn}'.", Array.Empty<BuildDiagnostic>());
-            await EnsureCoreAsync(cli, fqbn, ct);   // install the board core on first use for this vendor
+            if (await EnsureCoreAsync(cli, fqbn, ct) is { } coreError)   // board core, incl. third-party indexes
+                return new BuildResult(true, true, false, coreError, Array.Empty<BuildDiagnostic>());
+            await EnsureLibrariesAsync(cli, project, ct);   // the sketch's declared #include dependencies
             Diagnostics.AppLog.Info("build", $"compiling firmware · {fqbn}");
             var run = await Diagnostics.ProcessRunner.RunAsync(cli,
                 $"compile --fqbn {fqbn} --format json --warnings none \"{sketchDir}\"",
@@ -140,12 +148,13 @@ public static class FirmwareBuilder
 
     /// <summary>
     /// Compile the firmware to a real image under <paramref name="outputDir"/> and resolve the produced
-    /// ELF/HEX/BIN for the inferred FQBN. Like <see cref="CompileAsync"/> but adds <c>--output-dir</c> and
+    /// ELF/HEX/BIN for the resolved FQBN. Like <see cref="CompileAsync"/> but adds <c>--output-dir</c> and
     /// does NOT delete <paramref name="outputDir"/> — the emulator and flasher consume the artefacts.
     /// </summary>
-    public static async Task<CompiledImage> CompileToImageAsync(Project.Project project, string outputDir, CancellationToken ct = default)
+    public static async Task<CompiledImage> CompileToImageAsync(Project.Project project, string outputDir,
+        CancellationToken ct = default, string? fqbnOverride = null)
     {
-        var fqbn = Fqbn(project);
+        var fqbn = string.IsNullOrWhiteSpace(fqbnOverride) ? Fqbn(project) : fqbnOverride.Trim();
         if (project.Firmware.Platform.Contains("python", StringComparison.OrdinalIgnoreCase))
             return new CompiledImage(false, fqbn, null, null, null, outputDir,
                 new[] { new BuildDiagnostic("error", "", 0, "MicroPython firmware has no compiled image — flash to your board to run it.") });
@@ -175,7 +184,10 @@ public static class FirmwareBuilder
             if (!IsValidFqbn(fqbn))   // defense in depth: never interpolate an unvalidated board id into the CLI
                 return new CompiledImage(false, fqbn, null, null, null, outputDir,
                     new[] { new BuildDiagnostic("error", "", 0, $"Refusing to compile — unsafe board id '{fqbn}'.") });
-            await EnsureCoreAsync(cli, fqbn, ct);
+            if (await EnsureCoreAsync(cli, fqbn, ct) is { } coreError)
+                return new CompiledImage(false, fqbn, null, null, null, outputDir,
+                    new[] { new BuildDiagnostic("error", "", 0, coreError) });
+            await EnsureLibrariesAsync(cli, project, ct);
             Diagnostics.AppLog.Info("build", $"building firmware image · {fqbn}");
             var run = await Diagnostics.ProcessRunner.RunAsync(cli,
                 $"compile --fqbn {fqbn} --output-dir \"{outputDir}\" --format json --warnings none \"{sketchDir}\"",
@@ -374,14 +386,20 @@ public static class FirmwareBuilder
         var buildDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_flash_" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
-            var image = await CompileToImageAsync(project, buildDir, ct);
+            var image = await CompileToImageAsync(project, buildDir, ct: ct, fqbnOverride: fqbn);
             if (!image.Ok)
             {
                 var firstErr = image.Diagnostics.FirstOrDefault(d => d.Severity == "error")?.Message ?? "compile failed";
                 return new UploadResult(true, false, $"Won't flash — firmware didn't compile for {fqbn}.", firstErr);
             }
+            if (!image.Fqbn.Equals(fqbn, StringComparison.OrdinalIgnoreCase))
+                return new UploadResult(true, false, "Won't flash — compiled image does not match the selected board.",
+                    $"compiled {image.Fqbn}, selected {fqbn}");
 
-            await EnsureCoreAsync(cli, fqbn, ct);
+            // CompileToImageAsync above already installed (and verified) the core for this exact FQBN, so a
+            // failure here would be a fresh environment change — surface it rather than flashing blind.
+            if (await EnsureCoreAsync(cli, fqbn, ct) is { } coreError)
+                return new UploadResult(true, false, "Won't flash — the board core isn't available.", coreError);
             // --input-dir points arduino-cli at the artefacts CompileToImageAsync already produced (no recompile).
             var args = $"upload -p {board.Port} --fqbn {fqbn} --input-dir \"{buildDir}\" --format json";
             Diagnostics.AppLog.Info("flash", $"flashing {fqbn} → {board.Port}");
@@ -404,22 +422,145 @@ public static class FirmwareBuilder
         finally { try { System.IO.Directory.Delete(buildDir, true); } catch { } }
     }
 
-    /// <summary>Ensure the platform core for an FQBN is installed (e.g. esp32:esp32). One-time per vendor.</summary>
-    private static async Task EnsureCoreAsync(string cli, string fqbn, CancellationToken ct)
+    /// <summary>
+    /// Board-manager package indexes for the third-party cores Foundry's OWN <see cref="Fqbn"/> inference
+    /// targets. Without these, <c>core install esp32:esp32</c> can never resolve — the platform simply is not
+    /// in arduino-cli's built-in index — so the README's flagship ESP32 device could not compile or flash.
+    /// <para>
+    /// These are BUILD-TIME constants and never AI- or user-supplied. That distinction is the whole point:
+    /// <see cref="Fqbn"/> deliberately refuses a model-supplied board hint containing flags
+    /// (see <see cref="IsValidFqbn"/>) precisely so an attacker-chosen package index can't reach this
+    /// command line. Adding a URL here is a deliberate trust decision; forwarding one is not.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, string> BoardIndexUrls = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["esp32"]   = "https://espressif.github.io/arduino-esp32/package_esp32_index.json",
+        ["esp8266"] = "https://arduino.esp8266.com/stable/package_esp8266com_index.json",
+        ["rp2040"]  = "https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json",
+    };
+
+    /// <summary>The <c>--additional-urls</c> argument for an FQBN's vendor, or "" for the built-in index.</summary>
+    internal static string AdditionalUrlsArg(string fqbn)
+    {
+        var vendor = fqbn.Split(':').FirstOrDefault() ?? "";
+        return BoardIndexUrls.TryGetValue(vendor, out var url) ? $" --additional-urls {url}" : "";
+    }
+
+    /// <summary>
+    /// Ensure the platform core for an FQBN is installed (e.g. esp32:esp32). Returns null on success, or a
+    /// user-facing reason on failure. Previously this swallowed every error, so a core that could not be
+    /// installed surfaced only as an opaque compiler error much later.
+    /// </summary>
+    private static async Task<string?> EnsureCoreAsync(string cli, string fqbn, CancellationToken ct)
     {
         var parts = fqbn.Split(':');
-        if (parts.Length < 2) return;
+        if (parts.Length < 2) return null;
         var platform = $"{parts[0]}:{parts[1]}";   // vendor:arch
+        var extra = AdditionalUrlsArg(fqbn);
         try
         {
-            var list = await RunAsync(cli, "core list", ct);
-            if (list.stdout.Contains(platform, StringComparison.OrdinalIgnoreCase)) return;
+            var list = await RunAsync(cli, "core list" + extra, ct);
+            if (list.stdout.Contains(platform, StringComparison.OrdinalIgnoreCase)) return null;
+
             Diagnostics.AppLog.Info("build", $"installing board core {platform} (one-time)…");
-            await RunAsync(cli, "core update-index", ct);
-            await RunAsync(cli, $"core install {platform}", ct);
+            await RunAsync(cli, "core update-index" + extra, ct);
+            var install = await RunAsync(cli, $"core install {platform}{extra}", ct);
+            if (install.code != 0)
+            {
+                var detail = Detail(install.stdout, install.stderr);
+                Diagnostics.AppLog.Error("build", $"board core {platform} install failed · {detail}");
+                return $"Couldn't install the {platform} board core — {detail}";
+            }
+            Diagnostics.AppLog.Info("build", $"board core {platform} installed");
+            return null;
         }
-        catch { /* compile will surface a clear "platform not installed" error if this fails */ }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Diagnostics.AppLog.Error("build", $"board core {platform} install error: {ex.Message}");
+            return $"Couldn't install the {platform} board core — {ex.Message}";
+        }
     }
+
+    // A library name/version reaches a command line, so it is validated as strictly as the FQBN is.
+    private static readonly System.Text.RegularExpressions.Regex SafeLibName =
+        new(@"^[A-Za-z0-9 _.\-]{1,64}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex SafeLibVersion =
+        new(@"^[A-Za-z0-9.\-]{1,32}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Libraries that ship WITH a core and are not in the library index — installing them fails.</summary>
+    private static readonly HashSet<string> CoreBundledLibs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "arduino core", "wire", "wire (i2c)", "spi", "eeprom", "serial", "softwareserial",
+        "wifi", "wificlientsecure", "webserver", "httpclient", "preferences", "fs", "spiffs",
+        "littlefs", "esp8266wifi", "esp8266httpclient", "esp8266webserver", "sd", "math",
+    };
+
+    /// <summary>
+    /// The <c>lib install</c> argument for one declared library, or null when it must be SKIPPED: a
+    /// core-bundled/"built-in" entry (not in the library index — installing it just fails) or a name that
+    /// fails validation. A pinned version is only appended when it too validates, so a malformed version
+    /// degrades to "latest" instead of reaching the shell. Pure + unit-testable.
+    /// </summary>
+    internal static string? LibraryInstallSpec(string? name, string? version)
+    {
+        var n = (name ?? "").Trim();
+        var v = (version ?? "").Trim();
+        if (n.Length == 0) return null;
+        if (CoreBundledLibs.Contains(n) || v.Equals("built-in", StringComparison.OrdinalIgnoreCase)) return null;
+        if (!SafeLibName.IsMatch(n)) return null;
+        return v.Length > 0 && SafeLibVersion.IsMatch(v) ? $"{n}@{v}" : n;
+    }
+
+    /// <summary>
+    /// Install the libraries the generated sketch declares (<see cref="Project.Firmware.Libraries"/>) before
+    /// compiling. Nothing did this before, so any AI sketch doing what its prompt instructs — real Wi-Fi/MQTT/
+    /// sensor code — failed on its first #include. Core-bundled and "built-in" entries are skipped (they are
+    /// not in the library index); a name that fails validation is skipped rather than passed to the shell.
+    /// Returns the names that could not be installed, so the caller can report them honestly.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>> EnsureLibrariesAsync(
+        string cli, Project.Project project, CancellationToken ct)
+    {
+        var failed = new List<string>();
+        foreach (var lib in project.Firmware.Libraries)
+        {
+            var name = (lib.Key ?? "").Trim();
+            if (LibraryInstallSpec(name, lib.Value) is not { } spec) continue;
+            try
+            {
+                var r = await RunAsync(cli, $"lib install \"{spec}\"", ct);
+                if (r.code == 0) { Diagnostics.AppLog.Info("build", $"library installed · {spec}"); continue; }
+
+                // A pinned version that does not exist is common in generated designs — retry unpinned
+                // before giving up, so one bad version string doesn't fail an otherwise good sketch.
+                if (spec != name)
+                {
+                    var retry = await RunAsync(cli, $"lib install \"{name}\"", ct);
+                    if (retry.code == 0)
+                    {
+                        Diagnostics.AppLog.Warn("build", $"library {name}: pinned version unavailable ({spec}) — installed latest");
+                        continue;
+                    }
+                }
+                Diagnostics.AppLog.Warn("build", $"library install failed · {spec} · {Detail(r.stdout, r.stderr)}");
+                failed.Add(name);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Diagnostics.AppLog.Warn("build", $"library install error · {spec} · {ex.Message}");
+                failed.Add(name);
+            }
+        }
+        return failed;
+    }
+
+    private static string Detail(string stdout, string stderr) =>
+        !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim().Split('\n')[0].Trim()
+        : !string.IsNullOrWhiteSpace(stdout) ? stdout.Trim().Split('\n')[^1].Trim()
+        : "no output";
 
     // Thin adapter over the shared ProcessRunner: concurrent stdout/stderr drain (no pipe-buffer deadlock),
     // a timeout, and process-tree kill on timeout/cancel. arduino-cli core/compile/upload → ArduinoTimeout.
@@ -435,16 +576,19 @@ public static class FirmwareBuilder
         var dir = System.IO.Path.GetDirectoryName(LocalToolPath)!;
         System.IO.Directory.CreateDirectory(dir);
         var zip = System.IO.Path.Combine(dir, "arduino-cli.zip");
-        // Arduino embed-signs arduino-cli.exe, so integrity is verified by Authenticode on the extracted exe
-        // (covers the rolling 'latest' URL without re-pinning a SHA each release).
+        // The release ZIP is pinned by SHA-256 — that IS the integrity anchor. Arduino does NOT
+        // Authenticode-sign arduino-cli.exe (verified: Get-AuthenticodeSignature reports NotSigned), so the
+        // signature gate that used to follow this could never pass and made the tool uninstallable.
+        // Extraction is quarantined so a rejected payload never lands in the shared tools dir.
         using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMinutes(5) })
-            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http,
-                "https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Windows_64bit.zip", zip, null, ct);
-        Provisioning.DownloadVerifier.ExtractZipSafe(zip, dir, overwrite: true);
-        try { System.IO.File.Delete(zip); } catch { }
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, ArduinoCliUrl, zip, ArduinoCliSha256, ct);
+        try
+        {
+            Provisioning.DownloadVerifier.ExtractVerifiedFile(zip, "arduino-cli.exe", LocalToolPath);
+        }
+        finally { try { System.IO.File.Delete(zip); } catch { } }
+
         if (!System.IO.File.Exists(LocalToolPath)) throw new InvalidOperationException("arduino-cli.exe not found after download.");
-        // Fail-closed: refuse to use an arduino-cli.exe that isn't validly publisher-signed.
-        Provisioning.DownloadVerifier.RequireAuthenticode(LocalToolPath, "downloaded arduino-cli.exe");
         await RunAsync(LocalToolPath, "core update-index", ct);
         Diagnostics.AppLog.Info("build", "arduino-cli installed to app tools folder");
         return LocalToolPath;

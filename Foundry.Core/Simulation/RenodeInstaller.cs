@@ -19,6 +19,13 @@ public static class RenodeInstaller
     private const string PortableUrl =
         "https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.windows-portable-dotnet.zip";
 
+    /// <summary>
+    /// Pinned SHA-256 of the portable zip, computed from the official GitHub release asset over TLS.
+    /// Antmicro does NOT Authenticode-sign Renode.exe (verified: Get-AuthenticodeSignature reports
+    /// NotSigned), so a signature gate here can never pass — the archive hash is the only real anchor.
+    /// </summary>
+    public const string PortableSha256 = "D09B7934CFD560CD06BDE8F131EF78F521F10D423D5AAC6096F2A583224AEB3E";
+
     public static string ToolsDir => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Foundry", "tools", "renode");
 
@@ -48,17 +55,21 @@ public static class RenodeInstaller
     /// <summary>Download the pinned portable Renode zip into <see cref="ToolsDir"/> and extract. Returns the exe path.</summary>
     public static async Task<string> DownloadAsync(CancellationToken ct = default)
     {
-        System.IO.Directory.CreateDirectory(ToolsDir);
-        var zip = System.IO.Path.Combine(ToolsDir, "renode.zip");
+        var parent = System.IO.Path.GetDirectoryName(ToolsDir)!;
+        System.IO.Directory.CreateDirectory(parent);
+        var zip = System.IO.Path.Combine(parent, "renode.zip");
         Diagnostics.AppLog.Info("sim", $"downloading Renode {Version} (portable) — this is a large file…");
+        // Fail-closed on the ARCHIVE hash (the publisher ships no signature), then quarantine-then-promote so
+        // a rejected payload never lands where Locate() would later report it as installed.
         using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
-            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, PortableUrl, zip, null, ct);
-        // Zip-slip-safe extract (a malicious archive can't write outside ToolsDir).
-        Provisioning.DownloadVerifier.ExtractZipSafe(zip, ToolsDir, overwrite: true);
-        try { System.IO.File.Delete(zip); } catch { }
+            await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, PortableUrl, zip, PortableSha256, ct);
+        try
+        {
+            Provisioning.DownloadVerifier.ExtractVerifiedZip(zip, ToolsDir);
+        }
+        finally { try { System.IO.File.Delete(zip); } catch { } }
+
         var exe = Locate() ?? throw new InvalidOperationException("Renode.exe not found after download.");
-        // Fail-closed: refuse to run a Renode.exe that isn't validly publisher-signed.
-        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded Renode.exe");
         Diagnostics.AppLog.Info("sim", $"Renode {Version} installed at {exe}");
         return exe;
     }

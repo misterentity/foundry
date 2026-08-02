@@ -229,4 +229,90 @@ public class ValidationTests
         var findings = RulesEngine.Validate(connections, kb);
         Assert.Contains(findings, f => f is { Code: "GND-NC", Severity: "warn" });
     }
+
+    // ---- referential integrity: the engine must not report health for what it never checked ----
+
+    // Every rule resolves parts through kb.ByAlias(..) and skips a miss, so a netlist naming a part the
+    // design never declared previously produced ZERO findings — a clean bill of health over an
+    // unvalidatable design.
+    [Fact]
+    public void UndeclaredPart_InANet_Fails()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "m", Alias = "MCU", Name = "MCU", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO4", Kind = PinKind.Bidir }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } },
+        });
+        var connections = new List<Connection>
+        {
+            new() { From = "MCU.GPIO4", To = "GHOST.OUT", Net = "signal" },   // GHOST is never declared
+        };
+
+        var findings = RulesEngine.Validate(connections, kb);
+        Assert.Contains(findings, f => f is { Code: "NET-REF", Severity: "fail" } && f.Refs.Contains("GHOST"));
+    }
+
+    [Fact]
+    public void InventedPin_OnADeclaredPart_Fails()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "m", Alias = "MCU", Name = "MCU", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO4", Kind = PinKind.Bidir }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } },
+            new ComponentSpec { Ref = "s", Alias = "SEN", Name = "Sensor", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "OUT", Kind = PinKind.Output }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } },
+        });
+        var connections = new List<Connection>
+        {
+            new() { From = "MCU.GPIO99", To = "SEN.OUT", Net = "signal" },   // GPIO99 does not exist
+        };
+
+        var findings = RulesEngine.Validate(connections, kb);
+        Assert.Contains(findings, f => f is { Code: "NET-PIN", Severity: "fail" } && f.Refs.Contains("MCU.GPIO99"));
+    }
+
+    // A part with no pin table makes no claims to contradict (common for passives) — not an error.
+    [Fact]
+    public void PartWithNoPinTable_DoesNotFailReferentialCheck()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "m", Alias = "MCU", Name = "MCU", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO4", Kind = PinKind.Bidir } } },
+            new ComponentSpec { Ref = "r", Alias = "R1", Name = "220R resistor" },   // no Pins
+        });
+        var connections = new List<Connection>
+        {
+            new() { From = "MCU.GPIO4", To = "R1.1", Net = "signal" },
+        };
+
+        var findings = RulesEngine.Validate(connections, kb);
+        Assert.DoesNotContain(findings, f => f.Code is "NET-REF" or "NET-PIN");
+    }
+
+    // The rollup is what the report card renders; an unresolvable netlist must never reach "pass".
+    [Fact]
+    public void UnresolvableNetlist_CannotRollUpToPass()
+    {
+        var p = new Project
+        {
+            Components = new()
+            {
+                new ComponentSpec { Ref = "m", Alias = "MCU", Name = "MCU", LogicV = 3.3,
+                    Pins = new() { new PinSpec { Name = "GPIO4", Kind = PinKind.Bidir }, new PinSpec { Name = "GND", Kind = PinKind.Ground } } },
+            },
+            Connections = new() { new Connection { From = "MCU.GPIO4", To = "GHOST.OUT", Net = "signal" } },
+        };
+
+        ProjectValidator.Revalidate(p);
+        Assert.Equal("fail", p.Validation);
+    }
+
+    [Fact]
+    public void DemoProject_StillHasNoReferentialFailures()
+    {
+        var demo = Foundry.Core.Project.DemoData.CreateSoilMoistureProject();
+        var findings = RulesEngine.Validate(demo.Connections, new ComponentKb(demo.Components));
+        Assert.DoesNotContain(findings, f => f.Code is "NET-REF" or "NET-PIN");
+    }
 }

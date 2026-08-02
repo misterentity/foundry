@@ -65,7 +65,13 @@ public static class ProjectStore
 
     public static void DeleteById(string id)
     {
-        try { var p = PathFor(id); if (File.Exists(p)) File.Delete(p); Diagnostics.AppLog.Info("project", $"deleted {id} from library"); }
+        try
+        {
+            var p = PathFor(id);
+            if (File.Exists(p)) File.Delete(p);
+            RevisionStore.DeleteAll(id);   // don't leave history for the next project with this id to inherit
+            Diagnostics.AppLog.Info("project", $"deleted {id} from library");
+        }
         catch { /* best effort */ }
     }
 

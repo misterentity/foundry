@@ -1,4 +1,5 @@
 using Foundry.Core.Pcb;
+using Foundry.Core.Firmware;
 using Foundry.Core.Toolchain;
 
 namespace Foundry.Tests;
@@ -152,6 +153,23 @@ public class FreeRoutingInstallerProvisioningTests
             // If we created the tools dir solely for this test, remove it to avoid masking real state.
             if (!preexisting) { try { Directory.Delete(FreeRoutingInstaller.JavaToolsDir, recursive: true); } catch { } }
         }
+    }
+}
+
+public class ArduinoCliProvisioningTests
+{
+    [Fact]
+    public void ArduinoCliUrl_IsVersionPinned()
+    {
+        Assert.Contains(FirmwareBuilder.ArduinoCliVersion, FirmwareBuilder.ArduinoCliUrl);
+        Assert.DoesNotContain("latest", FirmwareBuilder.ArduinoCliUrl, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(FirmwareBuilder.ArduinoCliZipName, FirmwareBuilder.ArduinoCliUrl);
+    }
+
+    [Fact]
+    public void ArduinoCliSha256_IsPinned64HexDigest()
+    {
+        Assert.Matches("^[0-9A-Fa-f]{64}$", FirmwareBuilder.ArduinoCliSha256);
     }
 }
 

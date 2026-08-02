@@ -165,6 +165,63 @@ public class FootprintMapTests
         Assert.Equal("J1", FootprintMap.RefOf("J1"));
         Assert.Equal("1", FootprintMap.PinOf("J1"));   // no dot ⇒ pad 1
     }
+
+    // ---- keyword matching must respect token boundaries ----
+
+    // The regression that motivated HasToken: "OLED" embeds "led", so an I²C display resolved to a
+    // TWO-PAD LED footprint. Its SDA/SCL/VCC/GND pins then had no pad to land on, and because the choice
+    // was reported as a RESOLVED footprint (not a placeholder), build_board.py's gate refused to
+    // ordinal-map them — so one substring silently dead-ended the entire board build.
+    [Theory]
+    [InlineData("0.96\" OLED display SSD1306")]
+    [InlineData("SSD1306 OLED")]
+    [InlineData("1.3in OLED module")]
+    public void Oled_IsNotResolvedToAnLedFootprint(string name)
+    {
+        var c = FootprintMap.Resolve(Spec(name), 4);
+        Assert.DoesNotContain("LED", c.LibId, StringComparison.Ordinal);
+        // With no real footprint match it must land on the HONEST placeholder — a pin-count-correct
+        // header flagged IsFallback, which build_board.py IS allowed to ordinal-map.
+        Assert.True(c.IsFallback);
+        Assert.Contains("PinHeader_1x04", c.LibId, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealLed_StillResolves()
+    {
+        Assert.Equal("LED_THT:LED_D5.0mm", FootprintMap.Resolve(Spec("5mm red LED"), 2).LibId);
+        Assert.Equal("LED_SMD:LED_0805_2012Metric", FootprintMap.Resolve(Spec("0805 SMD LED"), 2).LibId);
+    }
+
+    // "Capacitive Soil Moisture Sensor" is a MODULE, not a capacitor — "cap" must not match inside it.
+    [Fact]
+    public void CapacitiveSensor_IsNotResolvedToACapacitor()
+    {
+        var c = FootprintMap.Resolve(Spec("Capacitive Soil Moisture Sensor v1.2"), 3);
+        Assert.DoesNotContain("Capacitor", c.LibId, StringComparison.Ordinal);
+        Assert.True(c.IsFallback);
+    }
+
+    // Boundary matching kills the bare "uf"/"nf"/"pf" substring keys, so values are matched AS values.
+    [Theory]
+    [InlineData("100nF decoupling capacitor")]
+    [InlineData("10uF cap")]
+    [InlineData("0.1 uF")]
+    [InlineData("22pF")]
+    public void CapacitorValues_StillResolve(string name) =>
+        Assert.Contains("Capacitor", FootprintMap.Resolve(Spec(name), 2).LibId, StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("led", "0.96\" oled display", false)]
+    [InlineData("led", "5mm led", true)]
+    [InlineData("cap", "capacitive sensor", false)]
+    [InlineData("cap", "10uf cap", true)]
+    [InlineData("esp32", "esp32-wroom-32", true)]      // hyphen is a boundary
+    [InlineData("sot-23", "sot-23-3 package", true)]   // multi-token key survives
+    [InlineData("uno", "arduino uno r3", true)]
+    [InlineData("res", "pressure sensor", false)]
+    public void HasToken_MatchesOnlyAtTokenBoundaries(string word, string hay, bool expected) =>
+        Assert.Equal(expected, FootprintMap.HasToken(hay, word));
 }
 
 public class PcbJobTests

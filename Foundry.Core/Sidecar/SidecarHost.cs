@@ -76,7 +76,7 @@ public sealed class SidecarHost : IDisposable
                 {
                     if (e.Data is null) return;
                     _stderrTail.Enqueue(e.Data);
-                    while (_stderrTail.Count > 30) _stderrTail.TryDequeue(out string _);
+                    while (_stderrTail.Count > 30) _stderrTail.TryDequeue(out string? _);
                 };
                 _process.Start();
                 _process.BeginOutputReadLine();

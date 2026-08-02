@@ -167,7 +167,7 @@ public static class KiCadInstaller
             await Provisioning.DownloadVerifier.DownloadVerifiedAsync(http, FallbackExeUrl, exe, null, ct);
         // Fail-closed BEFORE running an installer elevated/silent: refuse a KiCad exe that isn't validly
         // publisher-signed (the highest-stakes path — silent elevated execution). KiCad embed-signs its exe.
-        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded KiCad installer");
+        Provisioning.DownloadVerifier.RequireAuthenticode(exe, "downloaded KiCad installer", "KiCad");
         progress?.Report("Running installer…");
         AppLog.Info("pcb", "running KiCad NSIS installer silently (/S) — may prompt UAC…");
         await RunAsync(exe, "/S", ct);

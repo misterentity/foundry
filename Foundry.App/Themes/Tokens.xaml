@@ -31,6 +31,10 @@
   <Color x:Key="Color.Warn">#FFFBBF24</Color>
   <Color x:Key="Color.Fail">#FFEF4444</Color>
   <Color x:Key="Color.Info">#FF5DD2FF</Color>
+  <!-- "the engine declined to judge" — deliberately OUTSIDE the ok/warn/fail ramp so an unproven
+       check never reads as a mild warning, and violet rather than grey so it reads as unknown
+       rather than disabled. -->
+  <Color x:Key="Color.Unproven">#FFA78BFA</Color>
   <Color x:Key="Color.Power">#FFFF4040</Color>
   <Color x:Key="Color.Ground">#FF888888</Color>
   <Color x:Key="Color.Signal">#FF5DD2FF</Color>
@@ -59,6 +63,7 @@
   <SolidColorBrush x:Key="Brush.Warn" Color="{StaticResource Color.Warn}"/>
   <SolidColorBrush x:Key="Brush.Fail" Color="{StaticResource Color.Fail}"/>
   <SolidColorBrush x:Key="Brush.Info" Color="{StaticResource Color.Info}"/>
+  <SolidColorBrush x:Key="Brush.Unproven" Color="{StaticResource Color.Unproven}"/>
   <SolidColorBrush x:Key="Brush.Power" Color="{StaticResource Color.Power}"/>
   <SolidColorBrush x:Key="Brush.Ground" Color="{StaticResource Color.Ground}"/>
   <SolidColorBrush x:Key="Brush.Signal" Color="{StaticResource Color.Signal}"/>
@@ -76,6 +81,8 @@
   <SolidColorBrush x:Key="Brush.TagFailBorder" Color="#66EF4444"/>
   <SolidColorBrush x:Key="Brush.TagInfoBg"     Color="#145DD2FF"/>
   <SolidColorBrush x:Key="Brush.TagInfoBorder" Color="#665DD2FF"/>
+  <SolidColorBrush x:Key="Brush.TagUnprovenBg"     Color="#14A78BFA"/>
+  <SolidColorBrush x:Key="Brush.TagUnprovenBorder" Color="#66A78BFA"/>
   <SolidColorBrush x:Key="Brush.TagAccentBg"     Color="#1AFF5A1F"/>
   <SolidColorBrush x:Key="Brush.TagAccentBorder" Color="#80FF5A1F"/>
 
@@ -84,6 +91,7 @@
   <SolidColorBrush x:Key="Brush.FindFailBg" Color="#14EF4444"/>
   <SolidColorBrush x:Key="Brush.FindInfoBg" Color="#125DD2FF"/>
   <SolidColorBrush x:Key="Brush.FindPassBg" Color="#124ADE80"/>
+  <SolidColorBrush x:Key="Brush.FindUnprovenBg" Color="#12A78BFA"/>
 
   <!-- accent 6% callout wash -->
   <SolidColorBrush x:Key="Brush.AccentWash" Color="#0FFF5A1F"/>

@@ -57,7 +57,7 @@ public class FabricationTests
         };
         var net = KiCadNetlist.Export(p);
         // exactly one (net ...) block (the three nodes unioned)
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Matches(net, @"\(net \(code").Count);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(net, @"\(net \(code"));
         Assert.Contains("(node (ref \"A\")", net);
         Assert.Contains("(node (ref \"B\")", net);
         Assert.Contains("(node (ref \"C\")", net);

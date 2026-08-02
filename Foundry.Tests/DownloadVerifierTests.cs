@@ -136,4 +136,146 @@ public class DownloadVerifierTests
         Assert.True(DownloadVerifier.VerifyAuthenticode(kicad.KicadCliPath),
             "WinVerifyTrust should validate KiCad's embedded Authenticode signature");
     }
+
+    [Theory]
+    [InlineData("CN=Arduino SA, O=Arduino SA, L=Turin", "Arduino", true)]
+    [InlineData("CN=Eclipse Adoptium, O=Eclipse Foundation", "Adoptium", true)]
+    [InlineData("CN=Unexpected Vendor, O=Other", "Arduino", false)]
+    [InlineData("", "Arduino", false)]
+    public void SignerSubjectAllowed_MatchesExpectedPublisherToken(string subject, string token, bool expected)
+    {
+        Assert.Equal(expected, DownloadVerifier.SignerSubjectAllowed(subject, token));
+    }
+
+    // ---- quarantine-then-promote ------------------------------------------------------------------
+    //
+    // The property under test is the one whose absence let a REJECTED binary stay installed: extracting
+    // into the live tools dir and verifying afterwards leaves the payload on disk when verification
+    // throws, and every installer's Locate() is a bare file-existence check — so the tool that failed
+    // its integrity check is reported installed and executed on every later run.
+
+    private static string MakeZip(params (string Path, string Body)[] entries)
+    {
+        var zipPath = TempPath(".zip");
+        using var fs = new FileStream(zipPath, FileMode.Create);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+        foreach (var (path, body) in entries)
+        {
+            using var w = new StreamWriter(zip.CreateEntry(path).Open());
+            w.Write(body);
+        }
+        return zipPath;
+    }
+
+    [Fact]
+    public void ExtractVerifiedZip_PromotesPayload_WhenVerificationPasses()
+    {
+        var zipPath = MakeZip(("tool/bin/app.exe", "payload"));
+        var target = TempPath("");
+        try
+        {
+            DownloadVerifier.ExtractVerifiedZip(zipPath, target, staged =>
+                Assert.True(Directory.EnumerateFiles(staged, "app.exe", SearchOption.AllDirectories).Any()));
+
+            Assert.True(File.Exists(Path.Combine(target, "tool", "bin", "app.exe")));
+        }
+        finally { File.Delete(zipPath); if (Directory.Exists(target)) Directory.Delete(target, true); }
+    }
+
+    [Fact]
+    public void ExtractVerifiedZip_LeavesNothingOnDisk_WhenVerificationFails()
+    {
+        var zipPath = MakeZip(("tool/bin/app.exe", "payload"));
+        var target = TempPath("");
+        try
+        {
+            Assert.Throws<IntegrityException>(() =>
+                DownloadVerifier.ExtractVerifiedZip(zipPath, target, _ => throw new IntegrityException("bad signature")));
+
+            Assert.False(Directory.Exists(target), "a rejected payload must not be promoted");
+            // ...and no staging tree may survive for Locate() to stumble onto.
+            var siblings = Directory.EnumerateDirectories(Path.GetDirectoryName(target)!,
+                Path.GetFileName(target) + ".staging-*");
+            Assert.Empty(siblings);
+        }
+        finally { File.Delete(zipPath); if (Directory.Exists(target)) Directory.Delete(target, true); }
+    }
+
+    [Fact]
+    public void ExtractVerifiedZip_KeepsTheWorkingInstall_WhenAReinstallFailsVerification()
+    {
+        var zipPath = MakeZip(("tool/app.exe", "new"));
+        var target = TempPath("");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(target, "tool"));
+            File.WriteAllText(Path.Combine(target, "tool", "app.exe"), "existing-good-install");
+
+            Assert.Throws<IntegrityException>(() =>
+                DownloadVerifier.ExtractVerifiedZip(zipPath, target, _ => throw new IntegrityException("bad hash")));
+
+            // A failed upgrade must not uninstall the tool that was already working.
+            Assert.Equal("existing-good-install", File.ReadAllText(Path.Combine(target, "tool", "app.exe")));
+        }
+        finally { File.Delete(zipPath); if (Directory.Exists(target)) Directory.Delete(target, true); }
+    }
+
+    [Fact]
+    public void ExtractVerifiedFile_PromotesOnlyTheNamedFile()
+    {
+        var zipPath = MakeZip(("nested/arduino-cli.exe", "cli"), ("nested/readme.txt", "docs"));
+        var dest = TempPath(".exe");
+        try
+        {
+            DownloadVerifier.ExtractVerifiedFile(zipPath, "arduino-cli.exe", dest);
+
+            Assert.Equal("cli", File.ReadAllText(dest));
+            // The shared tools dir must not be littered with the archive's other entries.
+            Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(dest)!, "readme.txt")));
+        }
+        finally { File.Delete(zipPath); if (File.Exists(dest)) File.Delete(dest); }
+    }
+
+    [Fact]
+    public void ExtractVerifiedFile_DoesNotWriteDestination_WhenVerificationFails()
+    {
+        var zipPath = MakeZip(("arduino-cli.exe", "cli"));
+        var dest = TempPath(".exe");
+        try
+        {
+            Assert.Throws<IntegrityException>(() =>
+                DownloadVerifier.ExtractVerifiedFile(zipPath, "arduino-cli.exe", dest,
+                    _ => throw new IntegrityException("unsigned")));
+
+            Assert.False(File.Exists(dest));
+        }
+        finally { File.Delete(zipPath); if (File.Exists(dest)) File.Delete(dest); }
+    }
+
+    [Fact]
+    public void ExtractVerifiedFile_ThrowsWhenTheNamedFileIsAbsent()
+    {
+        var zipPath = MakeZip(("something-else.txt", "x"));
+        var dest = TempPath(".exe");
+        try
+        {
+            Assert.Throws<IntegrityException>(() =>
+                DownloadVerifier.ExtractVerifiedFile(zipPath, "arduino-cli.exe", dest));
+            Assert.False(File.Exists(dest));
+        }
+        finally { File.Delete(zipPath); if (File.Exists(dest)) File.Delete(dest); }
+    }
+
+    // Guard the provenance constants: a blank or malformed pin silently disables the ONLY integrity anchor
+    // these two tools have (neither publisher Authenticode-signs its binaries).
+    [Theory]
+    [InlineData("openscad")]
+    [InlineData("renode")]
+    public void UnsignedTools_KeepAPinnedArchiveHash(string tool)
+    {
+        var pin = tool == "openscad"
+            ? Foundry.Core.Cad.OpenScadInstaller.PortableSha256
+            : Foundry.Core.Simulation.RenodeInstaller.PortableSha256;
+        Assert.Matches("^[A-F0-9]{64}$", pin);
+    }
 }

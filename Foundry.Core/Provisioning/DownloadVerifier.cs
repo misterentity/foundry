@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.IO.Compression;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Foundry.Core.Provisioning;
 
@@ -121,12 +122,109 @@ public static class DownloadVerifier
         }
     }
 
-    /// <summary>Verify <paramref name="path"/> is Authenticode-signed; throw <see cref="IntegrityException"/>
-    /// (fail-closed) if not. Use for downloaded executables from publishers that embed-sign their binaries.</summary>
-    public static void RequireAuthenticode(string path, string what)
+    /// <summary>Return the embedded Authenticode signer certificate, or null for unsigned/unreadable files.</summary>
+    public static X509Certificate2? SignerCert(string path)
+    {
+        try { return new X509Certificate2(X509Certificate.CreateFromSignedFile(path)); }
+        catch { return null; }
+    }
+
+    /// <summary>Pure helper for publisher allow-lists. A match means the certificate subject contains one of
+    /// the expected vendor tokens (case-insensitive). Keep tokens broad enough to survive CA wording changes.</summary>
+    public static bool SignerSubjectAllowed(string? subject, params string[] expectedSubjectTokens) =>
+        expectedSubjectTokens.Length == 0 ||
+        (!string.IsNullOrWhiteSpace(subject) &&
+         expectedSubjectTokens.Any(t => !string.IsNullOrWhiteSpace(t) &&
+             subject.Contains(t, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>Verify <paramref name="path"/> is Authenticode-signed and, when tokens are supplied, signed by
+    /// the expected publisher family. Throws <see cref="IntegrityException"/> on failure.</summary>
+    public static void RequireAuthenticode(string path, string what, params string[] expectedSubjectTokens)
     {
         if (!VerifyAuthenticode(path))
             throw new IntegrityException($"{what}: failed Authenticode signature verification — refusing to use it.");
+        if (expectedSubjectTokens.Length == 0) return;
+
+        var subject = SignerCert(path)?.Subject;
+        if (!SignerSubjectAllowed(subject, expectedSubjectTokens))
+            throw new IntegrityException(
+                $"{what}: signer '{subject ?? "unknown"}' did not match expected publisher ({string.Join(" / ", expectedSubjectTokens)}) — refusing to use it.");
+    }
+
+    /// <summary>
+    /// QUARANTINE-THEN-PROMOTE: extract into a private staging dir, verify it there, and only move it into
+    /// <paramref name="targetDir"/> once verification passes. Nothing observable is created until the payload
+    /// has been checked — on failure the staging tree is deleted and the exception propagates.
+    /// <para>
+    /// Extracting straight into the live tools dir and verifying afterwards is not equivalent: the rejected
+    /// payload survives the throw, and since every installer's <c>Locate()</c> is a file-existence check (and
+    /// <c>ToolchainProvisioner.InstallAsync</c> short-circuits on <c>IsInstalled</c>), the binary that FAILED
+    /// verification is then reported as installed and executed on every subsequent run.
+    /// </para>
+    /// </summary>
+    public static void ExtractVerifiedZip(string zipPath, string targetDir, Action<string>? verifyStaged = null)
+    {
+        var staging = StagingPathFor(targetDir);
+        try
+        {
+            ExtractZipSafe(zipPath, staging, overwrite: true);
+            verifyStaged?.Invoke(staging);
+            PromoteDirectory(staging, targetDir);
+        }
+        finally { TryDelete(staging); }
+    }
+
+    /// <summary>
+    /// The single-file form of <see cref="ExtractVerifiedZip"/>, for archives whose payload is one executable
+    /// landing in a SHARED directory (promoting the whole directory there would clobber sibling tools).
+    /// Extracts to staging, locates <paramref name="entryFileName"/> anywhere inside it, verifies, then moves
+    /// just that file to <paramref name="destPath"/>.
+    /// </summary>
+    public static void ExtractVerifiedFile(string zipPath, string entryFileName, string destPath,
+        Action<string>? verifyStaged = null)
+    {
+        var staging = StagingPathFor(destPath);
+        try
+        {
+            ExtractZipSafe(zipPath, staging, overwrite: true);
+            var staged = Directory.EnumerateFiles(staging, entryFileName, SearchOption.AllDirectories).FirstOrDefault()
+                ?? throw new IntegrityException($"{entryFileName} not found in {Path.GetFileName(zipPath)}.");
+            verifyStaged?.Invoke(staged);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            File.Move(staged, destPath, overwrite: true);
+        }
+        finally { TryDelete(staging); }
+    }
+
+    private static string StagingPathFor(string target) =>
+        target.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        + ".staging-" + Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>Swap a verified staging dir into place, retiring (and only then deleting) any previous
+    /// install — so a failed move leaves the working tool where it was rather than uninstalling it.</summary>
+    private static void PromoteDirectory(string staging, string targetDir)
+    {
+        var parent = Path.GetDirectoryName(targetDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+
+        string? retired = null;
+        if (Directory.Exists(targetDir))
+        {
+            retired = targetDir + ".old-" + Guid.NewGuid().ToString("N")[..8];
+            Directory.Move(targetDir, retired);
+        }
+        try { Directory.Move(staging, targetDir); }
+        catch
+        {
+            if (retired is not null && !Directory.Exists(targetDir)) Directory.Move(retired, targetDir);
+            throw;
+        }
+        if (retired is not null) TryDelete(retired);
+    }
+
+    private static void TryDelete(string dir)
+    {
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
     }
 
     /// <summary>Zip-slip-safe extraction: every entry must resolve INSIDE <paramref name="targetDir"/>, else

@@ -1,3 +1,11 @@
+---
+title: "Foundry — P0 Implementation Plan (June 2026)"
+domain: p0-plan
+status: archived
+last-reviewed: 2026-08-01
+superseded-by: "[[pcb]]"
+---
+
 # Foundry — P0 Implementation Plan
 
 _Generated from the multi-agent critical review (2026-06-04). Grade C-. 6 P0 fixes to make the auto-PCB->fab moat trustworthy._

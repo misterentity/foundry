@@ -4,14 +4,13 @@ namespace Foundry.Tests;
 
 public class UpdateTrustPolicyTests
 {
-    // Unsigned build (the current distribution choice): there's no publisher to pin to, so the strict gate
-    // can't apply — allow the auto-update so the tray "Check for updates" stays one-click. The strict path
-    // below auto-engages the moment the app IS signed. The reason is logged so the unverified run is visible.
+    // Unsigned build: there's no publisher to pin to, so the updater must fail closed and direct users to the
+    // releases page instead of auto-running a downloaded installer.
     [Fact]
-    public void UnsignedApp_IsAllowed_NoPublisherToVerify()
+    public void UnsignedApp_IsRefused_NoPublisherToVerify()
     {
         var d = UpdateTrustPolicy.Decide(appThumbprint: null, installerAuthenticodeValid: false, installerThumbprint: null);
-        Assert.True(d.Trusted);
+        Assert.False(d.Trusted);
         Assert.Contains("unsigned", d.Reason);
     }
 

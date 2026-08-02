@@ -157,7 +157,9 @@ public sealed class FirmwareFile
 /// <summary>A deterministic validation finding (PRD §8.8).</summary>
 public sealed class Finding
 {
-    /// <summary>info | warn | fail | pass</summary>
+    /// <summary>info | warn | fail | pass | unproven.
+    /// <c>unproven</c> means the engine could not obtain a fact it needed — NOT that the design is fine.
+    /// It must never roll up to "pass"; see <see cref="Foundry.Core.Validation.ProjectValidator.Rollup"/>.</summary>
     public string Severity { get; set; } = "info";
     public string Code { get; set; } = "";
     /// <summary>Short display token, e.g. "W·02" / "OK".</summary>
@@ -178,7 +180,7 @@ public sealed class Finding
     /// does NOT offer "Apply &amp; re-run", since an AI design edit can never clear them.
     /// </summary>
     [JsonIgnore]
-    public bool Advisory => Severity == "info" || Code is "PWR-02" or "BOM-01";
+    public bool Advisory => Severity is "info" or "unproven" || Code is "PWR-02" or "BOM-01";
 }
 
 public sealed class AssemblyStep

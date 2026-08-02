@@ -1,0 +1,43 @@
+{
+  "version": "0.6.1",
+  "commit": "f6c9e5d-dirty",
+  "installed": "2026-08-02",
+  "ci": false,
+  "ciBranches": [],
+  "hooks": "none",
+  "skip": [],
+  "files": {
+    "scripts/match-docs.mjs": {
+      "templateHash": "sha256:6115a5b0e2c597839385730cf2095a63a3aa64cb49e9e7c3eb6cd87ca4708e21",
+      "writtenHash": "sha256:6115a5b0e2c597839385730cf2095a63a3aa64cb49e9e7c3eb6cd87ca4708e21"
+    },
+    "scripts/vault-doctor.mjs": {
+      "templateHash": "sha256:4a38772f8f17b5fb631abaeece2b3d5903755f5ecd14ceef503672ac421a03e0",
+      "writtenHash": "sha256:4a38772f8f17b5fb631abaeece2b3d5903755f5ecd14ceef503672ac421a03e0"
+    },
+    "scripts/vault-lib.mjs": {
+      "templateHash": "sha256:4e4a5cfaeb14d222a34f2b87ffa7f808752a5c0eac82b518faf5765b798baa07",
+      "writtenHash": "sha256:4e4a5cfaeb14d222a34f2b87ffa7f808752a5c0eac82b518faf5765b798baa07"
+    },
+    "scripts/check-docs-freshness.mjs": {
+      "templateHash": "sha256:0c350bb94cdd8b1cb17f3a78881856d120578c1985d0288f21e48e4486754d32",
+      "writtenHash": "sha256:0c350bb94cdd8b1cb17f3a78881856d120578c1985d0288f21e48e4486754d32"
+    },
+    "docs/_meta/vault-conventions.md": {
+      "templateHash": "sha256:1ecf8dd15c927e1c0b9d6544102754178f18dd1272504ea2566ad5dd4a16434f",
+      "writtenHash": "sha256:ffc11a90323e65243a74a11943f18feacc3c57f8cd2f8e55ae3b6bee27261651"
+    },
+    "docs/_meta/docs-sync-prompt.md": {
+      "templateHash": "sha256:c1b2532158fdcb2bd1ee882c5d70e73707c4f995c43f49b1cf7d1fafb0840eb4",
+      "writtenHash": "sha256:a96745feedcbccd8e38c48ef135cc3752792e7c5fa5a0f0f982b5f625538c7a5"
+    },
+    "docs/_meta/templates/domain-doc.md": {
+      "templateHash": "sha256:78a5fff301a33f9d6dd2ab7039087565958442a8e69adee254c7ceca74875ded",
+      "writtenHash": "sha256:20c411ec6a90df200b06fd6a7589c5a97f31fe9f5df081ec813e10d4e242757f"
+    },
+    "docs/_meta/templates/cheatsheet.md": {
+      "templateHash": "sha256:0390be3e8aee15c6abe07a7932ab5ae5bdc11fcd434c0cfa640ed20c5a878ee3",
+      "writtenHash": "sha256:119b6e08b6f163f45838485dad49e0d8034b31f234a3d4c69274e9621f1b60f2"
+    }
+  }
+}

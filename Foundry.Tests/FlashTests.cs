@@ -122,6 +122,24 @@ public class FlashTests
         Assert.Equal(FirmwareBuilder.FqbnSource.Inferred, plan.Source);
     }
 
+    [Fact]
+    public async Task CompileToImageAsync_UsesExplicitFlashFqbnOverride()
+    {
+        // The flasher may choose the detected physical board's concrete FQBN. The compile step must build the
+        // artifact for that same FQBN, not whatever the project inference picked earlier.
+        var dir = Path.Combine(Path.GetTempPath(), "foundry_flash_test_" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var image = await FirmwareBuilder.CompileToImageAsync(ProjectFor("Arduino Uno"), dir,
+                fqbnOverride: "arduino:avr:nano");
+            Assert.Equal("arduino:avr:nano", image.Fqbn);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("arduino:avr:uno", true)]
     [InlineData("esp32:esp32:esp32:PartitionScheme=huge_app", true)]

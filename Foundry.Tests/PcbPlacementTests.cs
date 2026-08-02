@@ -147,6 +147,84 @@ public class PcbPlacerTests
                     $"{boxes[i].Ref} overlaps {boxes[j].Ref}");
     }
 
+    private static (double W, double D) BoardSize(PcbPlacer.PlaceResult res)
+    {
+        double w = 0, d = 0;
+        foreach (var s in res.OutlineSegmentsMm)
+        {
+            w = Math.Max(w, Math.Max(s[0], s[2]));
+            d = Math.Max(d, Math.Max(s[1], s[3]));
+        }
+        return (w, d);
+    }
+
+    // ---- default (no-plan) packing efficiency -----------------------------------------------------
+    //
+    // The regression: the no-plan path used a uniform grid whose cells were sized to the LARGEST part in
+    // BOTH axes, so a single big component inflated every cell. The shipped demo — an 88 mm 18650 holder
+    // beside an MCU and three small parts — laid out at 220 x 48 mm of mostly empty copper, and the
+    // enclosure derived from that outline was correspondingly wrong.
+
+    private static IReadOnlyList<PcbPlacer.PlacedItem> OneDominantPart() => new[]
+    {
+        Item("BAT", 88.0, 21.75),   // 18650 holder — far larger than everything else
+        Item("U1", 18.0, 25.5),
+        Item("J1", 7.62, 2.54),
+        Item("J2", 5.08, 2.54),
+        Item("C1", 1.6, 0.8),
+    };
+
+    [Fact]
+    public void OneOversizedPart_DoesNotInflateTheWholeBoard()
+    {
+        var items = OneDominantPart();
+        var (w, d) = BoardSize(PcbPlacer.Place(items, PlacementPlan.Empty, marginMm: 5, gapMm: 2));
+
+        // A board can never be narrower than its widest part, but it must not be a multiple of it either.
+        Assert.True(w < 88.0 * 1.5, $"board width {w:0.#} mm is inflated well past the 88 mm part");
+        Assert.True(d < 88.0, $"board depth {d:0.#} mm should not scale with the widest part");
+    }
+
+    [Fact]
+    public void BoardIsAtLeastAsWideAsItsWidestPart()
+    {
+        var items = OneDominantPart();
+        var (w, _) = BoardSize(PcbPlacer.Place(items, PlacementPlan.Empty, marginMm: 5, gapMm: 2));
+        Assert.True(w >= 88.0, $"board width {w:0.#} mm cannot hold an 88 mm part");
+    }
+
+    [Fact]
+    public void DominantPartLayout_StillHasNoOverlaps() =>
+        AssertNoOverlaps(OneDominantPart(), PlacementPlan.Empty);
+
+    // Small parts must share a shelf with the tall part rather than each wrapping onto their own row —
+    // this is what First-Fit-Decreasing-Height buys over filling only the newest shelf.
+    [Fact]
+    public void SmallPartsShareShelvesWithTallerOnes()
+    {
+        var items = new[]
+        {
+            Item("TALL", 20, 30),
+            Item("A", 5, 4), Item("B", 5, 4), Item("C", 5, 4), Item("D", 5, 4),
+        };
+        var res = PcbPlacer.Place(items, PlacementPlan.Empty, marginMm: 5, gapMm: 2);
+        var rows = items.Select(i => Math.Round(res[i.Ref].YMm - (i.Courtyard.HMm / 2), 1)).Distinct().Count();
+        Assert.True(rows <= 3, $"5 small parts spread over {rows} rows — shelves are not being reused");
+    }
+
+    [Fact]
+    public void Placement_IsDeterministic()
+    {
+        var items = OneDominantPart();
+        var a = PcbPlacer.Place(items, PlacementPlan.Empty);
+        var b = PcbPlacer.Place(items, PlacementPlan.Empty);
+        foreach (var i in items)
+        {
+            Assert.Equal(a[i.Ref].XMm, b[i.Ref].XMm, 4);
+            Assert.Equal(a[i.Ref].YMm, b[i.Ref].YMm, 4);
+        }
+    }
+
     // A few fixture parts lists, including a dense one with many same-size parts.
     private static IReadOnlyList<PcbPlacer.PlacedItem> SmallMixed() => new[]
     {

@@ -34,6 +34,14 @@ public static class PcbPlacer
         public IReadOnlyList<double[]> OutlineSegmentsMm { get; }
     }
 
+    // One row of the bin-pack: fixed Y and height, filled left to right.
+    private sealed class Shelf
+    {
+        public double Y;
+        public double Height;
+        public double UsedX;
+    }
+
     // A box being packed (inflated by gap on every side).
     private sealed class Box
     {
@@ -332,29 +340,62 @@ public static class PcbPlacer
         interiorTop = boardTop;
     }
 
-    // ---- empty-plan tidy grid (= v2.2 behavior, courtyard-aware) ----
+    // ---- empty-plan default placement: shelf bin-pack ----
 
+    /// <summary>
+    /// The no-AI-plan default. Shelf bin-packs tallest-first into a squarish board derived from the true
+    /// total area — the same algorithm <see cref="PackGroup"/> uses on the AI-plan path, so both paths
+    /// produce comparably tight boards.
+    ///
+    /// <para>
+    /// This replaced a uniform grid whose cells were sized to the LARGEST part in BOTH axes. One big part
+    /// therefore inflated every cell: a 5-part board carrying an 88 mm 18650 holder laid out at 220 mm,
+    /// mostly empty copper, and the enclosure derived from that outline was correspondingly absurd.
+    /// </para>
+    ///
+    /// Deterministic (ties broken by ref) and non-overlapping by construction: items advance by
+    /// <c>W + gap</c> along a shelf, and each new shelf clears the tallest box on the one below.
+    /// </summary>
     private static PlaceResult Grid(List<Box> boxes, double margin, double gap)
     {
-        int n = boxes.Count;
         var result = new Dictionary<string, Placement>(StringComparer.OrdinalIgnoreCase);
-        if (n == 0) return new PlaceResult(result, Outline(2 * margin, 2 * margin));
+        if (boxes.Count == 0) return new PlaceResult(result, Outline(2 * margin, 2 * margin));
 
-        int cols = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(n)));
-        double cellW = boxes.Max(b => b.W) + gap;
-        double cellH = boxes.Max(b => b.H) + gap;
+        double totalArea = boxes.Sum(b => b.W * b.H);
+        double targetW = Math.Max(boxes.Max(b => b.W), Math.Sqrt(totalArea) * 1.3);
 
-        double maxX = 0, maxY = 0;
-        for (int i = 0; i < n; i++)
+        var ordered = boxes
+            .OrderByDescending(b => b.H)
+            .ThenBy(b => b.Ref, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // First-Fit Decreasing Height: a box goes on the FIRST shelf with room, not merely the newest.
+        // Filling only the current shelf strands a tall part alone on a wide row while the small parts
+        // that would have sat beside it wrap onto the next one.
+        var shelves = new List<Shelf>();
+        double maxX = 0;
+        foreach (var b in ordered)
         {
-            var b = boxes[i];
-            double x = margin + (i % cols) * cellW;
-            double y = margin + (i / cols) * cellH;
-            result[b.Ref] = new Placement(Snap(x + b.W / 2), Snap(y + b.H / 2), b.Rot);
-            maxX = Math.Max(maxX, x + b.W);
-            maxY = Math.Max(maxY, y + b.H);
+            var shelf = shelves.FirstOrDefault(s => s.UsedX + b.W <= targetW);
+            if (shelf is null)
+            {
+                var y = shelves.Count == 0 ? 0 : shelves[^1].Y + shelves[^1].Height + gap;
+                // Processing tallest-first means the first box on a shelf is the tallest it will ever
+                // hold, so a shelf's height is fixed at creation and the shelf above can never be fouled.
+                shelf = new Shelf { Y = y, Height = b.H };
+                shelves.Add(shelf);
+            }
+
+            b.X = margin + shelf.UsedX;
+            b.Y = margin + shelf.Y;
+            result[b.Ref] = new Placement(Snap(b.X + b.W / 2), Snap(b.Y + b.H / 2), b.Rot);
+
+            shelf.UsedX += b.W + gap;
+            maxX = Math.Max(maxX, b.X + b.W);
         }
-        return new PlaceResult(result, Outline(Snap(maxX + margin), Snap(maxY + margin)));
+
+        var top = shelves.Count == 0 ? 0 : shelves[^1].Y + shelves[^1].Height;
+        return new PlaceResult(result, Outline(Snap(maxX + margin), Snap(margin + top + margin)));
     }
 
     // ---- geometry helpers ----

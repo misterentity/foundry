@@ -43,7 +43,7 @@ def _rounded_box(trimesh, w, h, d, r):
     return box
 
 
-def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none", fmt="stl"):
+def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="none", fmt="stl"):
     import numpy as np  # noqa: F401  (trimesh pulls it in; kept explicit for PyInstaller)
     import trimesh
     from trimesh.transformations import rotation_matrix
@@ -64,7 +64,11 @@ def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none", f
 
     # port/control cutouts + ventilation slots (expanded into many thin slot cutouts)
     all_cuts = list(cutouts or []) + _vent_cutouts(vents or [], ox, oy, oz)
-    for c in all_cuts:
+    # face:"top" features belong to the LID, not the base. The base is open above (oz = H + t), so a
+    # top cutter placed at the base's rim pierces empty space and the hole vanishes from the printed
+    # part — which is why a reset button or LED window on the top face silently produced a sealed lid.
+    top_cuts = [c for c in all_cuts if str(c.get("face", "")).lower() == "top"]
+    for c in (c for c in all_cuts if str(c.get("face", "")).lower() != "top"):
         try:
             solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin)
             if solid is not None:
@@ -88,11 +92,11 @@ def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none", f
             continue
 
     # ----- LID: rounded cap + locating lip + screw clearance, shown exploded above the base -----
-    lid = _build_lid(trimesh, L, Wd, ox, oy, t, corner, boss_xy)
+    lid_mesh = _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts, margin)
     gap = 10.0
-    lid.apply_translation([0, 0, oz + gap])
+    lid_mesh.apply_translation([0, 0, oz + gap])
 
-    model = trimesh.util.concatenate([base, lid])
+    model = trimesh.util.concatenate([base, lid_mesh])
     fmt = (fmt or "stl").lower()
     if fmt not in ("stl", "3mf"):
         fmt = "stl"
@@ -109,14 +113,28 @@ def _csg_build(inner, wall, cutouts, standoffs, lid, vents=None, mount="none", f
     return bytes(data), stats
 
 
-def _build_lid(trimesh, L, Wd, ox, oy, t, corner, boss_xy):
-    """Cap that overlaps the wall tops, with a downward locating lip and screw clearance holes."""
+def _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts=None, margin=2.0):
+    """Cap that overlaps the wall tops, with a downward locating lip, top-face ports, and screw holes."""
     capT = max(2.0, t)
     lipH = max(2.0, t + 1.0)
     cap = _rounded_box(trimesh, ox, oy, capT, corner)          # z [0, capT]
     lip = _rounded_box(trimesh, L - 0.5, Wd - 0.5, lipH, max(0.0, corner - t))
     lip.apply_translation([0, 0, -lipH])                       # hangs below the cap
     lid = cap.union(lip, engine="manifold")
+
+    # face:"top" ports and vents are cut HERE, in lid-local coordinates. The lid spans z [-lipH, capT],
+    # so the cutter is centred on that span and made long enough to clear both cap and lip — the same
+    # geometry the screw holes below already use.
+    lid_through = capT + lipH + 2.0
+    for c in top_cuts or []:
+        try:
+            solid = _cutout_solid(trimesh, rotation_matrix, c, ox, oy,
+                                  (capT - lipH) / 2.0, lid_through, margin)
+            if solid is not None:
+                lid = lid.difference(solid, engine="manifold")
+        except Exception:
+            continue  # a bad cutout never breaks the lid
+
     # screw clearance holes (Ø3.4) above each standoff
     for (px, py) in boss_xy:
         try:
