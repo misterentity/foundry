@@ -59,8 +59,11 @@ public sealed class ComponentKb
         },
         new ComponentSpec
         {
-            Ref = "li_18650", Alias = "BAT", Name = "18650 Li-ion 3000mAh",
-            OutputV = 3.7, CapacityMah = 3000,
+            // 14500 = AA-sized Li-ion. Same 3.7 V chemistry as an 18650 (so the TP4056 / USB-C charging
+            // path is unchanged) in a holder with a 57.5 × 17.4 mm courtyard instead of 88 × 21.75 —
+            // the 18650 holder alone made the demo board too long for any pocket-sized case.
+            Ref = "li_14500", Alias = "BAT", Name = "14500 Li-ion 800mAh (AA)",
+            OutputV = 3.7, CapacityMah = 800,
             Pins = new()
             {
                 new PinSpec { Name = "+", Kind = PinKind.Power },

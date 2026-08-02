@@ -33,11 +33,31 @@ class EnclosureSchema(BaseModel):
     vents: list[dict] = []
     mount: str = "none"
     format: str = "stl"   # stl | 3mf
+    arrange: str = "exploded"   # exploded (preview: lid above base) | print (both flat on the plate)
+
+
+def _kernel_name() -> str:
+    """What the CSG path will ACTUALLY use. This used to be the constant "builtin" regardless, so a
+    sidecar running without manifold3d reported the same string as one with it — the health endpoint
+    asserting a fact it never checked."""
+    try:
+        import trimesh  # noqa: F401
+        import manifold3d  # noqa: F401
+        return "manifold"
+    except Exception:
+        return "builtin"
 
 
 @app.get("/health")
 def health() -> JSONResponse:
-    return JSONResponse({"status": "ok", "service": "foundry-cad", "kernel": "builtin"})
+    # The token is per-spawn and comes from the parent's environment. Echoing it is what lets the host
+    # tell ITS child apart from any other Foundry sidecar already listening on this machine.
+    return JSONResponse({
+        "status": "ok",
+        "service": "foundry-cad",
+        "token": os.environ.get("FOUNDRY_SIDECAR_TOKEN", ""),
+        "kernel": _kernel_name(),
+    })
 
 
 @app.post("/enclosure")

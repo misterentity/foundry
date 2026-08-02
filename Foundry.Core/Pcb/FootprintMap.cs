@@ -35,10 +35,18 @@ public static class FootprintMap
     /// so the fail-closed gate refused the board and the user was dead-ended by a substring. A boundary is
     /// any non-alphanumeric character or the string edge, so multi-token keys ("sot-223", "arduino uno")
     /// and hyphenated part names keep working.
+    ///
+    /// <para>
+    /// Underscore counts as a WORD character, not a boundary, because <see cref="Resolve"/> matches against
+    /// <c>Name + " " + Ref</c> and refs are slugs: treating "_" as a separator made <c>cap_sensor_v1</c>
+    /// match "cap", so the demo's capacitive soil sensor was handed a two-pad 0603 capacitor footprint —
+    /// whose pads then cannot carry VCC/GND/AOUT, so the fail-closed gate refused the whole board.
+    /// Real signal lives in the NAME ("ESP32 DevKit v1"), which is unaffected.
+    /// </para>
     /// </summary>
     internal static bool HasToken(string hay, string word) =>
         !string.IsNullOrEmpty(word) &&
-        Regex.IsMatch(hay, $@"(?<![a-z0-9]){Regex.Escape(word)}(?![a-z0-9])", RegexOptions.IgnoreCase);
+        Regex.IsMatch(hay, $@"(?<![a-z0-9_]){Regex.Escape(word)}(?![a-z0-9_])", RegexOptions.IgnoreCase);
 
     /// <summary>
     /// The chosen footprint lib id for a component plus a flag indicating it fell through to the generic
@@ -134,6 +142,11 @@ public static class FootprintMap
         // 6V solar panel — 2-wire lead → 2-pin JST-PH connector.
         if (Has("solar", "panel", "photovoltaic"))
             return Heur("Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical");
+
+        // AA-sized cells (14500 Li-ion, or a plain AA) → the single-AA holder. Checked BEFORE the 18650
+        // rule, whose "battery holder" keyword would otherwise swallow every holder into an 88 mm part.
+        if (Has("14500", "aa cell", "1xaa", "aa holder"))
+            return Heur("Battery:BatteryHolder_Keystone_2460_1xAA");
 
         // 18650 Li-ion cell → single-cell battery holder.
         if (Has("18650", "li-ion cell", "lithium cell", "battery holder"))
@@ -236,6 +249,8 @@ public static class FootprintMap
 
         // ---- connectors / battery holders used for SolarPool exotic parts (offline approximations) ----
         if (Has("BatteryHolder") && Has("18650")) return (88.0, 21.75);
+        // measured from the F.CrtYd polygon in BatteryHolder_Keystone_2460_1xAA.kicad_mod
+        if (Has("BatteryHolder") && Has("1xAA")) return (57.5, 17.4);
         if (Has("BatteryHolder")) return (40.0, 20.0);
         if (Has("JST_PH_B3B") || Has("1x03") && Has("JST")) return (9.0, 5.6);
         if (Has("JST_PH_B2B") || Has("1x02") && Has("JST")) return (7.0, 5.6);

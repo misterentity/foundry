@@ -16,7 +16,11 @@ public class EnclosureSchemaTests
         var root = doc.RootElement;
 
         Assert.Equal("box_enclosure", root.GetProperty("type").GetString());
-        Assert.Equal(62, root.GetProperty("inner")[0].GetDouble());
+        // assert the schema FAITHFULLY carries the project's dims, not a magic number that has to be
+        // edited whenever the sample is resized
+        Assert.Equal(p.Enclosure.Inner[0], root.GetProperty("inner")[0].GetDouble());
+        Assert.Equal(p.Enclosure.Inner[1], root.GetProperty("inner")[1].GetDouble());
+        Assert.Equal(p.Enclosure.Inner[2], root.GetProperty("inner")[2].GetDouble());
         Assert.Equal(2.0, root.GetProperty("wall_mm").GetDouble());          // snake_case for the sidecar
         Assert.Equal(p.Enclosure.Lid, root.GetProperty("lid").GetProperty("style").GetString());
         Assert.Equal(p.Enclosure.Mount, root.GetProperty("mount").GetString());

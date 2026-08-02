@@ -220,8 +220,24 @@ public class FootprintMapTests
     [InlineData("sot-23", "sot-23-3 package", true)]   // multi-token key survives
     [InlineData("uno", "arduino uno r3", true)]
     [InlineData("res", "pressure sensor", false)]
+    // Underscore is a WORD character, not a separator — Resolve matches Name + " " + Ref, and refs are
+    // slugs, so "cap_sensor_v1" must not read as a capacitor.
+    [InlineData("cap", "capacitive soil v1.2 cap_sensor_v1", false)]
+    [InlineData("led", "status_led_driver", false)]
+    [InlineData("esp32", "esp32 devkit v1 esp32_devkit", true)]   // the NAME still carries it
     public void HasToken_MatchesOnlyAtTokenBoundaries(string word, string hay, bool expected) =>
         Assert.Equal(expected, FootprintMap.HasToken(hay, word));
+
+    // The demo's own sensor: a slug ref must not drag a real part onto a two-pad passive footprint,
+    // whose pads then cannot carry VCC/GND/AOUT and so refuse the entire board at the fail-closed gate.
+    [Fact]
+    public void SlugRef_DoesNotMisResolveARealPart()
+    {
+        var sensor = new ComponentSpec { Alias = "SENSOR", Ref = "cap_sensor_v1", Name = "Capacitive Soil v1.2" };
+        var c = FootprintMap.Resolve(sensor, 3);
+        Assert.DoesNotContain("Capacitor", c.LibId, StringComparison.Ordinal);
+        Assert.True(c.IsFallback);   // honest placeholder the build can ordinal-map, not a wrong real part
+    }
 }
 
 public class PcbJobTests

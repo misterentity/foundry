@@ -10,8 +10,22 @@ namespace Foundry.Core.Sidecar;
 /// </summary>
 public sealed class SidecarHost : IDisposable
 {
-    private const int Port = 8731;
     private static readonly SemaphoreSlim Gate = new(1, 1);
+    private string _token = "";
+
+    /// <summary>
+    /// Ask the OS for a free loopback port. There is a small race between releasing it and the child
+    /// binding it, but a squatter cannot produce our token, so the health check refuses it and startup
+    /// fails loudly instead of adopting a stranger.
+    /// </summary>
+    private static int PickFreePort()
+    {
+        var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        l.Start();
+        var port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return port;
+    }
 
     private Process? _process;
     private SidecarClient? _client;
@@ -34,18 +48,31 @@ public sealed class SidecarHost : IDisposable
         {
             if (_client is not null) return _client;
 
-            var baseUrl = $"http://127.0.0.1:{Port}";
-            var probe = new SidecarClient(baseUrl);
-
-            // Maybe one is already running (dev) — reuse it.
-            if (await probe.HealthAsync(ct))
+            // EXPLICIT developer override: an operator who started server.py by hand points us at it.
+            // This is the only path that adopts a process we did not spawn, and it is opt-in and visible.
+            var overrideUrl = Environment.GetEnvironmentVariable(SidecarIdentity.UrlVar);
+            if (!string.IsNullOrWhiteSpace(overrideUrl))
             {
-                _client = probe;
-                StatusMessage = $"connected · {baseUrl}";
-                return _client;
+                var manual = new SidecarClient(overrideUrl.Trim());
+                if (await manual.HealthAsync(ct))
+                {
+                    _client = manual;
+                    StatusMessage = $"connected · {manual.BaseUrl} (via {SidecarIdentity.UrlVar})";
+                    Diagnostics.AppLog.Info("sidecar", $"using operator-supplied sidecar at {manual.BaseUrl}");
+                    return _client;
+                }
+                Diagnostics.AppLog.Warn("sidecar", $"{SidecarIdentity.UrlVar}={overrideUrl} did not answer — spawning our own");
             }
 
-            var (fileName, args, workDir, kind) = ResolveLauncher();
+            // Otherwise ALWAYS spawn our own, on a free port, carrying a token only our child can echo.
+            // Probing a fixed port and adopting whatever answered meant a build from this tree would
+            // silently serve geometry from an older installed sidecar while reporting "connected".
+            _token = SidecarIdentity.NewToken();
+            var port = PickFreePort();
+            var baseUrl = $"http://127.0.0.1:{port}";
+            var probe = new SidecarClient(baseUrl, expectedToken: _token);
+
+            var (fileName, args, workDir, kind) = ResolveLauncher(port);
             if (fileName is null)
             {
                 StatusMessage = "sidecar not found (no frozen exe and no Python)";
@@ -69,6 +96,9 @@ public sealed class SidecarHost : IDisposable
                         RedirectStandardOutput = true,
                     },
                 };
+                // Token goes through the ENVIRONMENT, not argv — argv is readable by any local process
+                // in the task list, which would defeat the point of a per-spawn secret.
+                _process.StartInfo.Environment[SidecarIdentity.TokenVar] = _token;
                 // Drain both pipes asynchronously so the child can never block writing to a full buffer.
                 // stdout is discarded (uvicorn access logs); a bounded tail of stderr is kept for diagnostics.
                 _process.OutputDataReceived += (_, _) => { };
@@ -108,8 +138,19 @@ public sealed class SidecarHost : IDisposable
                     }
                     await Task.Delay(250, ct);
                 }
-                StatusMessage = "sidecar health-check timed out";
-                Diagnostics.AppLog.Warn("sidecar", $"health-check timed out{StderrTail()}");
+                // Distinguish "didn't start" from "started but couldn't prove it's ours". The second is
+                // almost always a STALE frozen bundle: server.py gained the token echo, the .exe next to
+                // it did not, so it answers /health without a token and is refused. Left as a bare
+                // timeout that reads like a mystery hang.
+                var alive = _process is { HasExited: false };
+                StatusMessage = alive
+                    ? $"sidecar started but did not authenticate — the {kind} is likely STALE; re-freeze it"
+                    : "sidecar health-check timed out";
+                Diagnostics.AppLog.Warn("sidecar", alive
+                    ? $"{kind} answered but produced no matching token — rebuild the frozen bundle " +
+                      $"(PyInstaller) so it carries the current server.py{StderrTail()}"
+                    : $"health-check timed out{StderrTail()}");
+                KillProcess();
                 return null;
             }
             catch (OperationCanceledException)
@@ -123,9 +164,9 @@ public sealed class SidecarHost : IDisposable
     }
 
     /// <summary>Pick how to launch the sidecar: frozen exe (packaged) first, else Python + server.py (dev).</summary>
-    private static (string? fileName, string? args, string? workDir, string kind) ResolveLauncher()
+    private static (string? fileName, string? args, string? workDir, string kind) ResolveLauncher(int port)
     {
-        var portArgs = $"--host 127.0.0.1 --port {Port}";
+        var portArgs = $"--host 127.0.0.1 --port {port}";
 
         var frozen = LocateFrozenExe();
         if (frozen is not null)

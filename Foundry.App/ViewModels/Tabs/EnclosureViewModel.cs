@@ -245,7 +245,9 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             // never the AI-authored OpenSCAD preview. AI fills the schema; geometry is computed from it.
             var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
             if (client is null) { SidecarStatus = "can't export — CAD sidecar offline"; return; }
-            var mesh = await client.BuildEnclosureAsync(Foundry.Core.Sidecar.EnclosureSchema.ToJson(E, fmt));
+            // "print", not the preview arrangement: the file the user takes away must be slicable.
+            var mesh = await client.BuildEnclosureAsync(
+                Foundry.Core.Sidecar.EnclosureSchema.ToJson(E, fmt, arrange: "print"));
             var data = mesh.Stl;
             if (data is null || data.Length == 0) { SidecarStatus = "no mesh to export"; return; }
             var dir = ConfigStore.Load().OutputFolder;

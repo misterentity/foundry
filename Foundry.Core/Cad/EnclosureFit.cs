@@ -39,6 +39,24 @@ public static class EnclosureFit
     public const double MinStandoffMm = 3.0;
 
     /// <summary>
+    /// KiCad's 3dmodels dir, located once per process. Callers that don't supply one get it automatically:
+    /// requiring every call site to thread the path meant the app reported "no height data" on every part
+    /// while the models sat on disk, unread. Null when KiCad isn't installed — then heights really are
+    /// unknown and FIT-UNK is the honest answer.
+    /// </summary>
+    private static readonly Lazy<string?> DefaultModelDir = new(() =>
+    {
+        try
+        {
+            var kicad = Pcb.KiCadInstaller.Locate();
+            if (kicad is null) return null;
+            var dir = StepHeights.ModelDirFor(kicad.FootprintDir);
+            return Directory.Exists(dir) ? dir : null;
+        }
+        catch { return null; }
+    });
+
+    /// <summary>
     /// The board's footprint, derived from the placer's outline. The outline is a rectangle from the
     /// origin expressed as <c>[x1,y1,x2,y2]</c> segments, so the extent is its maximum corner.
     /// </summary>
@@ -70,6 +88,8 @@ public static class EnclosureFit
         IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null,
         string? modelDir = null)
     {
+        modelDir ??= DefaultModelDir.Value;
+
         var items = new List<Pcb.PcbPlacer.PlacedItem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var spec in project.Components)
@@ -110,19 +130,37 @@ public static class EnclosureFit
         return heights;
     }
 
-    /// <summary>The smallest inner cavity [L, W, H] that will actually hold this board and its parts.</summary>
+    /// <summary>
+    /// The smallest inner cavity [L, W, H] that will hold this board and its parts.
+    ///
+    /// <para>
+    /// L and W are always exact — the board extent is known independently of any part height. H is a
+    /// LOWER BOUND when only some heights are known (an unmeasured part may be taller), and is
+    /// <see cref="double.NaN"/> when NO height is known at all.
+    /// </para>
+    /// <para>
+    /// NaN rather than a number, deliberately. Treating unknown heights as zero returned
+    /// <c>3 + 1.6 + 0 + 1 = 5.6 mm</c> — a derived-looking depth that is nonsense for a board carrying a
+    /// 16 mm cell holder, and one that <see cref="Check"/> structurally could not contradict because its
+    /// depth test only runs when a height is known. A fabricated measurement is worse than no
+    /// measurement: it is the exact failure this whole class exists to prevent.
+    /// </para>
+    /// </summary>
     public static double[] MinimumInner(BoardExtent board, IReadOnlyList<PartHeight> parts)
     {
         var known = parts.Where(p => p.IsKnown).ToList();
-        var tallest = known.Count == 0 ? 0.0 : known.Max(p => p.AboveMm);
-        var deepest = known.Count == 0 ? 0.0 : known.Max(p => p.BelowMm);
-        var standoff = Math.Max(MinStandoffMm, deepest);
+        var depth = double.NaN;
+        if (known.Count > 0)
+        {
+            var standoff = Math.Max(MinStandoffMm, known.Max(p => p.BelowMm));
+            depth = Math.Round(standoff + PcbThicknessMm + known.Max(p => p.AboveMm) + LidClearanceMm, 2);
+        }
 
         return new[]
         {
             Math.Round(board.WidthMm + 2 * SideClearanceMm, 2),
             Math.Round(board.DepthMm + 2 * SideClearanceMm, 2),
-            Math.Round(standoff + PcbThicknessMm + tallest + LidClearanceMm, 2),
+            depth,
         };
     }
 

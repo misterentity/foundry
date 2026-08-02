@@ -108,6 +108,26 @@ public class EnclosureFitTests
         Assert.Equal(42.0, min[1], 2);
     }
 
+    // Treating unknown heights as zero produced 3 + 1.6 + 0 + 1 = 5.6 mm — a derived-LOOKING depth that
+    // is nonsense for a board carrying a 16 mm cell holder, and one Check() could never contradict.
+    [Fact]
+    public void NoHeightDataAtAll_RefusesToInventADepth()
+    {
+        var min = EnclosureFit.MinimumInner(Board, Array.Empty<PartHeight>());
+        Assert.True(double.IsNaN(min[2]), $"invented a depth of {min[2]} mm from no height data");
+    }
+
+    [Fact]
+    public void UnknownHeightsMixedWithKnownOnes_GiveALowerBoundNotNaN()
+    {
+        var mixed = Parts.Append(PartHeight.Unknown("Custom:Mystery")).ToArray();
+        var min = EnclosureFit.MinimumInner(Board, mixed);
+
+        // the known parts still bound it from below; the unmeasured one is reported via FIT-UNK
+        Assert.False(double.IsNaN(min[2]));
+        Assert.Equal(EnclosureFit.MinimumInner(Board, Parts)[2], min[2], 2);
+    }
+
     // ---- the rollup contract itself ----
 
     [Theory]
@@ -188,16 +208,44 @@ public class EnclosureFitTests
     }
 
     // The wiring: mechanical findings must reach the same report card as the electrical ones.
+    // The sample must pass its OWN mechanical check. Its case used to be a guess (62 x 48 x 26 for a
+    // board that places at 71.5 x 62.9), so the first thing a user opened reported a hard failure.
     [Fact]
-    public void Revalidate_SurfacesMechanicalFindingsAlongsideElectricalOnes()
+    public void TheShippedSample_FitsItsOwnEnclosure()
     {
         var demo = DemoData.CreateSoilMoistureProject();
         ProjectValidator.Revalidate(demo);
 
-        // The shipped sample's case (62 x 48 x 26) was never derived from its board: a naive placement
-        // of an 88 mm 18650 holder alongside the MCU and headers is ~220 mm long. The check says so.
-        Assert.Contains(demo.Findings, f => f is { Code: "FIT-XY", Severity: "fail" });
-        Assert.Equal("fail", demo.Validation);
+        Assert.DoesNotContain(demo.Findings, f => f.Code is "FIT-XY" or "FIT-Z");
+
+        // With KiCad present every demo part's height resolves, so there is nothing left unproven.
+        // Without it, heights genuinely are unknown and FIT-UNK is the correct answer — not a failure.
+        if (Foundry.Core.Pcb.KiCadInstaller.Locate() is not null)
+            Assert.DoesNotContain(demo.Findings, f => f.Code == "FIT-UNK");
+    }
+
+    // ...and the declared case must still be derived from the board, not merely large enough by luck.
+    [Fact]
+    public void TheShippedSample_DeclaresACaseCloseToItsDerivedMinimum()
+    {
+        var demo = DemoData.CreateSoilMoistureProject();
+        var findings = EnclosureFit.CheckProject(demo);
+        Assert.DoesNotContain(findings, f => f.Severity == "fail");
+
+        var min = EnclosureFit.MinimumInner(
+            EnclosureFit.BoardExtentOf(
+                Foundry.Core.Pcb.PcbPlacer.Place(
+                    demo.Components.Select(c =>
+                    {
+                        var lib = Foundry.Core.Pcb.FootprintMap.Resolve(c, Math.Max(1, c.Pins.Count)).LibId;
+                        return new Foundry.Core.Pcb.PcbPlacer.PlacedItem(c.Alias, lib, Foundry.Core.Pcb.FootprintMap.CourtyardOf(lib));
+                    }).ToList(),
+                    Foundry.Core.Pcb.PlacementPlan.Empty).OutlineSegmentsMm),
+            EnclosureFit.HeightsFor(demo, null));
+
+        // generous enough to print, not so generous the number is meaningless
+        for (int i = 0; i < 3; i++)
+            Assert.InRange(demo.Enclosure.Inner[i], min[i], min[i] * 1.35);
     }
 
     // Caught by rendering the tab, not by a test: mechanical findings were APPENDED after
@@ -206,7 +254,9 @@ public class EnclosureFitTests
     [Fact]
     public void Revalidate_SortsAndNumbersMechanicalFindingsWithTheElectricalOnes()
     {
+        // Force a mechanical finding so the ordering path is exercised regardless of the sample's state.
         var demo = DemoData.CreateSoilMoistureProject();
+        demo.Enclosure.Inner = new[] { 20.0, 20.0, 10.0 };
         ProjectValidator.Revalidate(demo);
 
         Assert.All(demo.Findings, f => Assert.False(string.IsNullOrWhiteSpace(f.Num),

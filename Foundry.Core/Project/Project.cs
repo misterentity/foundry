@@ -180,7 +180,10 @@ public sealed class Finding
     /// does NOT offer "Apply &amp; re-run", since an AI design edit can never clear them.
     /// </summary>
     [JsonIgnore]
-    public bool Advisory => Severity is "info" or "unproven" || Code is "PWR-02" or "BOM-01";
+    // FIT-UNDER is guidance until standoff height is a real parameter (see PLAN-v3 A1): the resolution is
+    // a geometry change, not a design edit, so offering "Apply & re-run" would route to an AI fix that
+    // cannot satisfy it.
+    public bool Advisory => Severity is "info" or "unproven" || Code is "PWR-02" or "BOM-01" or "FIT-UNDER";
 }
 
 public sealed class AssemblyStep

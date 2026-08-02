@@ -37,6 +37,9 @@ public static class StepHeights
             ["Module:Arduino_UNO_R3"]              = (11.0, 3.0),   // stacked headers dominate
             ["Module:Arduino_Nano"]                = (7.5, 3.0),    // header pins below
             ["Package_TO_SOT_SMD:SOT-223-3_TabPin2"] = (1.8, 0.0),
+            // DERIVED, not measured: a AA cell is 14.5 mm diameter (IEC R6) and the Keystone 2460
+            // cradles it just above the board. Treat as approximate — replace if a model ever ships.
+            ["Battery:BatteryHolder_Keystone_2460_1xAA"] = (16.5, 0.0),
         };
 
     /// <summary>Where KiCad keeps 3D models for a footprint library, given the footprint dir.</summary>

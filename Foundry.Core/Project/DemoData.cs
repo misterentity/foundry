@@ -32,8 +32,8 @@ public static class DemoData
                 Specs = new() { new("Logic","3.3 V"), new("Idle","12 mA"), new("Wi-Fi","802.11 b/g/n"), new("Pins","30") } },
             new Subsystem { Id = "sensor", Role = "Sensor", Name = "Capacitive Soil v1.2", Mpn = "SEN-CAP-01",
                 Specs = new() { new("Output","AOUT 0-3V"), new("Supply","3.3 V"), new("Draw","5 mA"), new("IP","67") } },
-            new Subsystem { Id = "power", Role = "Power", Name = "18650 + TP4056", Mpn = "LI-18650-3000",
-                Specs = new() { new("Capacity","3000 mAh"), new("Charge","USB-C"), new("Protect","yes"), new("Voltage","3.7 V") } },
+            new Subsystem { Id = "power", Role = "Power", Name = "14500 + TP4056", Mpn = "LI-14500-800",
+                Specs = new() { new("Capacity","800 mAh"), new("Charge","USB-C"), new("Protect","yes"), new("Voltage","3.7 V") } },
             new Subsystem { Id = "regulator", Role = "Regulator", Name = "MCP1700-3302E", Mpn = "MCP1700-3302E/TO",
                 Specs = new() { new("Vout","3.3 V"), new("Iq","1.6 µA"), new("Imax","250 mA"), new("Dropout","178 mV") } },
         },
@@ -42,10 +42,10 @@ public static class DemoData
         {
             new BomLine { Qty=1, Name="ESP32 DevKit v1",             Mpn="ESP32-DEVKITC-32E", Price=8.50, Stock=1442, Lead="Stock", Dist="DigiKey", Note="Wi-Fi MCU" },
             new BomLine { Qty=1, Name="Capacitive Soil Sensor v1.2", Mpn="SEN-CAP-01",        Price=4.20, Stock=312,  Lead="Stock", Dist="Amazon",  Note="Analog out" },
-            new BomLine { Qty=1, Name="18650 Li-ion 3000mAh",        Mpn="LI-18650-3000",     Price=7.95, Stock=62,   Lead="2 wk",  Dist="Mouser",  Note="Protected" },
+            new BomLine { Qty=1, Name="14500 Li-ion 800mAh (AA)",    Mpn="LI-14500-800",      Price=5.40, Stock=88,   Lead="2 wk",  Dist="Mouser",  Note="Protected" },
             new BomLine { Qty=1, Name="TP4056 USB-C Charger",        Mpn="TP4056-USB-C",      Price=1.40, Stock=984,  Lead="Stock", Dist="DigiKey", Note="1A charge" },
             new BomLine { Qty=1, Name="MCP1700 3.3V LDO",            Mpn="MCP1700-3302E/TO",  Price=0.48, Stock=5210, Lead="Stock", Dist="Mouser",  Note="TO-92" },
-            new BomLine { Qty=1, Name="18650 Holder, single",        Mpn="HLD-18650-1S",      Price=0.85, Stock=140,  Lead="Stock", Dist="DigiKey", Note="PCB mount" },
+            new BomLine { Qty=1, Name="AA/14500 Holder, single",     Mpn="HLD-1XAA-2460",     Price=0.62, Stock=210,  Lead="Stock", Dist="DigiKey", Note="PCB mount" },
             new BomLine { Qty=2, Name="Tactile Switch 6×6mm",        Mpn="TL3301AF260QG",     Price=0.18, Stock=9999, Lead="Stock", Dist="Mouser",  Note="Reset/Mode" },
             new BomLine { Qty=1, Name="Cable Gland M12",             Mpn="M12-GLAND-PG7",     Price=0.85, Stock=28,   Lead="low",   Dist="Amazon",  Note="Sensor lead" },
         },
@@ -54,7 +54,11 @@ public static class DemoData
 
         Enclosure = new Enclosure
         {
-            Inner = new double[] { 62, 48, 26 },
+            // Sized to the board this project actually places, not guessed: EnclosureFit.MinimumInner
+            // reports 73.5 × 64.9 × 22.2 mm for these parts (the AA holder dominates the floor, the
+            // 8.7 mm headers the height). Rounded up for print tolerance. Kept honest deliberately —
+            // the sample is the first thing a user opens, and it must pass its own fit check.
+            Inner = new double[] { 76, 68, 24 },
             Wall = 2.0,
             Lid = "screw",           // outdoor → screw-down lid
             Mount = "wall-tabs",     // wall-mounted soil sensor
@@ -90,8 +94,8 @@ public static class DemoData
                 Body="Run the capacitive sensor's three-wire lead through the M12 cable gland. VCC→ESP32 3V3, GND→ESP32 GND, AOUT→ESP32 GPIO34. Use 24 AWG silicone wire.",
                 Chips=new(){ "SEN-CAP-01","M12 gland","GPIO34" } },
             new AssemblyStep { N=4, Title="Battery + charger",
-                Body="Press-fit the 18650 holder into the standoffs. Wire TP4056 OUT+/OUT– to the regulator input. Route USB-C through the side cutout. Verify polarity before inserting the cell.",
-                Chips=new(){ "TP4056","18650","USB-C cutout" } },
+                Body="Solder the AA holder to the board. Wire TP4056 OUT+/OUT– to the regulator input. Route USB-C through the side cutout. Verify polarity before inserting the 14500 cell — it is AA-sized but 3.7 V, not 1.5 V.",
+                Chips=new(){ "TP4056","14500","USB-C cutout" } },
             new AssemblyStep { N=5, Title="Flash the firmware",
                 Body="Open the exported project folder in Arduino IDE 2.x or PlatformIO. Set your Wi-Fi credentials and webhook in `wifi.h` (`// TODO: SSID` markers). Flash at 460800 baud. The board should boot, sample once, and deep-sleep within ~3s.",
                 Chips=new(){ "main.ino","wifi.h","460800 baud" } },
@@ -141,7 +145,7 @@ public static class DemoData
         new ChatMessage { Role="user", Time="14:08",
             Text="A battery-powered soil-moisture sensor that texts me when my plants are dry. Outdoor enclosure. Should run at least a month on a single charge." },
         new ChatMessage { Role="assistant", Time="14:08",
-            Text="On it. Picking parts for low-duty-cycle Wi-Fi, IP65 enclosure, and a single 18650 with USB-C charging. I'll favor capacitive over resistive sensors for outdoor lifetime.",
+            Text="On it. Picking parts for low-duty-cycle Wi-Fi, IP65 enclosure, and a single 14500 (AA-sized Li-ion) with USB-C charging. I'll favor capacitive over resistive sensors for outdoor lifetime.",
             Pipeline=new(){ new("Spec","done"), new("Architecture","done"), new("Wiring","done"), new("Firmware","done"), new("Enclosure","done"), new("Validation","done") } },
         new ChatMessage { Role="user", Time="14:14", Text="Can it use Twilio SMS instead of email?" },
         new ChatMessage { Role="assistant", Time="14:14",

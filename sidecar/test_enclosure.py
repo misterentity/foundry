@@ -117,6 +117,48 @@ def test_cutout_on_every_face_removes_material():
         assert removed > 1.0, f"face '{face}' cutout removed only {removed:.2f} mm^3"
 
 
+# The regression that made every exported file unslicable: the preview's explode offset was applied to
+# the mesh that was then EXPORTED, so the STL held a lid floating ~7 mm above the base with fully
+# overlapping XY. A slicer either rejects the floating body or builds 33 mm of support under it.
+def test_print_arrangement_puts_every_body_flat_on_the_plate():
+    mesh, _ = _mesh(_base_schema(arrange="print"))
+    bodies = mesh.split(only_watertight=False)
+    assert len(bodies) >= 2, "expected a base and a lid"
+    for b in bodies:
+        assert b.bounds[0][2] == pytest.approx(0.0, abs=1e-6), \
+            f"body starts at z={b.bounds[0][2]:.2f}, not on the plate"
+
+
+def test_print_arrangement_separates_the_bodies_in_xy():
+    mesh, _ = _mesh(_base_schema(arrange="print"))
+    bodies = sorted(mesh.split(only_watertight=False), key=lambda b: b.bounds[0][0])
+    a, b = bodies[0], bodies[-1]
+    assert a.bounds[1][0] < b.bounds[0][0], "bodies overlap in X — they cannot both be printed"
+
+
+def test_exploded_arrangement_is_still_stacked_for_the_preview():
+    mesh, _ = _mesh(_base_schema(arrange="exploded"))
+    bodies = sorted(mesh.split(only_watertight=False), key=lambda b: b.bounds[0][2])
+    assert bodies[-1].bounds[0][2] > bodies[0].bounds[1][2], "lid should sit above the base in preview"
+
+
+def test_arrangement_defaults_to_exploded_so_the_preview_is_unchanged():
+    a, _ = _mesh(_base_schema())
+    b, _ = _mesh(_base_schema(arrange="exploded"))
+    assert a.volume == pytest.approx(b.volume)
+
+
+# Arrangement must move geometry, never change it — same solid, different placement.
+def test_arrangement_does_not_alter_the_geometry():
+    p, _ = _mesh(_base_schema(arrange="print"))
+    e, _ = _mesh(_base_schema(arrange="exploded"))
+    # rel=1e-6, not tighter: the print arrangement rotates the lid, and a rigid-body transform through
+    # float64 perturbs the computed volume in the ~1e-8 relative range. Tighter asserts float exactness,
+    # which is not what "same solid" means.
+    assert p.volume == pytest.approx(e.volume, rel=1e-6)
+    assert len(p.faces) == len(e.faces)
+
+
 def test_a_bad_cutout_does_not_break_the_build():
     mesh, _ = _mesh(_base_schema(cutouts=[
         {"face": "nonsense", "shape": "??", "size": ["x", None]},

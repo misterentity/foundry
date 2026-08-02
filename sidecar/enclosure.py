@@ -43,7 +43,9 @@ def _rounded_box(trimesh, w, h, d, r):
     return box
 
 
-def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="none", fmt="stl"):
+def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="none", fmt="stl",
+               arrange="exploded"):
+    import math
     import numpy as np  # noqa: F401  (trimesh pulls it in; kept explicit for PyInstaller)
     import trimesh
     from trimesh.transformations import rotation_matrix
@@ -91,10 +93,24 @@ def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="no
         except Exception:
             continue
 
-    # ----- LID: rounded cap + locating lip + screw clearance, shown exploded above the base -----
+    # ----- LID: rounded cap + locating lip + screw clearance -----
     lid_mesh = _build_lid(trimesh, rotation_matrix, L, Wd, ox, oy, t, corner, boss_xy, top_cuts, margin)
-    gap = 10.0
-    lid_mesh.apply_translation([0, 0, oz + gap])
+
+    # ARRANGEMENT. "exploded" stacks the lid above the base for the 3D preview; "print" lays both flat
+    # on the plate, side by side.
+    #
+    # These MUST differ. The exploded offset used to be applied to the mesh that was then EXPORTED, so
+    # every STL Foundry ever wrote contained a lid hovering ~7 mm above the base with fully overlapping
+    # XY — a slicer either rejects the floating body or builds tens of mm of support under it. The file
+    # the user takes away has to be printable; the pretty picture is the special case, not the default.
+    if str(arrange).lower() == "print":
+        # Flip the lid so the flat cap sits ON the plate and the locating lip points up — no support
+        # under the cap, and the lip's overhang becomes a self-supporting rim.
+        lid_mesh.apply_transform(rotation_matrix(math.pi, [1, 0, 0]))
+        lo = lid_mesh.bounds[0]
+        lid_mesh.apply_translation([ox + 10.0, 0, -lo[2]])
+    else:
+        lid_mesh.apply_translation([0, 0, oz + 10.0])
 
     model = trimesh.util.concatenate([base, lid_mesh])
     fmt = (fmt or "stl").lower()
@@ -375,7 +391,8 @@ def build_stl(schema: dict) -> Tuple[bytes, dict]:
     vents = schema.get("vents", []) or []
     mount = schema.get("mount", "none")
     fmt = str(schema.get("format", "stl")).lower()
+    arrange = str(schema.get("arrange", "exploded")).lower()
     try:
-        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount, fmt)
+        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount, fmt, arrange)
     except Exception:
         return _fallback_build(inner, wall)   # dependency-free fallback is STL only

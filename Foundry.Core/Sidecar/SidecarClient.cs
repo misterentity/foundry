@@ -9,11 +9,16 @@ public sealed record EnclosureMesh(byte[] Stl, string Kernel, int Triangles, str
 public sealed class SidecarClient
 {
     private readonly HttpClient _http;
+    private readonly string _expectedToken;
     public string BaseUrl { get; }
 
-    public SidecarClient(string baseUrl, HttpClient? http = null)
+    /// <param name="expectedToken">The per-spawn token this sidecar must echo from <c>/health</c>.
+    /// Empty means "any Foundry sidecar", which is only correct for the explicit
+    /// <see cref="SidecarIdentity.UrlVar"/> developer override.</param>
+    public SidecarClient(string baseUrl, HttpClient? http = null, string expectedToken = "")
     {
         BaseUrl = baseUrl.TrimEnd('/');
+        _expectedToken = expectedToken;
         _http = http ?? new HttpClient();
         // OpenSCAD CSG renders can legitimately take 30–90 s for parametric scripts; the sidecar's
         // own openscad subprocess cap is 180 s, so match it. Trimesh schema builds finish in <5 s.
@@ -26,12 +31,10 @@ public sealed class SidecarClient
         {
             using var resp = await _http.GetAsync($"{BaseUrl}/health", ct);
             if (!resp.IsSuccessStatusCode) return false;
-            // Only adopt a listener that identifies as Foundry's CAD sidecar. A different local process that
-            // happens to answer 200 on this port must NOT be mistaken for ours (it could feed back fake
-            // geometry/STL results). The /health body is {"status":"ok","service":"foundry-cad",...}.
-            var body = await resp.Content.ReadAsStringAsync(ct);
-            return body.Contains("\"service\"", StringComparison.OrdinalIgnoreCase)
-                && body.Contains("foundry-cad", StringComparison.OrdinalIgnoreCase);
+            // Identity is decided by SidecarIdentity: the listener must be a Foundry sidecar AND echo the
+            // token this process handed its own child. Matching on the service name alone let a different
+            // (older, installed) Foundry sidecar be adopted silently.
+            return SidecarIdentity.Accept(await resp.Content.ReadAsStringAsync(ct), _expectedToken);
         }
         catch { return false; }
     }

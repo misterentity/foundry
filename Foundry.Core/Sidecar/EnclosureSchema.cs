@@ -17,10 +17,17 @@ public static class EnclosureSchema
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
-    public static string ToJson(Enclosure enclosure, string format = "stl")
+    /// <param name="arrange">
+    /// <c>exploded</c> stacks the lid above the base for the 3D preview; <c>print</c> lays both flat on
+    /// the plate. EXPORT must use <c>print</c> — the exploded offset was previously baked into the mesh
+    /// that got written to disk, so every STL contained a lid floating above the base with overlapping
+    /// XY, which no slicer can build without tens of millimetres of support.
+    /// </param>
+    public static string ToJson(Enclosure enclosure, string format = "stl", string arrange = "exploded")
     {
         var schema = new SchemaDto
         {
+            Arrange = arrange.Equals("print", StringComparison.OrdinalIgnoreCase) ? "print" : "exploded",
             Type = "box_enclosure",
             Inner = enclosure.Inner,
             WallMm = enclosure.Wall,
@@ -53,6 +60,7 @@ public static class EnclosureSchema
         public List<VentDto> Vents { get; set; } = new();
         public List<CutoutDto> Cutouts { get; set; } = new();
         public string Format { get; set; } = "stl";
+        public string Arrange { get; set; } = "exploded";
     }
     private sealed class LidDto { public string Style { get; set; } = "snap"; }
     private sealed class VentDto { public string Face { get; set; } = "left"; public int Count { get; set; } }
