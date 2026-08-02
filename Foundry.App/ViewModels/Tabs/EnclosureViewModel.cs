@@ -74,7 +74,8 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
                 SidecarStatus = $"CAD sidecar offline ({Foundry.Core.Sidecar.SidecarHost.Shared.StatusMessage})";
                 return;
             }
-            var schema = Foundry.Core.Sidecar.EnclosureSchema.ToJson(E);
+            var schema = Foundry.Core.Sidecar.EnclosureSchema.ToJson(
+                E, board: Foundry.Core.Cad.EnclosureFit.PlaceBoard(Project));
             var mesh = await client.BuildEnclosureAsync(schema);
             StlBytes = mesh.Stl;
             SidecarOnline = true;
@@ -246,8 +247,8 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
             var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
             if (client is null) { SidecarStatus = "can't export — CAD sidecar offline"; return; }
             // "print", not the preview arrangement: the file the user takes away must be slicable.
-            var mesh = await client.BuildEnclosureAsync(
-                Foundry.Core.Sidecar.EnclosureSchema.ToJson(E, fmt, arrange: "print"));
+            var mesh = await client.BuildEnclosureAsync(Foundry.Core.Sidecar.EnclosureSchema.ToJson(
+                E, fmt, arrange: "print", board: Foundry.Core.Cad.EnclosureFit.PlaceBoard(Project)));
             var data = mesh.Stl;
             if (data is null || data.Length == 0) { SidecarStatus = "no mesh to export"; return; }
             var dir = ConfigStore.Load().OutputFolder;

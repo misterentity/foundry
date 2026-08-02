@@ -60,13 +60,26 @@ public sealed partial class ValidationViewModel : TabViewModelBase
     public string GradeSeverity => FailCount > 0 ? "fail"
         : WarnCount > 0 ? "warn"
         : UnprovenCount > 0 ? "unproven" : "pass";
-    public string Verdict => FailCount > 0
-        ? "Not yet — resolve the failures before applying power."
-        : WarnCount > 0
-            ? "Likely OK — review the warnings, then verify before powering on."
-            : UnprovenCount > 0
+    // Composed, not a single branch. Grading on unproven while the verdict read "Likely OK" put a "?"
+    // next to a reassuring sentence — the two halves of the report card contradicting each other.
+    public string Verdict
+    {
+        get
+        {
+            if (FailCount > 0) return "Not yet — resolve the failures before applying power.";
+
+            var unfinished = UnprovenCount == 0
+                ? ""
+                : $" {UnprovenCount} check{(UnprovenCount == 1 ? "" : "s")} couldn't be completed, so this isn't a clean bill of health.";
+
+            if (WarnCount > 0)
+                return "Likely OK on what was checked — review the warnings, then verify before powering on." + unfinished;
+
+            return UnprovenCount > 0
                 ? $"Can't say — {UnprovenCount} check{(UnprovenCount == 1 ? "" : "s")} couldn't be completed. Nothing here failed, but nothing here proves it's safe either."
                 : "Deterministic checks pass — safe to power on (still verify before building).";
+        }
+    }
 
     private void Refresh()
     {

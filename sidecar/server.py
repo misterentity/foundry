@@ -34,6 +34,7 @@ class EnclosureSchema(BaseModel):
     mount: str = "none"
     format: str = "stl"   # stl | 3mf
     arrange: str = "exploded"   # exploded (preview: lid above base) | print (both flat on the plate)
+    board: dict | None = None   # {widthMm, depthMm, thicknessMm, standoffMm, holes:[[x,y],...]}
 
 
 def _kernel_name() -> str:

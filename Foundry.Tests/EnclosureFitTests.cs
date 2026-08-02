@@ -270,6 +270,68 @@ public class EnclosureFitTests
         Assert.StartsWith("F·", fit.Num, StringComparison.Ordinal);
     }
 
+    // ---- mounting holes: the case and the board must agree by construction ----
+
+    [Fact]
+    public void PlaceBoard_ReportsFourMountHolesInsetFromTheBoardEdges()
+    {
+        var demo = DemoData.CreateSoilMoistureProject();
+        var placed = EnclosureFit.PlaceBoard(demo);
+
+        Assert.NotNull(placed);
+        Assert.Equal(4, placed!.MountHolesMm.Count);
+
+        const double i = Foundry.Core.Pcb.PcbPlacer.MountHoleInsetMm;
+        foreach (var h in placed.MountHolesMm)
+        {
+            Assert.InRange(h[0], i - 0.01, placed.Extent.WidthMm - i + 0.01);
+            Assert.InRange(h[1], i - 0.01, placed.Extent.DepthMm - i + 0.01);
+        }
+        // one hole per corner
+        Assert.Equal(4, placed.MountHolesMm.Select(h => (h[0] > placed.Extent.WidthMm / 2, h[1] > placed.Extent.DepthMm / 2)).Distinct().Count());
+    }
+
+    // The keep-out has to be RESERVED, or a component sits where the enclosure's boss must go.
+    [Fact]
+    public void NoComponentOverlapsAMountingHoleKeepout()
+    {
+        var demo = DemoData.CreateSoilMoistureProject();
+        var items = demo.Components.Select(c =>
+        {
+            var lib = Foundry.Core.Pcb.FootprintMap.Resolve(c, Math.Max(1, c.Pins.Count)).LibId;
+            return new Foundry.Core.Pcb.PcbPlacer.PlacedItem(c.Alias, lib, Foundry.Core.Pcb.FootprintMap.CourtyardOf(lib));
+        }).ToList();
+        var res = Foundry.Core.Pcb.PcbPlacer.Place(items, Foundry.Core.Pcb.PlacementPlan.Empty);
+
+        const double keepout = Foundry.Core.Pcb.PcbPlacer.MountHoleKeepoutRadiusMm;
+        foreach (var hole in res.MountHolesMm)
+            foreach (var it in items)
+            {
+                var p = res[it.Ref];
+                var (w, h) = it.Courtyard;
+                // closest point on the part's courtyard rectangle to the hole centre
+                var dx = Math.Max(0, Math.Abs(hole[0] - p.XMm) - w / 2);
+                var dy = Math.Max(0, Math.Abs(hole[1] - p.YMm) - h / 2);
+                Assert.True(Math.Sqrt(dx * dx + dy * dy) >= keepout - 0.01,
+                    $"{it.Ref} intrudes into the mount-hole keep-out at ({hole[0]:0.#}, {hole[1]:0.#})");
+            }
+    }
+
+    [Fact]
+    public void PlaceBoard_StandoffClearsTheDeepestPartUnderTheBoard()
+    {
+        var demo = DemoData.CreateSoilMoistureProject();
+        var placed = EnclosureFit.PlaceBoard(demo);
+
+        Assert.NotNull(placed);
+        var deepest = EnclosureFit.HeightsFor(demo, null).Where(h => h.IsKnown).Select(h => h.BelowMm).DefaultIfEmpty(0).Max();
+        Assert.True(placed!.StandoffMm >= Math.Max(EnclosureFit.MinStandoffMm, deepest) - 0.01);
+    }
+
+    [Fact]
+    public void PlaceBoard_OnAnEmptyProject_IsNull() =>
+        Assert.Null(EnclosureFit.PlaceBoard(new Project()));
+
     // A project with no enclosure asked for is not a mechanical failure.
     [Fact]
     public void Revalidate_StaysSilentWhenNoEnclosureWasRequested()

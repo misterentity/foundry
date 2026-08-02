@@ -19,19 +19,60 @@ public static class PcbPlacer
     /// <summary>A placed component's final position (snapped to 0.05 mm).</summary>
     public readonly record struct Placement(double XMm, double YMm, double Rot);
 
-    /// <summary>The placer's output: ref → position lookup + the board outline, sized to fit.</summary>
+    /// <summary>Distance from each board edge to a mounting-hole centre.</summary>
+    public const double MountHoleInsetMm = 4.0;
+
+    /// <summary>M3 clearance — the hole drilled through the PCB.</summary>
+    public const double MountHoleDiameterMm = 3.2;
+
+    /// <summary>
+    /// Radius kept clear of components around each mounting hole: the enclosure's standoff boss has to
+    /// land there, so a part sitting on top of it would foul the post.
+    /// </summary>
+    public const double MountHoleKeepoutRadiusMm = 3.0;
+
+    /// <summary>The placer's output: ref → position lookup, the board outline, and its mounting holes.</summary>
     public sealed class PlaceResult
     {
         private readonly Dictionary<string, Placement> _byRef;
-        public PlaceResult(Dictionary<string, Placement> byRef, IReadOnlyList<double[]> outline)
+        public PlaceResult(Dictionary<string, Placement> byRef, IReadOnlyList<double[]> outline,
+            IReadOnlyList<double[]>? mountHoles = null)
         {
             _byRef = byRef;
             OutlineSegmentsMm = outline;
+            MountHolesMm = mountHoles ?? Array.Empty<double[]>();
         }
         public Placement this[string @ref] => _byRef[@ref];
         public bool TryGet(string @ref, out Placement p) => _byRef.TryGetValue(@ref, out p);
         public IReadOnlyDictionary<string, Placement> Positions => _byRef;
         public IReadOnlyList<double[]> OutlineSegmentsMm { get; }
+
+        /// <summary>
+        /// Board-coordinate <c>[x, y]</c> centres of the four mounting holes. The ENCLOSURE puts its
+        /// standoffs here, so both sides agree by construction rather than by coincidence — a case whose
+        /// posts don't line up with the board's holes is as useless as one the board doesn't fit in.
+        /// </summary>
+        public IReadOnlyList<double[]> MountHolesMm { get; }
+    }
+
+    /// <summary>
+    /// The narrowest border that still reserves the corner mount-hole keep-outs. Every board gets at
+    /// least this, so the holes the enclosure mounts to are always clear of components.
+    /// </summary>
+    public const double MinMarginMm = MountHoleInsetMm + MountHoleKeepoutRadiusMm;
+
+    /// <summary>The four corner mount-hole centres for a board of this size, inset from each edge.</summary>
+    internal static IReadOnlyList<double[]> MountHolesFor(double boardW, double boardD)
+    {
+        const double i = MountHoleInsetMm;
+        if (boardW < 4 * i || boardD < 4 * i) return Array.Empty<double[]>();   // too small to mount
+        return new[]
+        {
+            new[] { i, i },
+            new[] { boardW - i, i },
+            new[] { boardW - i, boardD - i },
+            new[] { i, boardD - i },
+        };
     }
 
     // One row of the bin-pack: fixed Y and height, filled left to right.
@@ -62,6 +103,11 @@ public static class PcbPlacer
     {
         plan ??= PlacementPlan.Empty;
         var ordered = items.OrderBy(i => i.Ref, StringComparer.OrdinalIgnoreCase).ToList();
+
+        // Widen the border so the corner mounting holes — and the enclosure standoff bosses that land on
+        // them — are guaranteed clear of every component. Reserving the keep-out here is what lets the
+        // holes be reported as fact rather than hoped for.
+        marginMm = Math.Max(marginMm, MinMarginMm);
 
         // 1. Build a box per item: resolve courtyard, swap W/H for 90/270, inflate by gap.
         var boxes = new Dictionary<string, Box>(StringComparer.OrdinalIgnoreCase);
@@ -138,7 +184,8 @@ public static class PcbPlacer
         foreach (var b in all)
             result[b.Ref] = new Placement(Snap(b.X + b.W / 2), Snap(b.Y + b.H / 2), b.Rot);
 
-        return new PlaceResult(result, Outline(Snap(boardW), Snap(boardH)));
+        return new PlaceResult(result, Outline(Snap(boardW), Snap(boardH)),
+            MountHolesFor(Snap(boardW), Snap(boardH)));
     }
 
     // ---- group/edge assignment ----
@@ -395,7 +442,9 @@ public static class PcbPlacer
         }
 
         var top = shelves.Count == 0 ? 0 : shelves[^1].Y + shelves[^1].Height;
-        return new PlaceResult(result, Outline(Snap(maxX + margin), Snap(margin + top + margin)));
+        var boardW = Snap(maxX + margin);
+        var boardD = Snap(margin + top + margin);
+        return new PlaceResult(result, Outline(boardW, boardD), MountHolesFor(boardW, boardD));
     }
 
     // ---- geometry helpers ----

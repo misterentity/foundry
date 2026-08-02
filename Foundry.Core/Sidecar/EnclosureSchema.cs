@@ -23,11 +23,25 @@ public static class EnclosureSchema
     /// that got written to disk, so every STL contained a lid floating above the base with overlapping
     /// XY, which no slicer can build without tens of millimetres of support.
     /// </param>
-    public static string ToJson(Enclosure enclosure, string format = "stl", string arrange = "exploded")
+    /// <param name="board">
+    /// Where the PCB sits, from <see cref="Cad.EnclosureFit.PlaceBoard"/>. When supplied the sidecar
+    /// builds real PCB standoffs at the board's own mounting holes; without it the case has nothing to
+    /// mount the board to, which is what it shipped with — four full-height lid bosses and a loose board.
+    /// </param>
+    public static string ToJson(Enclosure enclosure, string format = "stl", string arrange = "exploded",
+        Cad.BoardPlacement? board = null)
     {
         var schema = new SchemaDto
         {
             Arrange = arrange.Equals("print", StringComparison.OrdinalIgnoreCase) ? "print" : "exploded",
+            Board = board is null ? null : new BoardDto
+            {
+                WidthMm = Math.Round(board.Extent.WidthMm, 2),
+                DepthMm = Math.Round(board.Extent.DepthMm, 2),
+                ThicknessMm = board.ThicknessMm,
+                StandoffMm = board.StandoffMm,
+                Holes = board.MountHolesMm.Select(h => new[] { Math.Round(h[0], 2), Math.Round(h[1], 2) }).ToList(),
+            },
             Type = "box_enclosure",
             Inner = enclosure.Inner,
             WallMm = enclosure.Wall,
@@ -36,7 +50,14 @@ public static class EnclosureSchema
             Mount = enclosure.Mount,
             Format = (format ?? "stl").ToLowerInvariant() == "3mf" ? "3mf" : "stl",
             Vents = enclosure.Vents.Select(v => new VentDto { Face = v.Face, Count = v.Count }).ToList(),
-            Cutouts = enclosure.Cutouts.Select(c => new CutoutDto
+            // When the board is known, port positions are DERIVED from where each part actually sits
+            // rather than taken from the design description. Doing it here means the preview and the
+            // exported file are the same geometry — a hole that lines up on screen but not in the print
+            // would be worse than no derivation at all. Undeducible ones keep their authored value.
+            Cutouts = (board is null
+                    ? enclosure.Cutouts
+                    : Cad.CutoutFit.Derive(enclosure, board).Results.Select(r => r.Cutout).ToList())
+                .Select(c => new CutoutDto
             {
                 Face = c.Face,
                 Shape = c.Shape,
@@ -61,6 +82,16 @@ public static class EnclosureSchema
         public List<CutoutDto> Cutouts { get; set; } = new();
         public string Format { get; set; } = "stl";
         public string Arrange { get; set; } = "exploded";
+        public BoardDto? Board { get; set; }
+    }
+
+    private sealed class BoardDto
+    {
+        public double WidthMm { get; set; }
+        public double DepthMm { get; set; }
+        public double ThicknessMm { get; set; }
+        public double StandoffMm { get; set; }
+        public List<double[]> Holes { get; set; } = new();
     }
     private sealed class LidDto { public string Style { get; set; } = "snap"; }
     private sealed class VentDto { public string Face { get; set; } = "left"; public int Count { get; set; } }

@@ -129,6 +129,14 @@ public sealed class Cutout
     public double[] Pos { get; set; } = new double[] { 0, 0 };
     public string Label { get; set; } = "";
 
+    /// <summary>
+    /// Alias of the component this port exposes (e.g. "USB" for the USB-C cutout). This is the link that
+    /// lets <see cref="Foundry.Core.Cad.CutoutFit"/> derive the hole's face, position and size from where
+    /// the part actually sits on the board. Without it the position is the model's guess and is reported
+    /// as unproven rather than silently trusted.
+    /// </summary>
+    public string? Ref { get; set; }
+
     /// <summary>Human dimension string for the readout, e.g. "9.5 × 6.5 mm" or "⌀ 12 mm".</summary>
     [JsonIgnore]
     public string DimsText => Shape == "circle"

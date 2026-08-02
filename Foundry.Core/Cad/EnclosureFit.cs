@@ -15,6 +15,31 @@ public sealed record PartHeight(string LibId, double AboveMm, double BelowMm)
 public sealed record BoardExtent(double WidthMm, double DepthMm);
 
 /// <summary>
+/// Everything the enclosure needs to know about the board it must hold: its extent, how far it sits
+/// above the floor, its thickness, and where its mounting holes are. The holes come from the SAME
+/// <see cref="Foundry.Core.Pcb.PcbPlacer"/> run that positioned the parts, so the case's standoffs and
+/// the board's holes agree by construction rather than by coincidence.
+/// </summary>
+public sealed record BoardPlacement(
+    BoardExtent Extent,
+    IReadOnlyList<double[]> MountHolesMm,
+    double StandoffMm,
+    double ThicknessMm)
+{
+    /// <summary>Where each component ended up, by alias — the input to deriving port cutouts.</summary>
+    public IReadOnlyDictionary<string, PartPlacement> Parts { get; init; } =
+        new Dictionary<string, PartPlacement>(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>A placed component: centre in board coordinates, courtyard extent, and height above the PCB
+/// (NaN when unmeasured).</summary>
+public sealed record PartPlacement(
+    string Alias, double XMm, double YMm, double WidthMm, double DepthMm, double HeightMm)
+{
+    public bool HeightKnown => !double.IsNaN(HeightMm);
+}
+
+/// <summary>
 /// Deterministic mechanical fit between a PCB and the enclosure generated for it.
 ///
 /// <para>
@@ -83,6 +108,60 @@ public static class EnclosureFit
     /// upgrade the approximations to measured geometry.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Run the deterministic placer for this project and report where the board and its mounting holes
+    /// end up. Null when the project has no components to place. Pure — no KiCad required.
+    /// </summary>
+    public static BoardPlacement? PlaceBoard(
+        Project.Project project,
+        IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null,
+        string? modelDir = null)
+    {
+        modelDir ??= DefaultModelDir.Value;
+        var items = ItemsFor(project, realSizes);
+        if (items.Count == 0) return null;
+
+        var placement = Pcb.PcbPlacer.Place(items, Pcb.PlacementPlan.Empty);
+        var heights = HeightsFor(project, modelDir);
+        var known = heights.Where(h => h.IsKnown).ToList();
+        var standoff = known.Count == 0 ? MinStandoffMm : Math.Max(MinStandoffMm, known.Max(h => h.BelowMm));
+
+        var byLib = heights.ToDictionary(h => h.LibId, h => h.AboveMm, StringComparer.OrdinalIgnoreCase);
+        var parts = new Dictionary<string, PartPlacement>(StringComparer.OrdinalIgnoreCase);
+        foreach (var it in items)
+        {
+            if (!placement.TryGet(it.Ref, out var p)) continue;
+            var (w, d) = it.Courtyard;
+            if (p.Rot is 90 or 270) (w, d) = (d, w);
+            parts[it.Ref] = new PartPlacement(it.Ref, p.XMm, p.YMm, w, d,
+                byLib.TryGetValue(it.LibId, out var hh) ? hh : double.NaN);
+        }
+
+        return new BoardPlacement(
+            BoardExtentOf(placement.OutlineSegmentsMm),
+            placement.MountHolesMm,
+            Math.Round(standoff, 2),
+            PcbThicknessMm)
+        { Parts = parts };
+    }
+
+    private static List<Pcb.PcbPlacer.PlacedItem> ItemsFor(
+        Project.Project project, IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes)
+    {
+        var items = new List<Pcb.PcbPlacer.PlacedItem>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var spec in project.Components)
+        {
+            if (!seen.Add(spec.Alias)) continue;
+            var libId = Pcb.FootprintMap.Resolve(spec, Math.Max(1, spec.Pins.Count)).LibId;
+            var size = realSizes is not null && realSizes.TryGetValue(libId, out var s)
+                ? s
+                : Pcb.FootprintMap.CourtyardOf(libId);
+            items.Add(new Pcb.PcbPlacer.PlacedItem(spec.Alias, libId, size));
+        }
+        return items;
+    }
+
     public static List<Finding> CheckProject(
         Project.Project project,
         IReadOnlyDictionary<string, (double WMm, double HMm)>? realSizes = null,
@@ -108,7 +187,15 @@ public static class EnclosureFit
             return new List<Finding>();
 
         var placement = Pcb.PcbPlacer.Place(items, Pcb.PlacementPlan.Empty);
-        return Check(project.Enclosure, BoardExtentOf(placement.OutlineSegmentsMm), HeightsFor(project, modelDir));
+        var findings = Check(project.Enclosure, BoardExtentOf(placement.OutlineSegmentsMm),
+            HeightsFor(project, modelDir));
+
+        // Port positions are part of "will this case work", so their verification status belongs on the
+        // same report card as the fit itself.
+        var board = PlaceBoard(project, realSizes, modelDir);
+        if (board is not null) findings.AddRange(CutoutFit.Derive(project.Enclosure, board).Findings);
+
+        return findings;
     }
 
     /// <summary>

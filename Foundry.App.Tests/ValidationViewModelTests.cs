@@ -69,6 +69,26 @@ public class ValidationViewModelTests
         Assert.Equal("WARN", vm.OverallStatus);
     }
 
+    // The two halves of the report card must not contradict each other: a "?" grade beside a
+    // reassuring "Likely OK" sentence is worse than either alone.
+    [Fact]
+    public void WarningsPlusUnprovenChecks_SayBothThings()
+    {
+        var vm = Vm(WithFindings(("warn", "PIN-04"), ("unproven", "CUT-POS"), ("unproven", "FIT-UNK")));
+
+        Assert.Equal("?", vm.Grade);
+        Assert.Contains("on what was checked", vm.Verdict, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("2 checks couldn't be completed", vm.Verdict, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void WarningsAlone_DoNotMentionUnfinishedChecks()
+    {
+        var vm = Vm(WithFindings(("warn", "PIN-04")));
+        Assert.Equal("B", vm.Grade);
+        Assert.DoesNotContain("couldn't be completed", vm.Verdict, StringComparison.OrdinalIgnoreCase);
+    }
+
     // A genuinely clean design must still be able to earn an A — the guard must not be a blanket downgrade.
     [Fact]
     public void ACleanDesignStillGradesA()

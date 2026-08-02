@@ -159,6 +159,59 @@ def test_arrangement_does_not_alter_the_geometry():
     assert len(p.faces) == len(e.faces)
 
 
+# PCB MOUNTING. Before this the case had NOTHING to hold the board: _standoff_posts builds lid screw
+# bosses, positioned from the CASE corners and running nearly the full cavity height, so a printed
+# enclosure came with a loose PCB — and a port's height above the floor was undefined because no
+# geometry established where the board sits.
+BOARD = {
+    "widthMm": 71.5, "depthMm": 62.9, "thicknessMm": 1.6, "standoffMm": 4.0,
+    "holes": [[4.0, 4.0], [67.5, 4.0], [67.5, 58.9], [4.0, 58.9]],
+}
+
+
+def test_pcb_standoffs_add_material_at_the_board_holes():
+    plain, _ = _mesh(_base_schema())
+    mounted, _ = _mesh(_base_schema(board=BOARD))
+    assert mounted.volume > plain.volume, "no PCB standoffs were added"
+
+
+def test_pcb_standoffs_land_under_the_board_holes():
+    mounted, _ = _mesh(_base_schema(board=BOARD))
+    base = max(mounted.split(only_watertight=False), key=lambda b: b.volume)
+
+    # holes are in BOARD coords; the case is centred, so subtract half the board extent
+    for hx, hy in BOARD["holes"]:
+        cx, cy = hx - BOARD["widthMm"] / 2, hy - BOARD["depthMm"] / 2
+        # a post occupies this column just above the floor
+        near = [f for f in base.triangles_center
+                if abs(f[0] - cx) < 3.5 and abs(f[1] - cy) < 3.5
+                and WALL < f[2] < WALL + BOARD["standoffMm"] + 0.5]
+        assert near, f"no standoff geometry at board hole ({hx}, {hy}) -> case ({cx:.1f}, {cy:.1f})"
+
+
+def test_pcb_standoffs_stop_below_the_board_plane():
+    mounted, _ = _mesh(_base_schema(board=BOARD))
+    base = max(mounted.split(only_watertight=False), key=lambda b: b.volume)
+    top = WALL + BOARD["standoffMm"]
+    # nothing from the standoffs may poke above the plane the board sits on (within the cavity footprint)
+    intruding = [f for f in base.triangles_center
+                 if abs(f[0]) < BOARD["widthMm"] / 2 - 6 and abs(f[1]) < BOARD["depthMm"] / 2 - 6
+                 and top + 0.5 < f[2] < top + BOARD["standoffMm"]]
+    assert not intruding, "standoff geometry rises through the board plane"
+
+
+def test_board_without_holes_adds_nothing():
+    plain, _ = _mesh(_base_schema())
+    no_holes, _ = _mesh(_base_schema(board={**BOARD, "holes": []}))
+    assert no_holes.volume == pytest.approx(plain.volume)
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"holes": [["x", "y"]], "widthMm": 70, "depthMm": 60, "standoffMm": 4}])
+def test_a_malformed_board_never_breaks_the_build(bad):
+    mesh, _ = _mesh(_base_schema(board=bad))
+    assert mesh.volume > 0
+
+
 def test_a_bad_cutout_does_not_break_the_build():
     mesh, _ = _mesh(_base_schema(cutouts=[
         {"face": "nonsense", "shape": "??", "size": ["x", None]},

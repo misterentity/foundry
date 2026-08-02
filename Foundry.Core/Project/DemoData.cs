@@ -55,20 +55,21 @@ public static class DemoData
         Enclosure = new Enclosure
         {
             // Sized to the board this project actually places, not guessed: EnclosureFit.MinimumInner
-            // reports 73.5 × 64.9 × 22.2 mm for these parts (the AA holder dominates the floor, the
-            // 8.7 mm headers the height). Rounded up for print tolerance. Kept honest deliberately —
-            // the sample is the first thing a user opens, and it must pass its own fit check.
-            Inner = new double[] { 76, 68, 24 },
+            // reports 77.5 × 68.9 × 22.1 mm for these parts (the AA holder dominates the floor, the
+            // 8.7 mm headers the height, and the border reserves the corner mount-hole keep-outs).
+            // Rounded up for print tolerance. Kept honest deliberately — the sample is the first thing
+            // a user opens, and it must pass its own fit check.
+            Inner = new double[] { 80, 71, 24 },
             Wall = 2.0,
             Lid = "screw",           // outdoor → screw-down lid
             Mount = "wall-tabs",     // wall-mounted soil sensor
             Cutouts = new()
             {
                 new Cutout { Face="front", Shape="rect",   Size=new double[]{9.5,3.5}, Pos=new double[]{0,-7},  Label="USB-C" },
-                new Cutout { Face="top",   Shape="circle", D=6,                        Pos=new double[]{18,8},  Label="Reset button" },
+                new Cutout { Face="top",   Shape="circle", D=6,                        Pos=new double[]{18,8},  Label="Reset button", Ref="BTN1" },
                 new Cutout { Face="top",   Shape="circle", D=3,                        Pos=new double[]{28,8},  Label="Status LED" },
                 new Cutout { Face="right", Shape="circle", D=12,                       Pos=new double[]{0,-4},  Label="M12 cable gland" },
-                new Cutout { Face="bottom",Shape="rect",   Size=new double[]{10,6},    Pos=new double[]{0,16},  Label="Soil-probe slot" },
+                new Cutout { Face="bottom",Shape="rect",   Size=new double[]{10,6},    Pos=new double[]{0,16},  Label="Soil-probe slot", Ref="SENSOR" },
             },
             Vents = new() { new Vent { Face="left", Count=4 }, new Vent { Face="right", Count=4 } },
             Standoffs = 4,

@@ -276,8 +276,9 @@ public class PcbPlacerTests
         var res = PcbPlacer.Place(Array.Empty<PcbPlacer.PlacedItem>(), PlacementPlan.Empty, marginMm: 5);
         Assert.Empty(res.Positions);
         Assert.Equal(4, res.OutlineSegmentsMm.Count);
-        // board is 2*margin square
-        Assert.Equal(10.0, res.OutlineSegmentsMm[1][0], 3);   // right edge x == w == 2*margin
+        // Board is 2*margin square. The requested 5 mm is widened to MinMarginMm so the corner
+        // mount-hole keep-outs are reserved on every board.
+        Assert.Equal(2 * PcbPlacer.MinMarginMm, res.OutlineSegmentsMm[1][0], 3);
     }
 
     [Fact]
@@ -316,7 +317,8 @@ public class PcbPlacerTests
         var plan = PlacementPlan.Parse("""
         {"groups":[{"id":"mcu","members":["U1"]},{"id":"io","members":["J1"],"edge":"left"}]}
         """);
-        const double gap = 1.5, margin = 5.0;
+        const double gap = 1.5;
+        const double margin = PcbPlacer.MinMarginMm;   // the placer widens anything smaller
         var res = PcbPlacer.Place(items, plan, marginMm: margin, gapMm: gap);
 
         var j1 = res["J1"];

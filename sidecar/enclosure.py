@@ -44,7 +44,7 @@ def _rounded_box(trimesh, w, h, d, r):
 
 
 def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="none", fmt="stl",
-               arrange="exploded"):
+               arrange="exploded", board=None):
     import math
     import numpy as np  # noqa: F401  (trimesh pulls it in; kept explicit for PyInstaller)
     import trimesh
@@ -81,6 +81,16 @@ def _csg_build(inner, wall, cutouts, standoffs, lid_style, vents=None, mount="no
     n = standoffs if isinstance(standoffs, int) else (len(standoffs) if standoffs else 0)
     boss_xy = _boss_positions(n, L, Wd)
     for post in _standoff_posts(trimesh, boss_xy, t, H):
+        try:
+            base = base.union(post, engine="manifold")
+        except Exception:
+            continue
+
+    # PCB standoffs at the board's OWN mounting holes. Without these the case had nothing to mount the
+    # board to — the four posts above are lid screw bosses, sized to the CASE corners and running nearly
+    # the full cavity height, so a printed enclosure held a loose PCB. They also define the board plane
+    # that a port's height above the floor is measured from.
+    for post in _pcb_standoffs(trimesh, board, L, Wd, t):
         try:
             base = base.union(post, engine="manifold")
         except Exception:
@@ -272,6 +282,46 @@ def _cutout_solid(trimesh, rotation_matrix, c, ox, oy, oz, through, margin):
     return solid
 
 
+def _pcb_standoffs(trimesh, board, L, Wd, t):
+    """Posts that carry the PCB, at the board's own mounting-hole positions.
+
+    Holes arrive in BOARD coordinates (0..W, 0..D); the case is centred on the origin and the board is
+    centred in the cavity, so the transform is a straight translation by half the board extent. The post
+    rises from the inner floor (z=t) to the standoff height the fit math proved, and carries an M3 pilot
+    so a screw can actually retain the board.
+    """
+    if not board:
+        return []
+    holes = board.get("holes") or []
+    if not holes:
+        return []
+    bw = float(board.get("widthMm") or board.get("width_mm") or 0.0)
+    bd = float(board.get("depthMm") or board.get("depth_mm") or 0.0)
+    h = float(board.get("standoffMm") or board.get("standoff_mm") or 3.0)
+    if bw <= 0 or bd <= 0 or h <= 0:
+        return []
+
+    posts = []
+    for xy in holes:
+        try:
+            hx, hy = float(xy[0]), float(xy[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        cx, cy = hx - bw / 2.0, hy - bd / 2.0
+        # keep the post inside the cavity even if the board is a tight fit
+        cx = max(-L / 2 + 3.0, min(L / 2 - 3.0, cx))
+        cy = max(-Wd / 2 + 3.0, min(Wd / 2 - 3.0, cy))
+        try:
+            boss = trimesh.creation.cylinder(radius=3.0, height=h, sections=32)
+            boss.apply_translation([cx, cy, t + h / 2.0])
+            pilot = trimesh.creation.cylinder(radius=1.25, height=h + 2, sections=24)
+            pilot.apply_translation([cx, cy, t + h / 2.0])
+            posts.append(boss.difference(pilot, engine="manifold"))
+        except Exception:
+            continue
+    return posts
+
+
 def _standoff_posts(trimesh, boss_xy, t, H):
     """Corner screw bosses (outer Ø6.4, M2 pilot Ø2.2) rising from the floor to just under the lid."""
     height = max(4.0, H - 2.0)
@@ -392,7 +442,8 @@ def build_stl(schema: dict) -> Tuple[bytes, dict]:
     mount = schema.get("mount", "none")
     fmt = str(schema.get("format", "stl")).lower()
     arrange = str(schema.get("arrange", "exploded")).lower()
+    board = schema.get("board")
     try:
-        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount, fmt, arrange)
+        return _csg_build(inner, wall, cutouts, standoffs, lid, vents, mount, fmt, arrange, board)
     except Exception:
         return _fallback_build(inner, wall)   # dependency-free fallback is STL only
