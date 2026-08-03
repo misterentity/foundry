@@ -111,19 +111,15 @@ public sealed record PcbJob(
         {
             var pos = placement[alias];
             var libId = choiceByRef[alias].LibId;
-            // A bare chip in a GENERIC package is identified by the PART (ChipCatalog), not the footprint.
-            var chip = ChipCatalog.Match(SpecFor(project, alias).Name);
-            // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6). Resolution order:
-            // curated McuPinMap (fast, KiCad-free, chip-specific aliases) → SymbolPinMap by FOOTPRINT (part-
-            // specific module footprints) → SymbolPinMap by PART identity (ChipCatalog, for chips in generic
-            // packages) → keep the logical name, which falls through to the fail-closed gate in build_board.py
-            // (refused), never ordinal-guessed.
+            var spec = SpecFor(project, alias);
+            // Translate logical MCU pins (e.g. ESP32 GPIO34) to the footprint's real pad (6). The resolution
+            // order lives in ONE place now — Kb.PartResolver — because this used to be an inlined copy and
+            // validation grew its own. Two copies of a fail-closed rule drift until the report card passes a
+            // pin the board build refuses. Unresolved keeps the logical name, which the gate in
+            // build_board.py refuses rather than ordinal-guessing.
             var padNetList = FootprintMap.PadNetList(alias, endpointNets)
                 .Select(pn => new PcbPadNet(
-                    McuPinMap.ResolvePad(libId, pn.Pin)
-                        ?? SymbolPinMap.ResolvePad(libId, pn.Pin, symbolDir)
-                        ?? (chip is not null ? SymbolPinMap.ResolvePadBySymbol(chip.SymbolLib, chip.SymbolName, pn.Pin, symbolDir) : null)
-                        ?? pn.Pin,
+                    Kb.PartResolver.ResolvePad(spec, libId, pn.Pin, symbolDir) ?? pn.Pin,
                     pn.Net))
                 .ToList();
             return new PcbJobComponent(alias, libId, pos.XMm, pos.YMm, pos.Rot,

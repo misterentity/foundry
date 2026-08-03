@@ -7,6 +7,8 @@ public enum PinAuthority
 {
     /// <summary>No authoritative pin table — the model's word is all there is.</summary>
     None,
+    /// <summary>The user said where the pin goes (<see cref="ComponentSpec.PinOverrides"/>). Beats everything.</summary>
+    Override,
     /// <summary>A curated, KiCad-free table Foundry maintains (<see cref="McuPinMap"/>).</summary>
     Curated,
     /// <summary>KiCad's own symbol library, keyed on the resolved footprint.</summary>
@@ -61,6 +63,11 @@ public static class PartResolver
         symbolDir ??= DefaultSymbolDir.Value;
         var libId = FootprintMap.Resolve(spec, Math.Max(1, spec.Pins.Count)).LibId;
 
+        // A user who has written the pad down for every pin IS the authority — that is the whole point of
+        // the override, and treating them as ungrounded would report their own numbers back as unproven.
+        if (spec.Pins.Count > 0 && spec.Pins.All(p => spec.PinOverrides.ContainsKey(p.Name)))
+            return new PartIdentity(spec.Alias, libId, PinAuthority.Override);
+
         if (McuPinMap.Has(libId)) return new PartIdentity(spec.Alias, libId, PinAuthority.Curated);
 
         // Probe with a pin we know the part declares: a symbol that resolves ANY of them is authoritative.
@@ -86,6 +93,20 @@ public static class PartResolver
     {
         symbolDir ??= DefaultSymbolDir.Value;
         var libId = FootprintMap.Resolve(spec, Math.Max(1, spec.Pins.Count)).LibId;
+        return ResolvePad(spec, libId, logicalPin, symbolDir);
+    }
+
+    /// <summary>
+    /// As <see cref="ResolvePad(ComponentSpec,string,string?)"/>, for callers that already resolved the
+    /// footprint. <c>PcbJob.Build</c> uses this so the board build and validation share ONE chain — they
+    /// had a copy each, and two copies of a fail-closed rule drift until the engine passes a pin the build
+    /// refuses.
+    /// </summary>
+    public static string? ResolvePad(ComponentSpec spec, string libId, string logicalPin, string? symbolDir)
+    {
+        // Step 0: the user's own mapping wins over every automatic source.
+        if (spec.PinOverrides.TryGetValue(logicalPin, out var forced) && !string.IsNullOrWhiteSpace(forced))
+            return forced.Trim();
 
         return McuPinMap.ResolvePad(libId, logicalPin)
             ?? SymbolPinMap.ResolvePad(libId, logicalPin, symbolDir)

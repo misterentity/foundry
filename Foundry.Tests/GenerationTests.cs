@@ -149,3 +149,90 @@ public class I2cAddressParsingTests
         Assert.Equal(0x77, One("\"i2cAddr\":\"0x77\",").I2cAddress);
     }
 }
+
+// ComponentSpec.Footprint and PinOverrides are the escape hatch out of the fail-closed pin gate. Footprint
+// was designed AND consumed (FootprintMap.Resolve honours it) but nothing ever produced it, so a build the
+// gate correctly refused had no way forward except editing the install. Phase B made the gate stricter,
+// which made the missing hatch matter more.
+public class PinOverrideTests
+{
+    private static ComponentSpec Parse(string extra)
+    {
+        var json = $$"""
+        {"components":[{"alias":"U1","ref":"u1","name":"Mystery Widget 9000","logicV":3.3,{{extra}}
+                        "pins":[{"name":"GPIO34","kind":"bidir"},{"name":"GND","kind":"ground"}]}]}
+        """;
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return Assert.Single(ProjectGenerator.MapComponents(doc.RootElement));
+    }
+
+    [Fact]
+    public void AFootprintFromTheModel_IsCarriedOnTheSpec() =>
+        Assert.Equal("Package_TO_SOT_THT:TO-92_Inline",
+            Parse("\"footprint\":\"Package_TO_SOT_THT:TO-92_Inline\",").Footprint);
+
+    [Fact]
+    public void NoFootprint_LeavesTheAutomaticResolutionInCharge() =>
+        Assert.Null(Parse("").Footprint);
+
+    [Fact]
+    public void AnExplicitFootprint_WinsOverTheKeywordHeuristic()
+    {
+        var spec = Parse("\"footprint\":\"Package_TO_SOT_THT:TO-92_Inline\",");
+        var choice = Foundry.Core.Pcb.FootprintMap.Resolve(spec, spec.Pins.Count);
+        Assert.Equal("Package_TO_SOT_THT:TO-92_Inline", choice.LibId);
+        Assert.Equal("explicit", choice.Reason);
+        Assert.False(choice.IsFallback);
+    }
+
+    // Pads are not all integers -- "A1", "PAD", "MP" are real KiCad pad names -- so they stay strings.
+    [Theory]
+    [InlineData("\"pinOverrides\":{\"GPIO34\":\"6\"},", "6")]
+    [InlineData("\"pinOverrides\":{\"GPIO34\":6},", "6")]
+    [InlineData("\"pinOverrides\":{\"GPIO34\":\"A1\"},", "A1")]
+    [InlineData("\"pinOverrides\":{\" GPIO34 \":\" 6 \"},", "6")]
+    public void AnOverriddenPin_ResolvesToTheGivenPad(string extra, string expected)
+    {
+        var spec = Parse(extra);
+        Assert.Equal(expected, Foundry.Core.Kb.PartResolver.ResolvePad(spec, "GPIO34", symbolDir: null));
+    }
+
+    [Fact]
+    public void OverridesAreCaseInsensitive_LikeEveryOtherPinLookup() =>
+        Assert.Equal("6", Foundry.Core.Kb.PartResolver.ResolvePad(
+            Parse("\"pinOverrides\":{\"gpio34\":\"6\"},"), "GPIO34", symbolDir: null));
+
+    [Fact]
+    public void APinWithNoOverride_StillFallsThroughToTheNormalChain() =>
+        Assert.Null(Foundry.Core.Kb.PartResolver.ResolvePad(
+            Parse("\"pinOverrides\":{\"GPIO34\":\"6\"},"), "GND", symbolDir: null));
+
+    [Theory]
+    [InlineData("\"pinOverrides\":{\"GPIO34\":\"\"},")]
+    [InlineData("\"pinOverrides\":{\"GPIO34\":null},")]
+    [InlineData("\"pinOverrides\":[],")]
+    [InlineData("\"pinOverrides\":\"nonsense\",")]
+    public void AMalformedOverride_IsIgnoredRatherThanTrusted(string extra) =>
+        Assert.Null(Foundry.Core.Kb.PartResolver.ResolvePad(Parse(extra), "GPIO34", symbolDir: null));
+
+    // A part Foundry has no pin data for is UNPROVEN -- unless the user supplied the pinout themselves,
+    // in which case reporting their own numbers back as unverified would be absurd.
+    [Fact]
+    public void FullyOverridingAPart_MakesItGrounded()
+    {
+        var bare = Parse("");
+        Assert.False(Foundry.Core.Kb.PartResolver.Identify(bare, symbolDir: null).IsGrounded);
+
+        var forced = Parse("\"pinOverrides\":{\"GPIO34\":\"6\",\"GND\":\"3\"},");
+        var id = Foundry.Core.Kb.PartResolver.Identify(forced, symbolDir: null);
+        Assert.True(id.IsGrounded);
+        Assert.Equal(Foundry.Core.Kb.PinAuthority.Override, id.Authority);
+        Assert.Empty(Foundry.Core.Kb.PartResolver.UnresolvablePins(forced, symbolDir: null));
+    }
+
+    // Overriding only SOME pins does not make the part authoritative -- the rest are still unknown.
+    [Fact]
+    public void APartlyOverriddenPart_IsStillUngrounded() =>
+        Assert.False(Foundry.Core.Kb.PartResolver
+            .Identify(Parse("\"pinOverrides\":{\"GPIO34\":\"6\"},"), symbolDir: null).IsGrounded);
+}

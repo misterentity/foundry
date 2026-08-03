@@ -46,6 +46,18 @@ public sealed class ComponentSpec
     /// </summary>
     public string? Footprint { get; init; }
 
+    /// <summary>
+    /// Logical pin name → real footprint pad ("GPIO34" → "6"), overriding every automatic resolution.
+    ///
+    /// <para>
+    /// The pin chain fails CLOSED: a pin no authority can place is refused by the board build rather than
+    /// ordinal-guessed. That is correct, and it dead-ends anyone holding a part Foundry has no pin data
+    /// for. This is the escape hatch — say where the pin goes and the build proceeds, with the override
+    /// recorded in the project rather than hidden in a patched install.
+    /// </para>
+    /// </summary>
+    public Dictionary<string, string> PinOverrides { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
     public List<PinSpec> Pins { get; init; } = new();
 
     public PinSpec? Pin(string name) =>

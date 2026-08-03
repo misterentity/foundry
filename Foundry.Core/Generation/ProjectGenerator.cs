@@ -81,6 +81,11 @@ ELECTRICAL RULES:
   duplicate per-device. Add ONE pair of pull-up resistors (e.g. 4.7 kΩ) to the bus as components + BOM.
 - EVERY part on an I²C bus MUST carry its 7-bit "i2cAddr" ("0x76" or 118). Validation cannot check a bus for
   address collisions without it, and will report the design as unverified rather than assume you got it right.
+- Optional, only when you are SURE: "footprint" pins the KiCad footprint ("Lib:Name", e.g.
+  "Package_TO_SOT_THT:TO-92_Inline"), and "pinOverrides" maps a logical pin to a real pad
+  ({"GPIO34":"6"}). Both override Foundry's own resolution, so a wrong value here silently produces a wrong
+  board. Omit them unless the user asked for a specific footprint or pinout — the automatic resolution is
+  checked against KiCad's libraries and refuses what it cannot place.
 - Add the passives a real board needs: a series resistor for every indicator LED, decoupling where it matters,
   and the I²C pull-ups above — as components AND BOM lines. These are checked by validation.
 
@@ -275,6 +280,8 @@ Output ONLY the JSON object.
             components = p.Components.Select(c => new { alias = c.Alias, @ref = c.Ref, name = c.Name,
                 logicV = c.LogicV, inputV = c.InputVRange, outputV = c.OutputV, currentMa = c.CurrentMaActive,
                 capacityMah = c.CapacityMah, i2cAddr = c.I2cAddress,
+                footprint = c.Footprint,
+                pinOverrides = c.PinOverrides.Count > 0 ? c.PinOverrides : null,
                 pins = c.Pins.Select(pn => new { name = pn.Name, kind = Kind(pn.Kind), inputOnly = pn.InputOnly, strapping = pn.Strapping }) }),
             bom = p.Bom.Select(b => new { qty = b.Qty, name = b.Name, mpn = b.Mpn, price = b.Price, stock = b.Stock, lead = b.Lead, dist = b.Dist, note = b.Note }),
             connections = p.Connections.Select(c => new { from = c.From, to = c.To, net = c.Net }),
@@ -407,6 +414,11 @@ Output ONLY the JSON object.
             CurrentMaActive = Int(e, "currentMa", 0),
             CapacityMah = Int(e, "capacityMah", 0),
             I2cAddress = I2cAddr(e),
+            // The escape hatch out of the fail-closed pin gate. Both were designed and consumed
+            // (FootprintMap.Resolve honours Footprint) but NOTHING produced them, so a correctly-refused
+            // build had no way forward except editing the install.
+            Footprint = Str(e, "footprint", "") is { Length: > 0 } fp ? fp : null,
+            PinOverrides = PinOverrides(e),
             Pins = Arr(e, "pins").Select(p => new PinSpec
             {
                 Name = Str(p, "name", "?"),
@@ -518,6 +530,29 @@ Output ONLY the JSON object.
         if (s.EndsWith("h", StringComparison.OrdinalIgnoreCase))
             return int.TryParse(s[..^1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var h2) ? h2 : null;
         return int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var d) ? d : null;
+    }
+
+    /// <summary>
+    /// Per-alias logical-pin → pad overrides. Values are footprint pad names, so they are kept as strings
+    /// ("6", "A1", "PAD") rather than parsed as numbers — KiCad pads are not all integers.
+    /// </summary>
+    private static Dictionary<string, string> PinOverrides(JsonElement e)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!e.TryGetProperty("pinOverrides", out var v) || v.ValueKind != JsonValueKind.Object) return map;
+
+        foreach (var p in v.EnumerateObject())
+        {
+            var pad = p.Value.ValueKind switch
+            {
+                JsonValueKind.String => p.Value.GetString(),
+                JsonValueKind.Number => p.Value.ToString(),
+                _ => null,
+            };
+            if (!string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(pad))
+                map[p.Name.Trim()] = pad!.Trim();
+        }
+        return map;
     }
 
     private static bool Bool(JsonElement e, string name) =>
