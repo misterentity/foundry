@@ -1,5 +1,6 @@
 using Foundry.Core.Ai;
 using Foundry.Core.Generation;
+using Foundry.Core.Kb;
 
 namespace Foundry.Tests;
 
@@ -98,4 +99,53 @@ public class AnthropicTruncationTests
     [InlineData("", false)]
     public void IsTruncated_DetectsMaxTokensStopReason(string? stopReason, bool expected) =>
         Assert.Equal(expected, Foundry.Core.Ai.AnthropicClient.IsTruncated(stopReason));
+}
+
+// The I²C address is the field the collision rule reads. It had no producer at all -- absent from the
+// system-prompt schema and unparsed by MapComponents -- so the rule was dead code that reported PASS.
+// These pin the parse, including the forms models actually emit instead of a clean JSON number.
+public class I2cAddressParsingTests
+{
+    private static ComponentSpec One(string addrJson)
+    {
+        var json = $$"""
+        {"components":[{"alias":"D1","ref":"d1","name":"BME280","logicV":3.3,{{addrJson}}
+                        "pins":[{"name":"SDA","kind":"bidir"}]}]}
+        """;
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return Assert.Single(ProjectGenerator.MapComponents(doc.RootElement));
+    }
+
+    [Theory]
+    [InlineData("\"i2cAddr\":\"0x76\",", 0x76)]
+    [InlineData("\"i2cAddr\":\"0X3C\",", 0x3C)]
+    [InlineData("\"i2cAddr\":118,", 0x76)]      // plain decimal
+    [InlineData("\"i2cAddr\":\"118\",", 0x76)]  // decimal as a string
+    [InlineData("\"i2cAddr\":\"76h\",", 0x76)]  // assembler style
+    [InlineData("\"i2cAddr\":\" 0x48 \",", 0x48)]
+    public void TheAddressFormsModelsEmit_AllParse(string addrJson, int expected) =>
+        Assert.Equal(expected, One(addrJson).I2cAddress);
+
+    // Out-of-range values are dropped, not trusted. 0x00-0x07 and 0x78-0x7F are reserved, and an 8-bit
+    // address (0xEC = 0x76 << 1) is a different number entirely -- checking against it would be worse
+    // than not checking, because it reports a verdict. Dropping leaves the bus honestly unproven.
+    [Theory]
+    [InlineData("\"i2cAddr\":\"0xEC\",")]       // 8-bit form of 0x76
+    [InlineData("\"i2cAddr\":0,")]
+    [InlineData("\"i2cAddr\":\"0x03\",")]       // reserved
+    [InlineData("\"i2cAddr\":\"0x7F\",")]       // reserved
+    [InlineData("\"i2cAddr\":300,")]
+    [InlineData("\"i2cAddr\":-1,")]
+    [InlineData("\"i2cAddr\":\"unknown\",")]
+    [InlineData("\"i2cAddr\":null,")]
+    [InlineData("")]                             // field absent entirely
+    public void AnAddressOutsideTheAddressableRange_IsDroppedNotTrusted(string addrJson) =>
+        Assert.Null(One(addrJson).I2cAddress);
+
+    [Fact]
+    public void TheBoundariesOfTheAddressableRange_AreKept()
+    {
+        Assert.Equal(0x08, One("\"i2cAddr\":\"0x08\",").I2cAddress);
+        Assert.Equal(0x77, One("\"i2cAddr\":\"0x77\",").I2cAddress);
+    }
 }

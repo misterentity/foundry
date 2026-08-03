@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Foundry.Core.Ai;
 using Foundry.Core.Firmware;
@@ -42,7 +43,10 @@ electrically-correct electronics project and return it as ONE JSON object. Use t
                          {"name":"GPIO0","kind":"bidir","strapping":true}]},
                 {"alias":"REG","ref":"ldo_3v3","name":"3.3 V LDO (AMS1117-3.3)","outputV":3.3,
                  "inputV":[4.5,12.0],"currentMa":1,
-                 "pins":[{"name":"VIN","kind":"power"},{"name":"GND","kind":"ground"},{"name":"VOUT","kind":"power"}]}],
+                 "pins":[{"name":"VIN","kind":"power"},{"name":"GND","kind":"ground"},{"name":"VOUT","kind":"power"}]},
+                {"alias":"SENSOR","ref":"bme280","name":"BME280","logicV":3.3,"i2cAddr":"0x76","currentMa":1,
+                 "pins":[{"name":"VCC","kind":"power"},{"name":"GND","kind":"ground"},
+                         {"name":"SDA","kind":"bidir"},{"name":"SCL","kind":"bidir"},{"name":"AOUT","kind":"output"}]}],
  "bom": [{"qty":1,"name":"ESP32 DevKit v1","mpn":"ESP32-DEVKITC-32E","price":8.5,"stock":1442,
           "lead":"Stock","dist":"DigiKey","note":"Wi-Fi MCU"}],
  "connections": [{"from":"MCU.GPIO34","to":"SENSOR.AOUT","net":"signal"},
@@ -75,6 +79,8 @@ ELECTRICAL RULES:
   3.3 V logic input directly from a 5 V output; add a level shifter or divider as a real part when levels differ.
 - Shared buses: put every device on one I²C bus on the SAME two nets (one SDA net, one SCL net) — don't
   duplicate per-device. Add ONE pair of pull-up resistors (e.g. 4.7 kΩ) to the bus as components + BOM.
+- EVERY part on an I²C bus MUST carry its 7-bit "i2cAddr" ("0x76" or 118). Validation cannot check a bus for
+  address collisions without it, and will report the design as unverified rather than assume you got it right.
 - Add the passives a real board needs: a series resistor for every indicator LED, decoupling where it matters,
   and the I²C pull-ups above — as components AND BOM lines. These are checked by validation.
 
@@ -268,7 +274,7 @@ Output ONLY the JSON object.
                 specs = s.Specs.Select(sp => new[] { sp.Key, sp.Value }) }),
             components = p.Components.Select(c => new { alias = c.Alias, @ref = c.Ref, name = c.Name,
                 logicV = c.LogicV, inputV = c.InputVRange, outputV = c.OutputV, currentMa = c.CurrentMaActive,
-                capacityMah = c.CapacityMah,
+                capacityMah = c.CapacityMah, i2cAddr = c.I2cAddress,
                 pins = c.Pins.Select(pn => new { name = pn.Name, kind = Kind(pn.Kind), inputOnly = pn.InputOnly, strapping = pn.Strapping }) }),
             bom = p.Bom.Select(b => new { qty = b.Qty, name = b.Name, mpn = b.Mpn, price = b.Price, stock = b.Stock, lead = b.Lead, dist = b.Dist, note = b.Note }),
             connections = p.Connections.Select(c => new { from = c.From, to = c.To, net = c.Net }),
@@ -387,7 +393,8 @@ Output ONLY the JSON object.
             From = Str(e, "from", ""), To = Str(e, "to", ""), Net = Str(e, "net", "signal"),
         }).Where(c => c.From.Length > 0 && c.To.Length > 0).ToList();
 
-    private static List<ComponentSpec> MapComponents(JsonElement root) =>
+    /// <summary>Internal so tests can exercise the model-JSON → ComponentSpec mapping without an API key.</summary>
+    internal static List<ComponentSpec> MapComponents(JsonElement root) =>
         Arr(root, "components").Select(e => new ComponentSpec
         {
             Ref = Str(e, "ref", Str(e, "alias", "part")),
@@ -399,6 +406,7 @@ Output ONLY the JSON object.
             OutputV = e.TryGetProperty("outputV", out var ov) && ov.ValueKind != JsonValueKind.Null && ov.ValueKind != JsonValueKind.Array ? Num(ov) : null,
             CurrentMaActive = Int(e, "currentMa", 0),
             CapacityMah = Int(e, "capacityMah", 0),
+            I2cAddress = I2cAddr(e),
             Pins = Arr(e, "pins").Select(p => new PinSpec
             {
                 Name = Str(p, "name", "?"),
@@ -483,6 +491,35 @@ Output ONLY the JSON object.
         e.TryGetProperty(name, out var v) ? (int)Math.Round(Num(v, fallback)) : fallback;
     private static double Dbl(JsonElement e, string name, double fallback) =>
         e.TryGetProperty(name, out var v) ? Num(v, fallback) : fallback;
+    /// <summary>
+    /// 7-bit I²C address, accepting the forms models actually emit: "0x76", "76h", "118", or a plain
+    /// number. Anything outside 0x08..0x77 (the addressable range — the rest are reserved) is dropped
+    /// rather than trusted, which leaves the bus UNVERIFIED instead of silently checked against junk.
+    /// </summary>
+    private static int? I2cAddr(JsonElement e)
+    {
+        if (!e.TryGetProperty("i2cAddr", out var v)) return null;
+
+        int? n = v.ValueKind switch
+        {
+            JsonValueKind.Number => v.TryGetInt32(out var i) ? i : null,
+            JsonValueKind.String => ParseAddr(v.GetString()),
+            _ => null,
+        };
+        return n is >= 0x08 and <= 0x77 ? n : null;
+    }
+
+    private static int? ParseAddr(string? s)
+    {
+        s = s?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return int.TryParse(s[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var h) ? h : null;
+        if (s.EndsWith("h", StringComparison.OrdinalIgnoreCase))
+            return int.TryParse(s[..^1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var h2) ? h2 : null;
+        return int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var d) ? d : null;
+    }
+
     private static bool Bool(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && (v.ValueKind == JsonValueKind.True);
 

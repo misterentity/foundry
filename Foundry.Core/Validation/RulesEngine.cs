@@ -1,3 +1,4 @@
+using Foundry.Core.Firmware;
 using Foundry.Core.Kb;
 using Foundry.Core.Project;
 
@@ -32,7 +33,7 @@ public static class RulesEngine
         VoltageLevels(connections, kb, findings);
         PowerGround(aliases, eps, kb, findings);
         PowerBudget(aliases, kb, batteryGoalDays, findings);
-        I2cCollisions(aliases, kb, findings);
+        I2cCollisions(aliases, connections, kb, findings);
         PassivesPresent(connections, kb, findings);   // v2: I²C pull-ups + LED current-limit resistors
 
         return Order(findings);
@@ -44,6 +45,12 @@ public static class RulesEngine
         return dot < 0
             ? new Endpoint(endpoint, "", net)
             : new Endpoint(endpoint[..dot], endpoint[(dot + 1)..], net);
+    }
+
+    private static string AliasOf(string endpoint)
+    {
+        var dot = endpoint.IndexOf('.');
+        return dot < 0 ? endpoint : endpoint[..dot];
     }
 
     // ---- Rule: the model's declared pins, checked against a real pinout ----
@@ -352,14 +359,28 @@ public static class RulesEngine
     }
 
     // ---- Rule: I²C address collisions ----
-    private static void I2cCollisions(List<string> aliases, ComponentKb kb, List<Finding> findings)
+    //
+    // This rule reported "No I²C address collisions · pass" on every project ever generated. I2cAddress was
+    // declared and read here but never populated: it wasn't in the system-prompt schema and MapComponents
+    // didn't parse it, so `addressed` was always empty and the rule always took the skip branch. A design
+    // with two 0x76 sensors on one bus got a green check. Both ends are fixed; this end refuses to call an
+    // unchecked bus clean.
+    private static void I2cCollisions(List<string> aliases, IReadOnlyList<Connection> connections,
+        ComponentKb kb, List<Finding> findings)
     {
-        var addressed = aliases
+        // Targets on the bus. The MCU is the controller, not a target — it has no address to collide.
+        var mcu = PinMap.DetectMcuAlias(connections, kb);
+        var targets = connections
+            .Where(c => c.Net == "i2c")
+            .SelectMany(c => new[] { AliasOf(c.From), AliasOf(c.To) })
+            .Where(a => a.Length > 0 && !a.Equals(mcu, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(kb.ByAlias)
-            .Where(s => s?.I2cAddress is not null)
+            .Where(s => s is not null)
+            .Select(s => s!)
             .ToList();
 
-        if (addressed.Count == 0)
+        if (targets.Count == 0)
         {
             findings.Add(new Finding
             {
@@ -371,25 +392,45 @@ public static class RulesEngine
             return;
         }
 
-        var dupes = addressed.GroupBy(s => s!.I2cAddress).Where(g => g.Count() > 1).ToList();
-        if (dupes.Count == 0)
+        var dupes = targets
+            .Where(s => s.I2cAddress is not null)
+            .GroupBy(s => s.I2cAddress)
+            .Where(g => g.Count() > 1)
+            .ToList();
+
+        foreach (var g in dupes)
+            findings.Add(new Finding
+            {
+                Severity = "fail", Code = "I2C-DUP",
+                Title = $"I²C address 0x{g.Key:X2} used by multiple devices",
+                Description = $"{string.Join(", ", g.Select(s => s.Name))} share address 0x{g.Key:X2}. Re-strap one or add a bus multiplexer.",
+                Refs = g.Select(s => s.Alias).ToList(),
+                Fix = "Re-strap address",
+            });
+
+        // A device with no declared address was not checked. Reporting the REST as clean while staying
+        // silent about it is the same lie in a smaller box, so an unproven verdict covers the whole bus.
+        var unknown = targets.Where(s => s.I2cAddress is null).ToList();
+        if (unknown.Count > 0)
+            findings.Add(new Finding
+            {
+                Severity = "unproven", Code = "I2C-UNVERIFIED",
+                Title = "I²C addresses not checked",
+                Description =
+                    $"{string.Join(", ", unknown.Select(s => s.Name))} " +
+                    $"{(unknown.Count == 1 ? "sits" : "sit")} on an I²C bus with no declared address, so this bus was NOT " +
+                    "checked for collisions. Two devices sharing an address will not both respond.",
+                Refs = unknown.Select(s => s.Alias).ToList(),
+                Fix = "Set each I²C device's 7-bit address, then re-validate.",
+            });
+        else if (dupes.Count == 0)
             findings.Add(new Finding
             {
                 Severity = "pass", Code = "I2C-00",
                 Title = "No I²C address collisions",
-                Description = $"{addressed.Count} I²C devices have distinct addresses.",
+                Description = $"{targets.Count} I²C devices have distinct addresses.",
                 Refs = new(),
             });
-        else
-            foreach (var g in dupes)
-                findings.Add(new Finding
-                {
-                    Severity = "fail", Code = "I2C-DUP",
-                    Title = $"I²C address 0x{g.Key:X2} used by multiple devices",
-                    Description = $"{string.Join(", ", g.Select(s => s!.Name))} share address 0x{g.Key:X2}. Re-strap one or add a bus multiplexer.",
-                    Refs = g.Select(s => s!.Alias).ToList(),
-                    Fix = "Re-strap address",
-                });
     }
 
     // Issue codes that can repeat across a large netlist — collapsed into one summarized finding each

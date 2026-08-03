@@ -189,6 +189,101 @@ public class ValidationTests
         Assert.DoesNotContain(RulesEngine.Validate(connections, kb), f => f.Code == "VLT-LVL");
     }
 
+    // ---- the I²C rule spent its whole life reporting a check it never ran ----
+    //
+    // I2cAddress was declared on ComponentSpec and read here, but nothing populated it: it was absent from
+    // the generation schema and MapComponents didn't parse it. So `addressed` was empty for every project
+    // ever generated, the rule took its "does not use I²C — check skipped" branch, and stamped it PASS.
+    // Two 0x76 sensors on one bus got a green check.
+
+    private static ComponentKb I2cKb(params (string alias, string name, int? addr)[] devices) => new(
+        new[]
+        {
+            new ComponentSpec { Ref = "mcu", Alias = "MCU", Name = "ESP32", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO21", Kind = PinKind.Bidir },
+                               new PinSpec { Name = "GPIO22", Kind = PinKind.Bidir } } },
+        }.Concat(devices.Select(d => new ComponentSpec
+        {
+            Ref = d.alias.ToLowerInvariant(), Alias = d.alias, Name = d.name, LogicV = 3.3, I2cAddress = d.addr,
+            Pins = new() { new PinSpec { Name = "SDA", Kind = PinKind.Bidir } },
+        })));
+
+    private static List<Connection> I2cBus(params string[] aliases) =>
+        aliases.Select(a => new Connection { From = "MCU.GPIO21", To = $"{a}.SDA", Net = "i2c" }).ToList();
+
+    [Fact]
+    public void ADeviceOnTheBusWithNoAddress_IsUnprovenNotPassed()
+    {
+        var findings = RulesEngine.Validate(
+            I2cBus("D1"), I2cKb(("D1", "BME280", null)));
+
+        Assert.Contains(findings, f => f is { Code: "I2C-UNVERIFIED", Severity: "unproven" });
+        Assert.DoesNotContain(findings, f => f.Code == "I2C-00");
+    }
+
+    // The subtler version of the same lie: check the two you know about, stay quiet about the third.
+    [Fact]
+    public void APartlyAddressedBus_DoesNotReportTheRestAsClean()
+    {
+        var findings = RulesEngine.Validate(
+            I2cBus("D1", "D2", "D3"),
+            I2cKb(("D1", "BME280", 0x76), ("D2", "OLED", 0x3C), ("D3", "Mystery", null)));
+
+        Assert.Contains(findings, f => f is { Code: "I2C-UNVERIFIED", Severity: "unproven" });
+        Assert.DoesNotContain(findings, f => f.Code == "I2C-00");
+        Assert.Contains("Mystery", Assert.Single(findings, f => f.Code == "I2C-UNVERIFIED").Description);
+    }
+
+    [Fact]
+    public void AFullyAddressedBus_Passes()
+    {
+        var findings = RulesEngine.Validate(
+            I2cBus("D1", "D2"), I2cKb(("D1", "BME280", 0x76), ("D2", "OLED", 0x3C)));
+
+        Assert.Contains(findings, f => f is { Code: "I2C-00", Severity: "pass" });
+        Assert.DoesNotContain(findings, f => f.Code == "I2C-UNVERIFIED");
+    }
+
+    // The controller has no address of its own; counting it as an unaddressed target would make every
+    // I²C design permanently unproven.
+    [Fact]
+    public void TheMcuIsNotTreatedAsAnUnaddressedTarget()
+    {
+        var findings = RulesEngine.Validate(
+            I2cBus("D1"), I2cKb(("D1", "BME280", 0x76)));
+
+        Assert.Contains(findings, f => f is { Code: "I2C-00", Severity: "pass" });
+    }
+
+    [Fact]
+    public void ADesignWithNoI2cNets_StillSkipsCleanly()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "mcu", Alias = "MCU", Name = "ESP32", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "GPIO5", Kind = PinKind.Output } } },
+            new ComponentSpec { Ref = "d", Alias = "DEV", Name = "Relay", LogicV = 3.3,
+                Pins = new() { new PinSpec { Name = "IN", Kind = PinKind.Input } } },
+        });
+        var findings = RulesEngine.Validate(
+            new List<Connection> { new() { From = "MCU.GPIO5", To = "DEV.IN", Net = "signal" } }, kb);
+
+        Assert.Contains(findings, f => f is { Code: "I2C-00", Severity: "pass" });
+        Assert.DoesNotContain(findings, f => f.Code == "I2C-UNVERIFIED");
+    }
+
+    // A collision still fails even when another device on the bus is unaddressed.
+    [Fact]
+    public void ACollisionFails_EvenAlongsideAnUnaddressedDevice()
+    {
+        var findings = RulesEngine.Validate(
+            I2cBus("X", "Y", "Z"),
+            I2cKb(("X", "Sensor X", 0x76), ("Y", "Sensor Y", 0x76), ("Z", "Mystery", null)));
+
+        Assert.Contains(findings, f => f is { Code: "I2C-DUP", Severity: "fail" });
+        Assert.Contains(findings, f => f is { Code: "I2C-UNVERIFIED", Severity: "unproven" });
+    }
+
     [Fact]
     public void I2cCollision_DuplicateAddress_IsFail()
     {
