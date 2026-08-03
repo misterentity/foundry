@@ -245,6 +245,7 @@ dialog didn't. **Effort:** S
 
 1. **The demo's battery.** An 88 mm 18650 holder cannot go in a pocket-sized case. Smaller cell, bigger
    case, or a different demo device? This affects the README screenshots.
-2. **Version bump.** The installed build and this one are both 2.5.0. When do we cut 2.6.0?
+2. ~~**Version bump.**~~ Cut **2.6.0** on 2026-08-02 — a minor bump, because this adds capability
+   (board mounting, cutout derivation, printable exports) rather than only fixing defects.
 3. **Print-time estimates** — keep them clearly labelled, or remove them as unknowable?
 4. **`BuildDemoFindings`** — delete, or keep as seed data for the stored project state?
