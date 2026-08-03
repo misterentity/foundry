@@ -103,7 +103,7 @@ public static class FirmwareGenerator
         var pinmap = new StringBuilder();
         pinmap.AppendLine("# GENERATED — derived from Project.connections. Do not edit.");
         foreach (var e in entries)
-            pinmap.AppendLine($"{e.Macro} = {e.Gpio}  # {e.Net}: {e.FromPin} <-> {e.ToPin}" + (e.Strapping ? "  [strapping]" : ""));
+            pinmap.AppendLine($"{e.Macro} = {e.PyEmit}  # {e.Net}: {e.FromPin} <-> {e.ToPin}" + (e.Strapping ? "  [strapping]" : ""));
 
         bool hasAnalog = entries.Any(e => e.Dir == "analog");
         bool hasI2c = entries.Any(e => e.Dir == "i2c");

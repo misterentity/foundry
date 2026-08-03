@@ -37,6 +37,84 @@ public class FirmwareTests
         Assert.DoesNotContain(after, e => e.Gpio == 0);
     }
 
+    // ---- the emitted literal is the pin's identity, which is not always its trailing number ----
+    //
+    // ExtractGpio took the trailing digits of any pin name, so an STM32 "PA5" became `#define PIN_X 5`.
+    // That compiles, flashes, and drives an unrelated pad. Worse, PA5 and PB5 both became 5, so two
+    // peripherals shared one define and one of them silently did nothing.
+
+    private static ComponentKb McuKb(params string[] mcuPins) => new(new[]
+    {
+        new ComponentSpec
+        {
+            Ref = "u1", Alias = "MCU", Name = "MCU", LogicV = 3.3,
+            Pins = mcuPins.Select(p => new PinSpec { Name = p, Kind = PinKind.Bidir }).ToList(),
+        },
+        new ComponentSpec
+        {
+            Ref = "d1", Alias = "LED", Name = "LED",
+            Pins = new() { new PinSpec { Name = "A", Kind = PinKind.Input },
+                           new PinSpec { Name = "B", Kind = PinKind.Input } },
+        },
+    });
+
+    private static List<Connection> Wire(params (string mcu, string periph)[] nets) =>
+        nets.Select(n => new Connection { From = $"MCU.{n.mcu}", To = $"LED.{n.periph}", Net = "signal" }).ToList();
+
+    [Theory]
+    [InlineData("PA5", "PA5")]     // STM32 port A bit 5 — never the integer 5
+    [InlineData("PB0", "PB0")]
+    [InlineData("PK15", "PK15")]
+    [InlineData("A0", "A0")]       // Arduino analog 0 is 14 on an Uno; 0 is the serial TX line
+    [InlineData("A7", "A7")]
+    [InlineData("GPIO34", "34")]   // ESP32 — the number IS the identity
+    [InlineData("GP25", "25")]     // Pico
+    [InlineData("D13", "13")]      // Arduino digital
+    [InlineData("IO4", "4")]
+    public void EmittedLiteral_IsThePinsIdentity(string pinName, string expected)
+    {
+        var entry = Assert.Single(PinMap.Build(Wire((pinName, "A")), McuKb(pinName)));
+        Assert.Equal(expected, entry.Emit);
+        Assert.Contains($"{entry.Macro} ".TrimEnd(), PinMap.RenderHeader(new[] { entry }));
+        Assert.Contains(expected, PinMap.RenderHeader(new[] { entry }));
+    }
+
+    [Fact]
+    public void TwoPortsOfTheSameBit_DoNotCollapseOntoOnePin()
+    {
+        var entries = PinMap.Build(Wire(("PA5", "A"), ("PB5", "B")), McuKb("PA5", "PB5"));
+
+        Assert.Equal(2, entries.Count);
+        Assert.Equal(new[] { "PA5", "PB5" }, entries.Select(e => e.Emit).OrderBy(x => x).ToArray());
+        // ...and the header defines two different pads, not the same one twice.
+        var header = PinMap.RenderHeader(entries);
+        Assert.Contains("PA5", header);
+        Assert.Contains("PB5", header);
+    }
+
+    [Fact]
+    public void MicroPython_QuotesSymbolicPins_AndDropsTheArduinoPPrefix()
+    {
+        var stm = Assert.Single(PinMap.Build(Wire(("PA5", "A")), McuKb("PA5")));
+        Assert.Equal("'A5'", stm.PyEmit);        // machine.Pin('A5')
+
+        var ard = Assert.Single(PinMap.Build(Wire(("A0", "A")), McuKb("A0")));
+        Assert.Equal("'A0'", ard.PyEmit);
+
+        var esp = Assert.Single(PinMap.Build(Wire(("GPIO34", "A")), McuKb("GPIO34")));
+        Assert.Equal("34", esp.PyEmit);          // machine.Pin(34) — no quotes
+    }
+
+    [Fact]
+    public void NumericPins_KeepTheirBareLiteral_SoExistingBoardsAreUnaffected()
+    {
+        foreach (var e in PinMap.Build(DemoData.SoilMoistureConnections(), Kb))
+        {
+            Assert.Equal("", e.Token);
+            Assert.Equal(e.Gpio.ToString(), e.Emit);
+        }
+    }
+
     [Fact]
     public void Header_IsGeneratedAndMarkedDerived()
     {

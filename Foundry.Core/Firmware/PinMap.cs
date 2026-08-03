@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Foundry.Core.Kb;
@@ -7,7 +8,27 @@ namespace Foundry.Core.Firmware;
 
 /// <summary>One generated pin-map entry: a peripheral signal bound to a concrete MCU GPIO.</summary>
 /// <param name="Dir">MCU-side direction: input | output | analog | i2c (drives setup/loop codegen).</param>
-public sealed record PinMapEntry(string Macro, int Gpio, string FromPin, string ToPin, string Net, bool Strapping, string Dir = "input");
+/// <param name="Token">
+/// The pin's symbolic identity, when its trailing number is NOT its identity — "PA5", "A0". Empty when
+/// the number is the identity (GPIO4, GP25, D13), which is the common case. See <see cref="Emit"/>.
+/// </param>
+public sealed record PinMapEntry(string Macro, int Gpio, string FromPin, string ToPin, string Net, bool Strapping, string Dir = "input", string Token = "")
+{
+    /// <summary>
+    /// The literal written into generated C. Emitting <see cref="Gpio"/> unconditionally was a
+    /// wrong-pin bug: on STM32duino "PA5" is port A bit 5 and the bare 5 selects an unrelated pad, and
+    /// on AVR "A0" is 14 while 0 is the serial TX line.
+    /// </summary>
+    public string Emit => Token.Length == 0 ? Gpio.ToString(CultureInfo.InvariantCulture) : Token;
+
+    /// <summary>
+    /// The MicroPython literal. Symbolic pins are strings to <c>machine.Pin</c>, and the STM32 port lives
+    /// there as "A5" rather than Arduino's "PA5".
+    /// </summary>
+    public string PyEmit => Token.Length == 0
+        ? Gpio.ToString(CultureInfo.InvariantCulture)
+        : "'" + (Token.Length > 2 && char.ToUpperInvariant(Token[0]) == 'P' && char.IsLetter(Token[1]) ? Token[1..] : Token) + "'";
+}
 
 /// <summary>
 /// Derives the firmware pin map directly from the authoritative netlist (PRD §6 invariant, §8.6,
@@ -57,7 +78,7 @@ public static class PinMap
             var (mcuEp, periphEp) = MatchMcu(c.From, c.To, mcu);
             if (mcuEp is null || periphEp is null) continue;
 
-            var gpio = ExtractGpio(Pin(mcuEp));
+            var (token, gpio) = ResolvePin(Pin(mcuEp));
             if (gpio is null) continue;
 
             var macro = "PIN_" + Sanitize(Alias(periphEp)) + "_" + Sanitize(Pin(periphEp));
@@ -69,12 +90,29 @@ public static class PinMap
                 : mcuPin?.Kind == PinKind.Analog ? "analog"
                 : periphPin?.Kind == PinKind.Input ? "output"
                 : "input";
-            entries.Add(new PinMapEntry(macro, gpio.Value, mcuEp, periphEp, c.Net, strapping, dir));
+            entries.Add(new PinMapEntry(macro, gpio.Value, mcuEp, periphEp, c.Net, strapping, dir, token));
         }
         if (entries.Count == 0 && hasSignalNets)
             Diagnostics.AppLog.Warn("firmware", $"MCU '{mcu}' detected but no signal/I²C net resolved to a GPIO pin — the generated pin map is empty.");
-        // stable order by GPIO number for deterministic output
-        return entries.OrderBy(e => e.Gpio).ToList();
+        WarnOnAliasedPins(entries);
+        // stable order by emitted pin for deterministic output
+        return entries.OrderBy(e => e.Gpio).ThenBy(e => e.Token, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// Two distinct MCU pins that emit the same literal drive the same physical pad: one peripheral in
+    /// the netlist silently does nothing. Resolving Token kills the common cause (PA5/PB5 both reading
+    /// as 5), so anything left is a naming form we cannot tell apart — say so rather than ship it quietly.
+    /// </summary>
+    private static void WarnOnAliasedPins(List<PinMapEntry> entries)
+    {
+        foreach (var g in entries.GroupBy(e => e.Emit, StringComparer.OrdinalIgnoreCase))
+        {
+            var pins = g.Select(e => e.FromPin).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (pins.Count > 1)
+                Diagnostics.AppLog.Warn("firmware",
+                    $"pin map collision: {string.Join(", ", pins)} all emit '{g.Key}' — they will drive the same pad.");
+        }
     }
 
     /// <summary>Renders the entries as a C header (the <c>pinmap.h</c> body).</summary>
@@ -92,7 +130,7 @@ public static class PinMap
             var note = $"// from net: {e.Net.ToUpperInvariant()} · {e.FromPin} ↔ {e.ToPin}" +
                        (e.Strapping ? "    [strapping pin — see validation]" : "");
             sb.AppendLine(note);
-            sb.AppendLine($"#define {e.Macro.PadRight(pad)}{e.Gpio}");
+            sb.AppendLine($"#define {e.Macro.PadRight(pad)}{e.Emit}");
             sb.AppendLine();
         }
         sb.AppendLine("// ADC reference (ESP32 default attenuation 11dB → ~3.3V)");
@@ -108,10 +146,41 @@ public static class PinMap
         return (null, null);
     }
 
-    private static int? ExtractGpio(string pin)
+    // Pin names whose trailing number is NOT the pin's identity. Mirrors GpioPinMap.ExtractPortGpio,
+    // which already had to tell PA5 from PB5 to keep the simulator's LEDs apart.
+    private static readonly Regex PortPin = new(@"^(P[A-K])(\d{1,2})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex AnalogPin = new(@"^A(\d{1,2})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex PortDotPin = new(@"^P(\d)[._](\d{1,2})$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// (symbolic token, number) for an MCU pin name. The token is empty when the number alone identifies
+    /// the pin — GPIO4, GP25, D13 — which is what every core we target expects there.
+    /// </summary>
+    private static (string token, int? gpio) ResolvePin(string pin)
     {
+        // STM32: "PA5" is port A bit 5. STM32duino defines PA0..PK15; the bare integer is a different pad.
+        var st = PortPin.Match(pin);
+        if (st.Success && int.TryParse(st.Groups[2].Value, out var sp))
+            return (st.Groups[1].Value.ToUpperInvariant() + sp, sp);
+
+        // Arduino: "A0" is a defined constant (14 on an Uno). Bare 0 is the serial TX line.
+        var an = AnalogPin.Match(pin);
+        if (an.Success && int.TryParse(an.Groups[1].Value, out var ap))
+            return ("A" + ap, ap);
+
+        // nRF "P0.13" / "P1.13": the port digit matters and the trailing number alone aliases the two
+        // ports together. No Arduino core symbol is portable here, so keep the number and be loud.
+        var np = PortDotPin.Match(pin);
+        if (np.Success && int.TryParse(np.Groups[2].Value, out var npn))
+        {
+            if (np.Groups[1].Value != "0")
+                Diagnostics.AppLog.Warn("firmware",
+                    $"pin '{pin}' is on port {np.Groups[1].Value}; the generated map carries only {npn} and cannot distinguish it from P0.{npn}.");
+            return ("", npn);
+        }
+
         var m = GpioNum.Match(pin);
-        return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : null;
+        return ("", m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : (int?)null);
     }
 
     private static string Alias(string endpoint)

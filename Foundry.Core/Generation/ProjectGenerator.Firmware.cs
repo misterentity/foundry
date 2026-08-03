@@ -20,7 +20,7 @@ public sealed partial class ProjectGenerator
             var platform = project.Firmware.Platform;
             var pinmapName = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "pinmap.py" : "pinmap.h";
             var pinmap = platform.Contains("python", StringComparison.OrdinalIgnoreCase)
-                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.Gpio}  # {e.Net}: {e.FromPin} <-> {e.ToPin}"))
+                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.PyEmit}  # {e.Net}: {e.FromPin} <-> {e.ToPin}"))
                 : PinMap.RenderHeader(entries);
 
             var parts = string.Join("\n", project.Components.Select(c =>
@@ -77,7 +77,7 @@ public sealed partial class ProjectGenerator
             var platform = project.Firmware.Platform;
             var pinmapName = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "pinmap.py" : "pinmap.h";
             var pinmap = platform.Contains("python", StringComparison.OrdinalIgnoreCase)
-                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.Gpio}"))
+                ? string.Join("\n", entries.Select(e => $"{e.Macro} = {e.PyEmit}"))
                 : PinMap.RenderHeader(entries);
             var inc = platform.Contains("python", StringComparison.OrdinalIgnoreCase) ? "from pinmap import *" : "#include \"pinmap.h\"";
             var current = string.Join("\n\n", project.Firmware.Files
