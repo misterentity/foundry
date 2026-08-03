@@ -1,4 +1,6 @@
 using Foundry.App.ViewModels;
+using System.Collections.Generic;
+using System.Linq;
 using Foundry.Core.Project;
 using Foundry.Core.Validation;
 
@@ -124,5 +126,59 @@ public class OverviewViewModelTests
         Assert.True(vm.HasPrintTime);
         Assert.Equal("3h 40m", vm.PrintTimeText);
         Assert.DoesNotContain("0.2mm", vm.PrintTimeText);   // the comp's layer height; nothing computes it
+    }
+}
+
+// Delete ran on a single click of a small "×", with no confirmation, next to the row that OPENS the
+// project -- and it takes the .rev history with it, so there was nothing left to restore from. The
+// revision cleanup landed; the dialog it needed never did.
+public class ProjectDeleteConfirmationTests
+{
+    private static ProjectsViewModel Vm(out List<string> prompts)
+    {
+        var seen = new List<string>();
+        prompts = seen;
+        var vm = new ProjectsViewModel(onNew: () => { }, onOpen: _ => { });
+        vm.Confirm = (title, message) => { seen.Add(message); return false; };
+        return vm;
+    }
+
+    [Fact]
+    public void DeletingAsksFirst()
+    {
+        var vm = Vm(out var prompts);
+        vm.DeleteCommand.Execute("p_doesnotexist");
+        Assert.Single(prompts);
+    }
+
+    [Fact]
+    public void TheQuestionNamesWhatIsLost()
+    {
+        var vm = Vm(out var prompts);
+        vm.DeleteCommand.Execute("p_doesnotexist");
+
+        Assert.Contains("version history", prompts[0]);
+        Assert.Contains("cannot be undone", prompts[0]);
+    }
+
+    [Fact]
+    public void AnEmptyIdNeverEvenAsks()
+    {
+        var vm = Vm(out var prompts);
+        vm.DeleteCommand.Execute(null);
+        vm.DeleteCommand.Execute("");
+        Assert.Empty(prompts);
+    }
+
+    // Saying no must be a real no: the row stays.
+    [Fact]
+    public void DecliningKeepsTheProject()
+    {
+        var vm = new ProjectsViewModel(onNew: () => { }, onOpen: _ => { });
+        var before = vm.Recent.Count;
+        vm.Confirm = (_, _) => false;
+
+        vm.DeleteCommand.Execute(vm.Recent.FirstOrDefault()?.Id ?? "p_none");
+        Assert.Equal(before, vm.Recent.Count);
     }
 }

@@ -28,7 +28,7 @@ public static class RevisionStore
                 At = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                 Json = ProjectStore.Serialize(project),
             };
-            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, rev.RevId + ".json"),
+            AtomicFile.WriteAllText(System.IO.Path.Combine(dir, rev.RevId + ".json"),
                 JsonSerializer.Serialize(rev, ProjectStore.Options));
             Prune(dir);
             Diagnostics.AppLog.Info("revision", $"captured “{rev.Label}” for {project.Id}");

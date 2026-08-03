@@ -53,13 +53,40 @@ public sealed partial class ProjectsViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Asks the user to confirm a destructive action. Swappable so the delete path is unit-testable —
+    /// a MessageBox in the view model is otherwise untestable by construction.
+    /// </summary>
+    public Func<string, string, bool> Confirm { get; set; } = DefaultConfirm;
+
+    private static bool DefaultConfirm(string title, string message) =>
+        System.Windows.MessageBox.Show(message, title,
+            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No) == System.Windows.MessageBoxResult.Yes;
+
+    /// <summary>
+    /// Delete a project and its revision history.
+    ///
+    /// <para>
+    /// This ran on a single click of a small "×" with no confirmation at all, next to the row that OPENS
+    /// the project — and it takes the .rev history with it, so there was nothing left to restore from.
+    /// The revision cleanup landed; the dialog it needed never did.
+    /// </para>
+    /// </summary>
     [RelayCommand]
     private void Delete(string? id)
     {
         if (string.IsNullOrEmpty(id)) return;
-        ProjectStore.DeleteById(id);
+
         var row = Recent.FirstOrDefault(x => x.Id == id);
+        var name = string.IsNullOrWhiteSpace(row?.Title) ? id : row!.Title;
+        if (!Confirm("Foundry — delete project",
+                $"Delete “{name}” and its version history?\n\nThis cannot be undone."))
+            return;
+
+        ProjectStore.DeleteById(id);
         if (row is not null) Recent.Remove(row);
         OnPropertyChanged(nameof(HasRecent));
+        Foundry.Core.Diagnostics.AppLog.Info("project", $"deleted “{name}” ({id})");
     }
 }

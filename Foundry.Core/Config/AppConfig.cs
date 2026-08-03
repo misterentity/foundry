@@ -40,18 +40,23 @@ public static class ConfigStore
         path ??= DefaultPath;
         try
         {
-            if (System.IO.File.Exists(path))
-                return JsonSerializer.Deserialize<AppConfig>(System.IO.File.ReadAllText(path)) ?? new AppConfig();
+            // Falls back to the .bak when the settings file is truncated — otherwise a crash mid-save
+            // silently resets every preference to defaults, including the configured output folder.
+            var json = Project.AtomicFile.ReadAllText(path, IsLoadable);
+            if (json is not null)
+                return JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
         }
         catch { /* fall through to defaults */ }
         return new AppConfig();
     }
 
-    public static void Save(AppConfig config, string? path = null)
+    private static bool IsLoadable(string json)
     {
-        path ??= DefaultPath;
-        var dir = System.IO.Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
-        System.IO.File.WriteAllText(path, JsonSerializer.Serialize(config, Opts));
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try { return JsonSerializer.Deserialize<AppConfig>(json) is not null; }
+        catch (JsonException) { return false; }
     }
+
+    public static void Save(AppConfig config, string? path = null) =>
+        Project.AtomicFile.WriteAllText(path ?? DefaultPath, JsonSerializer.Serialize(config, Opts));
 }

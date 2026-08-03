@@ -15,14 +15,29 @@ public static class ProjectStore
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public static void Save(Project project, string path)
+    /// <summary>
+    /// Persist a project. Atomic: this wrote in place, and WriteAllText truncates the destination before
+    /// writing, so a crash in that window left an empty or half-written file — and DeleteById takes the
+    /// revision history with the project, so there was nothing to restore from either.
+    /// </summary>
+    public static void Save(Project project, string path) =>
+        AtomicFile.WriteAllText(path, Serialize(project));
+
+    /// <summary>Load a project, falling back to the .bak if the main file is missing or not valid JSON.</summary>
+    public static Project Load(string path)
     {
-        var dir = System.IO.Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
-        File.WriteAllText(path, Serialize(project));
+        var json = AtomicFile.ReadAllText(path, IsLoadable)
+            ?? throw new FileNotFoundException($"No readable project at {path} (and no usable backup).", path);
+        return Deserialize(json);
     }
 
-    public static Project Load(string path) => Deserialize(File.ReadAllText(path));
+    /// <summary>Cheap "is this a whole project file" test for the backup fallback — a truncated write is still text.</summary>
+    private static bool IsLoadable(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try { return JsonSerializer.Deserialize<Project>(json, Options) is not null; }
+        catch (JsonException) { return false; }
+    }
 
     public static string Serialize(Project project) => JsonSerializer.Serialize(project, Options);
 
@@ -67,8 +82,8 @@ public static class ProjectStore
     {
         try
         {
-            var p = PathFor(id);
-            if (File.Exists(p)) File.Delete(p);
+            // Takes the .bak too — otherwise a deleted project quietly comes back on the next load.
+            AtomicFile.Delete(PathFor(id));
             RevisionStore.DeleteAll(id);   // don't leave history for the next project with this id to inherit
             Diagnostics.AppLog.Info("project", $"deleted {id} from library");
         }
@@ -80,7 +95,10 @@ public static class ProjectStore
     {
         var list = new List<ProjectSummary>();
         if (!Directory.Exists(LibraryDir)) return list;
-        foreach (var file in Directory.EnumerateFiles(LibraryDir, "*.json"))
+        // Explicit extension check: the shell's wildcard matching can also hit .json.bak / .json.tmp, which
+        // would list a project twice — once from its backup.
+        foreach (var file in Directory.EnumerateFiles(LibraryDir, "*.json")
+                     .Where(f => f.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
         {
             try
             {
