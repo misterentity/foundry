@@ -23,6 +23,7 @@ public sealed partial class BomRow : ObservableObject
     {
         _line = line;
         _price = line.Price; _stock = line.Stock; _lead = line.Lead; _dist = line.Dist;
+        _isLivePrice = line.IsLive;
     }
 
     public int Qty => _line.Qty;
@@ -40,10 +41,36 @@ public sealed partial class BomRow : ObservableObject
 
     /// <summary>True once a live sourcing quote has been applied to this row; until then Price is a generated estimate.</summary>
     [ObservableProperty] private bool _isLivePrice;
-    public string PriceSourceTag => IsLivePrice ? "LIVE" : "EST";
-    partial void OnIsLivePriceChanged(bool value) => OnPropertyChanged(nameof(PriceSourceTag));
+    public string PriceSourceTag => BomPricing.SourceTag(_line);
 
-    public void Apply(SourcingQuote q) { Dist = q.Distributor; Price = q.UnitPrice; Stock = q.Stock; Lead = q.Lead; IsLivePrice = true; }
+    /// <summary>
+    /// Stock and lead as the table should show them. An estimate has neither — the model invents a
+    /// plausible integer, and rendering it beside a stock-health dot made a guess look like inventory.
+    /// </summary>
+    public string StockText => BomPricing.StockText(_line);
+    public string LeadText => BomPricing.LeadText(_line);
+
+    /// <summary>Null unless a provider answered — the dot has no colour to be when stock is unknown.</summary>
+    public int? KnownStock => _line.IsLive ? _line.Stock : null;
+
+    partial void OnIsLivePriceChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PriceSourceTag));
+        OnPropertyChanged(nameof(StockText));
+        OnPropertyChanged(nameof(LeadText));
+        OnPropertyChanged(nameof(KnownStock));
+    }
+
+    public void Apply(SourcingQuote q)
+    {
+        // Write through to the line so provenance survives save/load and reaches the PDF export — the
+        // view model is not the only thing that renders this data.
+        _line.Dist = q.Distributor; _line.Price = q.UnitPrice; _line.Stock = q.Stock; _line.Lead = q.Lead;
+        _line.PriceSource = string.IsNullOrWhiteSpace(q.Distributor) ? "live" : q.Distributor;
+        _line.PricedAtUtc = DateTime.UtcNow;
+
+        Dist = q.Distributor; Price = q.UnitPrice; Stock = q.Stock; Lead = q.Lead; IsLivePrice = true;
+    }
 
     // v2 G10: substitutes
     [ObservableProperty] private bool _showAlternates;

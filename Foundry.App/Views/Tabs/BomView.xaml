@@ -15,8 +15,11 @@
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="44" LineHeight="52">
             <Run Text="What you'll "/><Run Text="buy." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
+          <!-- Was "Real-time pricing and availability per MPN" flat out. That is true only with a sourcing
+               key configured; without one every figure below is generated, so the panel promised live data
+               directly above a table of estimates. -->
           <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
-                     Text="Real-time pricing and availability per MPN, with one-click cart links to DigiKey, Mouser, or Amazon. Substitute parts with chat ('swap the OLED for e-paper') and downstream stages re-run."/>
+                     Text="Prices start as estimates, marked EST. Add a sourcing key in Settings to fetch live pricing and stock per MPN — those rows re-tag as LIVE, and stock stays blank until a distributor actually answers. One-click cart links to DigiKey, Mouser, or Amazon. Substitute parts with chat ('swap the OLED for e-paper') and downstream stages re-run."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
           <TextBox Style="{StaticResource FieldInput}" Width="86" VerticalAlignment="Center" Margin="0,0,6,0" Padding="8,5"
@@ -36,7 +39,12 @@
       <TextBlock Style="{StaticResource Kicker}" Margin="0,0,0,10" Foreground="{StaticResource Brush.InkMute}" Text="{Binding SourcingStatus}"/>
 
       <!-- BOM TABLE -->
-      <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Margin="0,0,0,28">
+      <!-- COMPONENT is the only elastic column, so with the chat panel open the fixed columns ate the whole
+           row and the part NAME collapsed to about 20px: "Cap. Soil Moisture Sensor" rendered as "C:".
+           The name is the one column nobody can work without. It gets a floor, and the table scrolls
+           sideways past that point instead of crushing it. -->
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,0,0,28">
+      <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 
@@ -44,8 +52,10 @@
           <Border Grid.Row="0" Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="0,0,0,1">
             <Grid Margin="0">
               <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="60"/><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="80"/><ColumnDefinition Width="80"/><ColumnDefinition Width="110"/>
+                <!-- UNIT carries the LIVE/EST provenance chip as well as the price, so it is wider than the
+                     other money columns; MPN gives up the same width to keep COMPONENT's share unchanged. -->
+                <ColumnDefinition Width="60"/><ColumnDefinition Width="*" MinWidth="220"/><ColumnDefinition Width="152"/>
+                <ColumnDefinition Width="118"/><ColumnDefinition Width="80"/><ColumnDefinition Width="110"/>
                 <ColumnDefinition Width="100"/><ColumnDefinition Width="80"/><ColumnDefinition Width="40"/>
               </Grid.ColumnDefinitions>
               <TextBlock Grid.Column="0" Style="{StaticResource Kicker}" Margin="14,12" HorizontalAlignment="Right" Text="QTY"/>
@@ -72,8 +82,8 @@
                  <StackPanel>
                   <Grid>
                     <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="60"/><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/>
-                      <ColumnDefinition Width="80"/><ColumnDefinition Width="80"/><ColumnDefinition Width="110"/>
+                      <ColumnDefinition Width="60"/><ColumnDefinition Width="*" MinWidth="220"/><ColumnDefinition Width="152"/>
+                      <ColumnDefinition Width="118"/><ColumnDefinition Width="80"/><ColumnDefinition Width="110"/>
                       <ColumnDefinition Width="100"/><ColumnDefinition Width="80"/><ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Style="{StaticResource Mono}" Margin="14,12" HorizontalAlignment="Right" Text="{Binding Qty, StringFormat='{}{0}×'}"/>
@@ -82,14 +92,21 @@
                       <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.InkFaint}" Margin="0,2,0,0" Text="{Binding Note}"/>
                     </StackPanel>
                     <TextBlock Grid.Column="2" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="14,12" Text="{Binding Mpn}"/>
-                    <TextBlock Grid.Column="3" Style="{StaticResource Mono}" Margin="14,12" HorizontalAlignment="Right" Foreground="{StaticResource Brush.Ink}" Text="{Binding Price, StringFormat='${0:0.00}'}"/>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="14,12">
+                      <!-- Price provenance was computed but never shown: an estimate and a real quote rendered identically. -->
+                      <Border Background="{StaticResource Brush.Hairline2}" CornerRadius="2" Padding="3,1" Margin="0,0,6,0" VerticalAlignment="Center"
+                              ToolTip="LIVE = fetched from a distributor. EST = generated estimate, not a quote.">
+                        <TextBlock Style="{StaticResource Mono}" FontSize="9" Foreground="{StaticResource Brush.InkMute}" Text="{Binding PriceSourceTag}"/>
+                      </Border>
+                      <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.Ink}" Text="{Binding Price, StringFormat='${0:0.00}'}"/>
+                    </StackPanel>
                     <TextBlock Grid.Column="4" Style="{StaticResource Mono}" Margin="14,12" HorizontalAlignment="Right" Foreground="{StaticResource Brush.Ink}" Text="{Binding Extended, StringFormat='${0:0.00}'}"/>
                     <StackPanel Grid.Column="5" Orientation="Horizontal" Margin="14,12">
-                      <Rectangle Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding Stock, Converter={StaticResource StockBrush}}"/>
-                      <TextBlock Style="{StaticResource Mono}" Foreground="{Binding Stock, Converter={StaticResource StockBrush}}" Text="{Binding Stock, StringFormat='{}{0:N0}'}"/>
+                      <Rectangle Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,8,0" Fill="{Binding KnownStock, Converter={StaticResource StockBrush}}"/>
+                      <TextBlock Style="{StaticResource Mono}" Foreground="{Binding KnownStock, Converter={StaticResource StockBrush}}" Text="{Binding StockText}"/>
                     </StackPanel>
                     <TextBlock Grid.Column="6" Style="{StaticResource Mono}" Foreground="{StaticResource Brush.Info}" Margin="14,12" Text="{Binding Dist}"/>
-                    <TextBlock Grid.Column="7" Style="{StaticResource Mono}" Margin="14,12" Text="{Binding Lead}"/>
+                    <TextBlock Grid.Column="7" Style="{StaticResource Mono}" Margin="14,12" Text="{Binding LeadText}"/>
                     <StackPanel Grid.Column="8" Orientation="Horizontal" Margin="4,8">
                       <Button Style="{StaticResource BtnGhost}" Padding="8,4" Margin="0,0,4,0" BorderBrush="{StaticResource Brush.Hairline2}" FontSize="10"
                               ToolTip="Suggest cheaper / in-stock substitutes" Content="ALT"
@@ -146,6 +163,7 @@
           </Grid>
         </Grid>
       </Border>
+      </ScrollViewer>
 
       <!-- SOURCING SUMMARY (by distributor) -->
       <Border BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">

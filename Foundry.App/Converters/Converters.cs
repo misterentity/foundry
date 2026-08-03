@@ -168,13 +168,18 @@ public sealed class BoolToGridLengthConverter : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;
 }
 
-/// <summary>low-stock (int &lt; 100) → warn/ok brush.</summary>
+/// <summary>
+/// Stock health → warn/ok brush. Null means NOBODY LOOKED: bind this to a nullable stock so an unchecked
+/// row reads as unknown rather than green. It used to take a raw int, so a model-invented "1,442" lit the
+/// ok brush and an estimate was visually identical to a distributor lookup.
+/// </summary>
 public sealed class StockBrushConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c)
     {
-        var n = value is int i ? i : 0;
-        return n < 100 ? Brushes.Res("Brush.Warn") : Brushes.Res("Brush.Ok");
+        if (value is not int n) return Brushes.Res("Brush.InkFaint");
+        return n < Foundry.Core.Sourcing.BomPricing.LowStockThreshold
+            ? Brushes.Res("Brush.Warn") : Brushes.Res("Brush.Ok");
     }
 
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Binding.DoNothing;

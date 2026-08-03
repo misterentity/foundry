@@ -47,7 +47,7 @@ public class ExportTests
         var csv = Exporters.BomCsv(p);
         var lines = csv.Replace("\r\n", "\n").TrimEnd().Split('\n');
 
-        Assert.StartsWith("Qty,Component,MPN,Unit,Extended,Stock,Distributor,Lead,Note", lines[0]);
+        Assert.StartsWith("Qty,Component,MPN,Unit,Extended,Source,Stock,Distributor,Lead,Note", lines[0]);
         Assert.Equal(p.Bom.Count + 2, lines.Length); // header + lines + subtotal
         Assert.Contains(lines, l => l.Contains("ESP32-DEVKITC-32E"));
         Assert.Contains(lines, l => l.EndsWith("Subtotal"));

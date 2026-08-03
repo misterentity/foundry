@@ -55,7 +55,8 @@
               <TextBlock Style="{StaticResource Kicker}" Text="COMPONENTS"/>
               <TextBlock Style="{StaticResource Serif}" FontSize="38" Foreground="{DynamicResource Brush.Accent}" Margin="0,6,0,0"
                          Text="{Binding Project.Kpis.Parts}"/>
-              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.Ok}" Text="+0 from rev 02"/>
+              <!-- Was "+0 from rev 02". Nothing computes a rev-over-rev part delta, so it was a fixed string
+                   under a live number. Deleted rather than faked; restore it when revisions are diffed. -->
             </StackPanel>
           </Border>
 
@@ -64,7 +65,8 @@
               <TextBlock Style="{StaticResource Kicker}" Text="PROJECT COST"/>
               <TextBlock Style="{StaticResource Serif}" FontSize="38" Foreground="{DynamicResource Brush.Accent}" Margin="0,6,0,0"
                          Text="{Binding CostText}"/>
-              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.Ok}" Text="–$1.85 (gland swap)"/>
+              <!-- Was "–$1.85 (gland swap)" on every project ever opened: a cost saving, attributed to a
+                   part swap, that no project had actually made. The most quotable false number in the app. -->
             </StackPanel>
           </Border>
 
@@ -75,7 +77,8 @@
                 <TextBlock Style="{StaticResource Serif}" FontSize="38" Foreground="{StaticResource Brush.Warn}" Text="{Binding Project.Kpis.BatteryDays}"/>
                 <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkMute}" VerticalAlignment="Bottom" Margin="4,0,0,8" Text="d"/>
               </StackPanel>
-              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.Fail}" Text="Below 60-day goal"/>
+              <!-- Was "Below 60-day goal" in fail red, always. No battery goal is stored on the project
+                   (batteryGoalDays is a Revalidate parameter), so there was no goal to be below. -->
             </StackPanel>
           </Border>
 
@@ -86,7 +89,11 @@
                 <TextBlock Style="{StaticResource Serif}" FontSize="38" Foreground="{DynamicResource Brush.Accent}" Text="{Binding Project.Kpis.PrintGrams}"/>
                 <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkMute}" VerticalAlignment="Bottom" Margin="4,0,0,8" Text="g"/>
               </StackPanel>
-              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.Ok}" Text="2h 14m @ 0.2mm"/>
+              <!-- Was "2h 14m @ 0.2mm": the demo's own print time, with a layer height nothing computes,
+                   hardcoded into the view. PrintTime is empty for generated projects, so it hides. -->
+              <TextBlock Style="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource Brush.Ok}"
+                         Text="{Binding PrintTimeText}"
+                         Visibility="{Binding HasPrintTime, Converter={StaticResource BoolVis}}"/>
             </StackPanel>
           </Border>
         </Grid>
@@ -98,7 +105,8 @@
           <Border BorderBrush="{StaticResource Brush.Hairline}" BorderThickness="0,0,0,1" Padding="0,0,0,8">
             <Grid>
               <TextBlock Style="{StaticResource SectionTitle}" Text="Architecture"/>
-              <TextBlock Style="{StaticResource SectionSub}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Text="4 subsystems · 9 nets"/>
+              <!-- Was the literal "4 subsystems · 9 nets" beside the real architecture grid. -->
+              <TextBlock Style="{StaticResource SectionSub}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Text="{Binding ArchitectureCountText}"/>
             </Grid>
           </Border>
         </Grid>
@@ -151,8 +159,14 @@
             <StackPanel>
               <Grid>
                 <TextBlock Style="{StaticResource Serif}" FontSize="24" Text="Validation status"/>
-                <Border Style="{StaticResource Tag}" Background="{StaticResource Brush.TagWarnBg}" BorderBrush="{StaticResource Brush.TagWarnBorder}" HorizontalAlignment="Right">
-                  <TextBlock Style="{StaticResource TagText}" Foreground="{StaticResource Brush.Warn}" Text="2 warn · 1 info · 2 pass"/>
+                <!-- Was the literal "2 warn · 1 info · 2 pass" in a permanently warn-coloured chip. The counts
+                     were fixed, and "info" is not a severity this engine produces. Colour follows the real
+                     rollup now, so the chip cannot read amber while a fail is present. -->
+                <Border Style="{StaticResource Tag}" HorizontalAlignment="Right"
+                        Background="{Binding FindingsSeverity, Converter={StaticResource SevTagBg}}"
+                        BorderBrush="{Binding FindingsSeverity, Converter={StaticResource SevTagBorder}}">
+                  <TextBlock Style="{StaticResource TagText}" Text="{Binding FindingsCountText}"
+                             Foreground="{Binding FindingsSeverity, Converter={StaticResource SevBrush}}"/>
                 </Border>
               </Grid>
               <ItemsControl ItemsSource="{Binding TopFindings}" Margin="0,16,0,0">

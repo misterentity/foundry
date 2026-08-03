@@ -26,10 +26,12 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             .Select(g => new SourcingRow
             {
                 Distributor = g.Key, Lines = g.Count(), Cost = g.Sum(x => x.Qty * x.Price),
-                Status = g.Any(x => x.Stock < 100) ? "warn" : "ok",
+                Status = Foundry.Core.Sourcing.BomPricing.GroupStatus(g),
             })
             .OrderByDescending(s => s.Cost).ToList();
     }
+
+    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
 
     /// <summary>Raised when the user asks to regenerate the whole project (handled by the shell).</summary>
     public event Action? RebuildRequested;
@@ -39,8 +41,49 @@ public sealed partial class OverviewViewModel : TabViewModelBase
     public IReadOnlyList<Finding> TopFindings { get; }
     public IReadOnlyList<SourcingRow> Sourcing { get; }
     public string CostText => $"${Project.Kpis.Cost:0.00}";
-    public bool AllInStock => Project.Bom.Count > 0 && Project.Bom.All(b => b.Stock >= 100);
-    public string StockText => AllInStock ? "All in stock" : $"{Project.Bom.Count(b => b.Stock < 100)} low-stock";
+
+    // ---- counts that used to be literals from the original design comp ----
+    //
+    // "4 subsystems · 9 nets" and "2 warn · 1 info · 2 pass" were hardcoded strings sitting directly beneath
+    // genuinely bound values, so they read as computed. They happened to be near-right for the demo and were
+    // wrong for every generated project — and "info" is not even a severity this engine produces.
+
+    public string ArchitectureCountText =>
+        $"{Count(Project.Subsystems.Count, "subsystem")} · {Count(NetCount, "net")}";
+
+    /// <summary>Distinct nets, not connections — several wires share one net on a bus.</summary>
+    private int NetCount => Project.Connections
+        .Select(c => c.Net).Where(n => !string.IsNullOrWhiteSpace(n))
+        .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
+    public string FindingsCountText
+    {
+        get
+        {
+            var parts = new[] { "fail", "warn", "unproven", "pass" }
+                .Select(s => (sev: s, n: Project.Findings.Count(f => f.Severity == s)))
+                .Where(x => x.n > 0)
+                .Select(x => $"{x.n} {x.sev}")
+                .ToList();
+            return parts.Count > 0 ? string.Join(" · ", parts) : "not validated";
+        }
+    }
+
+    /// <summary>Severity driving the findings chip's colour, so it cannot read "warn" while a fail is present.</summary>
+    public string FindingsSeverity => Project.Validation;
+
+    // ---- print estimate ----
+    //
+    // The comp read "2h 14m @ 0.2mm". The layer height was never computed by anything, and PrintTime is
+    // empty for every generated project (ProjectGenerator sets ""), so the line was the demo's own value
+    // hardcoded into the view. It now shows only when there is a real figure to show.
+    public string PrintTimeText => Project.Enclosure.PrintTime;
+    public bool HasPrintTime => !string.IsNullOrWhiteSpace(Project.Enclosure.PrintTime);
+    /// <summary>Only true when a provider actually reported healthy stock for every line.</summary>
+    public bool AllInStock =>
+        Project.Bom.Count > 0 && Project.Bom.All(b => b.IsLive && !b.LowStock);
+
+    public string StockText => Foundry.Core.Sourcing.BomPricing.StockSummary(Project.Bom);
 
     /// <summary>Export the branded project-spec PDF.</summary>
     [RelayCommand]

@@ -77,8 +77,27 @@ public sealed class BomLine
     public string Dist { get; set; } = "";
     public string Note { get; set; } = "";
 
+    /// <summary>
+    /// Who supplied <see cref="Price"/>/<see cref="Stock"/>/<see cref="Lead"/>/<see cref="Dist"/>: the
+    /// sourcing provider's name once a live quote lands, empty while they are the model's estimate.
+    ///
+    /// <para>
+    /// Without this the two are indistinguishable downstream. A generated "1,442 in stock · DigiKey ·
+    /// Stock" rendered exactly like a real distributor lookup, and the Overview tab turned it into the
+    /// headline "All in stock" — a sourcing claim about parts nobody had looked up.
+    /// </para>
+    /// </summary>
+    public string PriceSource { get; set; } = "";
+
+    /// <summary>When the live quote was taken. Null while the row is an estimate.</summary>
+    public DateTime? PricedAtUtc { get; set; }
+
+    [JsonIgnore] public bool IsLive => PriceSource.Length > 0;
+
     [JsonIgnore] public double Extended => Qty * Price;
-    [JsonIgnore] public bool LowStock => Stock < 100;
+
+    /// <summary>Low stock is only meaningful against a stock figure someone actually fetched.</summary>
+    [JsonIgnore] public bool LowStock => IsLive && Stock < Sourcing.BomPricing.LowStockThreshold;
 }
 
 /// <summary>A net in the authoritative netlist (PRD §6 connections).</summary>

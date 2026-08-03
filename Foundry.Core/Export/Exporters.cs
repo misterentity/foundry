@@ -6,17 +6,24 @@ namespace Foundry.Core.Export;
 /// <summary>Disk exporters for the Project's outputs (PRD §8.4, F7).</summary>
 public static class Exporters
 {
-    /// <summary>Full BOM as CSV (qty, component, MPN, unit, extended, distributor, lead).</summary>
+    /// <summary>
+    /// Full BOM as CSV. This is the file someone actually orders from, so an estimate must not leave here
+    /// looking like a distributor lookup: <c>Source</c> says LIVE or EST per line, and Stock/Lead are left
+    /// EMPTY on an estimate rather than exporting a number the model invented.
+    /// </summary>
     public static string BomCsv(Project.Project project)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Qty,Component,MPN,Unit,Extended,Stock,Distributor,Lead,Note");
+        sb.AppendLine("Qty,Component,MPN,Unit,Extended,Source,Stock,Distributor,Lead,Note");
         foreach (var l in project.Bom)
             sb.AppendLine(string.Join(",",
                 l.Qty, Csv(l.Name), Csv(l.Mpn), l.Price.ToString("0.00"),
-                (l.Qty * l.Price).ToString("0.00"), l.Stock, Csv(l.Dist), Csv(l.Lead), Csv(l.Note)));
+                (l.Qty * l.Price).ToString("0.00"),
+                Sourcing.BomPricing.SourceTag(l),
+                l.IsLive ? l.Stock.ToString() : "",
+                Csv(l.Dist), Csv(l.IsLive ? l.Lead : ""), Csv(l.Note)));
         var total = project.Bom.Sum(l => l.Qty * l.Price);
-        sb.AppendLine($",,,,{total:0.00},,,,Subtotal");
+        sb.AppendLine($",,,,{total:0.00},,,,,Subtotal");
         return sb.ToString();
     }
 

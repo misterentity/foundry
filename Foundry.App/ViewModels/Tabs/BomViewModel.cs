@@ -40,7 +40,8 @@ public sealed partial class BomViewModel : TabViewModelBase
     public int Units => Rows.Sum(r => r.Qty);
     public string SubtotalLabel => $"Subtotal · {Rows.Count} lines · {Units} units";
     public string LinesLabel => $"BILL OF MATERIALS · {Rows.Count} LINES";
-    public int LowStockCount => Rows.Count(r => r.Stock < 100);
+    /// <summary>Only rows with a stock figure a provider actually returned can be counted as low.</summary>
+    public int LowStockCount => Rows.Count(r => r.IsLivePrice && r.Stock < Foundry.Core.Sourcing.BomPricing.LowStockThreshold);
 
     /// <summary>Real cost/line breakdown by distributor (replaces the old hardcoded substitutions).</summary>
     public IReadOnlyList<SourcingRow> ByDistributor => Rows
@@ -48,7 +49,9 @@ public sealed partial class BomViewModel : TabViewModelBase
         .Select(g => new SourcingRow
         {
             Distributor = g.Key, Lines = g.Count(), Cost = g.Sum(r => r.Extended),
-            Status = g.Any(r => r.Stock < 100) ? "warn" : "ok",
+            Status = !g.Any(r => r.IsLivePrice) ? "unknown"
+                   : g.Any(r => r.IsLivePrice && r.Stock < Foundry.Core.Sourcing.BomPricing.LowStockThreshold) ? "warn"
+                   : "ok",
         })
         .OrderByDescending(s => s.Cost).ToList();
 
