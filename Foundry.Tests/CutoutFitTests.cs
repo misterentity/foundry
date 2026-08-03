@@ -193,3 +193,45 @@ public class CutoutFitTests
         Assert.Equal("unproven", ProjectValidator.Rollup(findings));
     }
 }
+
+// The Enclosure header asserted "derived from footprints" for every port — true for none of them
+// before this class existed and true for only some of them now. It states the ratio instead.
+// Lives here, not in a view-model test: EnclosureViewModel's constructor starts the CAD sidecar.
+public class CutoutSourceSummaryTests
+{
+    private static BoardPlacement Board(params PartPlacement[] parts) =>
+        new(new BoardExtent(80, 60), Array.Empty<double[]>(), 4.0, 1.6)
+        { Parts = parts.ToDictionary(p => p.Alias, p => p, StringComparer.OrdinalIgnoreCase) };
+
+    private static Enclosure Case(params Cutout[] c) =>
+        new() { Inner = new[] { 82.0, 62.0, 25.0 }, Wall = 2.0, Cutouts = c.ToList() };
+
+    [Fact]
+    public void NoCutouts_ReadsNone() =>
+        Assert.Equal("none", CutoutFit.SummariseSource(Case(), Board()));
+
+    [Fact]
+    public void NoBoard_ReadsPositionsFromTheDesign() =>
+        Assert.Equal("positions from the design",
+            CutoutFit.SummariseSource(Case(new Cutout { Face = "front", Label = "USB-C" }), null));
+
+    [Fact]
+    public void NoneDerivable_ReadsPositionsFromTheDesign() =>
+        Assert.Equal("positions from the design",
+            CutoutFit.SummariseSource(Case(new Cutout { Face = "front", Label = "USB-C" }), Board()));
+
+    [Fact]
+    public void AllDerivable_SaysSo() =>
+        Assert.Equal("all derived from the board",
+            CutoutFit.SummariseSource(
+                Case(new Cutout { Ref = "USB", Face = "front", Shape = "rect" }),
+                Board(new PartPlacement("USB", 20, 3, 9, 7, 3.2))));
+
+    [Fact]
+    public void PartlyDerivable_StatesTheRatio() =>
+        Assert.Equal("1 of 2 derived from the board",
+            CutoutFit.SummariseSource(
+                Case(new Cutout { Ref = "USB", Face = "front", Shape = "rect" },
+                     new Cutout { Face = "back", Shape = "rect", Label = "unlinked" }),
+                Board(new PartPlacement("USB", 20, 3, 9, 7, 3.2))));
+}

@@ -70,6 +70,23 @@ public static class CutoutFit
         return (results, findings);
     }
 
+    /// <summary>
+    /// How the enclosure's ports were positioned, for the UI to state plainly: "2 of 5 derived from the
+    /// board". The header used to assert "derived from footprints" for every port, which was true for
+    /// none of them before this class existed and is true for only some of them now.
+    /// </summary>
+    public static string SummariseSource(Enclosure enclosure, BoardPlacement? board)
+    {
+        var total = enclosure.Cutouts.Count;
+        if (total == 0) return "none";
+        if (board is null) return "positions from the design";
+
+        var derived = Derive(enclosure, board).Results.Count(r => r.Derived);
+        return derived == total ? "all derived from the board"
+             : derived == 0 ? "positions from the design"
+             : $"{derived} of {total} derived from the board";
+    }
+
     private static string Label(Cutout c) =>
         !string.IsNullOrWhiteSpace(c.Label) ? c.Label : $"{c.Shape} on {c.Face}";
 

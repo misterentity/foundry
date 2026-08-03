@@ -58,6 +58,14 @@ public sealed partial class EnclosureViewModel : TabViewModelBase
     public string LidText => E.Lid?.ToLowerInvariant() == "screw" ? "Screw-down" : "Snap-fit";
     public string MountText => E.Mount?.ToLowerInvariant() switch { "wall-tabs" => "Wall tabs", "flange" => "Perimeter flange", _ => "None" };
     public string StandoffText => E.Standoffs > 0 ? $"{E.Standoffs} bosses" : "None";
+    /// <summary>
+    /// How many ports were positioned from the part they expose, versus taken from the design
+    /// description. The header used to assert "derived from footprints" for all of them, which was true
+    /// for none of them before today and is true for some of them now — so it states the ratio instead.
+    /// </summary>
+    public string CutoutsSourceText => Foundry.Core.Cad.CutoutFit.SummariseSource(
+        E, Foundry.Core.Cad.EnclosureFit.PlaceBoard(Project));
+
     public int VentCount => E.Vents.Sum(v => v.Count);
     public string VentText => VentCount > 0 ? $"{VentCount} slots ({string.Join("/", E.Vents.Select(v => v.Face))})" : "None";
 
