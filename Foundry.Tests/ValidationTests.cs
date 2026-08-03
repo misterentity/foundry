@@ -230,6 +230,104 @@ public class ValidationTests
         Assert.Contains(findings, f => f is { Code: "GND-NC", Severity: "warn" });
     }
 
+    // ---- grounding: stop grading the model with the model's own answer key ----
+    //
+    // Every other rule reasons over ComponentSpec.Pins, which ProjectGenerator builds from the model's
+    // JSON reply. So a hallucinated pin passed every check, reached pinmap.h and got flashed to real
+    // hardware; the PCB build was the only thing that ever refused it. PartResolver applies the same
+    // authority that build refuses on.
+
+    private static ComponentSpec Esp32(params PinSpec[] pins) => new()
+    {
+        Ref = "esp32", Alias = "MCU", Name = "ESP32-WROOM-32", LogicV = 3.3,
+        Pins = pins.ToList(),
+    };
+
+    [Fact]
+    public void AWiredPinThatTheRealPartDoesNotHave_Fails()
+    {
+        // GPIO99 does not exist on an ESP32-WROOM-32; the curated map is the authority.
+        var kb = new ComponentKb(new[]
+        {
+            Esp32(new PinSpec { Name = "GPIO99", Kind = PinKind.Bidir },
+                  new PinSpec { Name = "GND", Kind = PinKind.Ground }),
+            new ComponentSpec { Ref = "s", Alias = "SEN", Name = "Sensor",
+                Pins = new() { new PinSpec { Name = "OUT", Kind = PinKind.Output } } },
+        });
+        var findings = RulesEngine.Validate(
+            new List<Connection> { new() { From = "MCU.GPIO99", To = "SEN.OUT", Net = "signal" } }, kb);
+
+        Assert.Contains(findings, f => f is { Code: "PIN-UNK", Severity: "fail" });
+    }
+
+    // A part may legitimately DECLARE pins the resolved footprint lacks. Only wiring one can do harm.
+    [Fact]
+    public void AnUnwiredPinThatTheRealPartLacks_DoesNotFail()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            Esp32(new PinSpec { Name = "GPIO4", Kind = PinKind.Bidir },
+                  new PinSpec { Name = "GPIO99", Kind = PinKind.Bidir },   // declared, never wired
+                  new PinSpec { Name = "GND", Kind = PinKind.Ground }),
+            new ComponentSpec { Ref = "s", Alias = "SEN", Name = "Sensor",
+                Pins = new() { new PinSpec { Name = "OUT", Kind = PinKind.Output } } },
+        });
+        var findings = RulesEngine.Validate(
+            new List<Connection> { new() { From = "MCU.GPIO4", To = "SEN.OUT", Net = "signal" } }, kb);
+
+        Assert.DoesNotContain(findings, f => f.Code == "PIN-UNK");
+    }
+
+    [Fact]
+    public void RealPinsOnAKnownPart_ProduceNoGroundingFailure()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            Esp32(new PinSpec { Name = "GPIO4", Kind = PinKind.Bidir },
+                  new PinSpec { Name = "GND", Kind = PinKind.Ground }),
+            new ComponentSpec { Ref = "s", Alias = "SEN", Name = "Sensor",
+                Pins = new() { new PinSpec { Name = "OUT", Kind = PinKind.Output } } },
+        });
+        var findings = RulesEngine.Validate(
+            new List<Connection> { new() { From = "MCU.GPIO4", To = "SEN.OUT", Net = "signal" } }, kb);
+
+        Assert.DoesNotContain(findings, f => f.Code == "PIN-UNK");
+    }
+
+    // Absence of evidence is not evidence: a part with no authority is UNPROVEN, never failed.
+    [Fact]
+    public void APartWithNoAuthoritativePinout_IsUnprovenNotFailed()
+    {
+        var kb = new ComponentKb(new[]
+        {
+            new ComponentSpec { Ref = "x", Alias = "X1", Name = "Mystery Widget 9000",
+                Pins = new() { new PinSpec { Name = "WHATEVER", Kind = PinKind.Bidir } } },
+            new ComponentSpec { Ref = "s", Alias = "SEN", Name = "Sensor",
+                Pins = new() { new PinSpec { Name = "OUT", Kind = PinKind.Output } } },
+        });
+        var findings = RulesEngine.Validate(
+            new List<Connection> { new() { From = "X1.WHATEVER", To = "SEN.OUT", Net = "signal" } }, kb);
+
+        Assert.DoesNotContain(findings, f => f.Code == "PIN-UNK");
+        Assert.Contains(findings, f => f is { Code: "PIN-UNVERIFIED", Severity: "unproven" });
+    }
+
+    [Fact]
+    public void UngroundedParts_KeepTheProjectOffAPass()
+    {
+        var p = new Project
+        {
+            Components = new()
+            {
+                new ComponentSpec { Ref = "x", Alias = "X1", Name = "Mystery Widget 9000",
+                    Pins = new() { new PinSpec { Name = "A", Kind = PinKind.Bidir } } },
+            },
+            Connections = new() { new Connection { From = "X1.A", To = "X1.A", Net = "signal" } },
+        };
+        ProjectValidator.Revalidate(p);
+        Assert.NotEqual("pass", p.Validation);
+    }
+
     // ---- referential integrity: the engine must not report health for what it never checked ----
 
     // Every rule resolves parts through kb.ByAlias(..) and skips a miss, so a netlist naming a part the

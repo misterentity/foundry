@@ -25,6 +25,7 @@ public static class RulesEngine
         var aliases = eps.Select(e => e.Alias).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         Referential(eps, kb, findings);
+        Grounding(eps, kb, findings);
         PinConflicts(connections, kb, findings);
         StrappingPins(eps, kb, findings);
         InputOnlyMisuse(connections, kb, findings);
@@ -43,6 +44,73 @@ public static class RulesEngine
         return dot < 0
             ? new Endpoint(endpoint, "", net)
             : new Endpoint(endpoint[..dot], endpoint[(dot + 1)..], net);
+    }
+
+    // ---- Rule: the model's declared pins, checked against a real pinout ----
+    //
+    // Every other rule reasons over ComponentSpec.Pins, and those come from the model's own JSON reply
+    // (ProjectGenerator builds the KB from it). So the "deterministic" engine was grading the model with
+    // the model's own answer key: a hallucinated pin passed every check, reached pinmap.h, and got
+    // flashed to real hardware — the PCB build was the only thing that refused it, long after the user
+    // had wired it on a breadboard.
+    //
+    // PartResolver applies the SAME authority the board build refuses on. A part it can place tells us
+    // the design's pins are real; a pin it cannot place on such a part is invented. A part it has no
+    // authority over is reported UNPROVEN, never failed — absence of evidence is not evidence.
+    private static void Grounding(List<Endpoint> eps, ComponentKb kb, List<Finding> findings,
+        string? symbolDir = null)
+    {
+        var ungrounded = new List<string>();
+
+        // Only pins the netlist actually USES can do harm. A part may legitimately declare pins the
+        // resolved footprint lacks — the demo's "ESP32 DevKit v1" carries a 5V pin while its footprint is
+        // the bare WROOM module, which has none. That is a modelling wart, not a build-breaker: nothing
+        // is wired to it and the PCB step never sees it. Failing on it would punish designs for being
+        // descriptive.
+        var wired = eps
+            .Where(e => e.Pin.Length > 0)
+            .ToLookup(e => e.Alias, e => e.Pin, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var spec in kb.All.Where(s => s.Pins.Count > 0))
+        {
+            if (!Kb.PartResolver.Identify(spec, symbolDir).IsGrounded)
+            {
+                ungrounded.Add(spec.Name);
+                continue;
+            }
+
+            var used = new HashSet<string>(wired[spec.Alias], StringComparer.OrdinalIgnoreCase);
+            var bad = Kb.PartResolver.UnresolvablePins(spec, symbolDir)
+                .Where(used.Contains)
+                .ToList();
+            if (bad.Count == 0) continue;
+
+            findings.Add(new Finding
+            {
+                Severity = "fail", Code = "PIN-UNK",
+                Title = $"{spec.Name} has no pin {string.Join(", ", bad.Take(3).Select(b => $"“{b}”"))}",
+                Description =
+                    $"The netlist wires {bad.Count} pin(s) that do not exist on the real part: " +
+                    string.Join(", ", bad.Take(8)) + (bad.Count > 8 ? " …" : "") +
+                    ". Those connections cannot be built, and the PCB step will refuse the board.",
+                Refs = bad.Take(6).Select(b => $"{spec.Alias}.{b}").ToList(),
+                Fix = "Use pins the part actually has",
+            });
+        }
+
+        if (ungrounded.Count > 0)
+            findings.Add(new Finding
+            {
+                Severity = "unproven", Code = "PIN-UNVERIFIED",
+                Title = $"{ungrounded.Count} part(s) have no authoritative pinout",
+                Description =
+                    "Foundry has no curated table or KiCad symbol for these, so their pin names are taken " +
+                    "from the design description and were not checked against a real part: " +
+                    string.Join(", ", ungrounded.Take(6)) +
+                    (ungrounded.Count > 6 ? $" (+{ungrounded.Count - 6} more)" : "") + ".",
+                Refs = ungrounded.Take(6).ToList(),
+                Fix = "Supply a footprint for these parts",
+            });
     }
 
     // ---- Rule: a net references a part or a pin that the design never declared ----

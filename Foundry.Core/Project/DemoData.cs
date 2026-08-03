@@ -115,7 +115,11 @@ public static class DemoData
         new Connection { From="MCU.GPIO34", To="SENSOR.AOUT", Net="signal" },
         new Connection { From="BAT.+",      To="REG.VIN",     Net="power" },
         new Connection { From="BAT.-",      To="REG.GND",     Net="ground" },
-        new Connection { From="REG.VOUT",   To="MCU.5V",      Net="power" },
+        // The 3.3 V regulator feeds the 3V3 rail, not a pin called 5V. This was REG.VOUT -> MCU.5V:
+        // a 3.3 V supply wired to a 5 V pin that the resolved footprint (the bare WROOM module) does
+        // not even have. The old engine passed it as "voltage/logic levels consistent" because it
+        // reasoned over the model's own pin list; PIN-UNK caught it against a real pinout.
+        new Connection { From="REG.VOUT",   To="MCU.3V3",     Net="power" },
         new Connection { From="REG.GND",    To="MCU.GND",     Net="ground" },
         new Connection { From="MCU.GPIO0",  To="BTN1.A",      Net="signal" },
         new Connection { From="BTN1.B",     To="MCU.GND",     Net="ground" },
