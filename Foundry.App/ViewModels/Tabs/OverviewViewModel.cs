@@ -95,10 +95,19 @@ public sealed partial class OverviewViewModel : TabViewModelBase
             Directory.CreateDirectory(dir);
             var path = Path.Combine(dir, "project-spec.pdf");
             var wiring = Rendering.WiringImage.Render(Project);
-            File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
-            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            // Writes a numbered sibling when the PDF is already open in a viewer, and returns what it used.
+            var written = Foundry.Core.Export.Exporters.WriteBytesUnlocked(
+                path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"project PDF → {written}");
+            Process.Start(new ProcessStartInfo { FileName = written, UseShellExecute = true });
         }
-        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            // A failed export used to be logged and nothing else, so the button silently did nothing.
+            Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}");
+            System.Windows.MessageBox.Show($"Couldn't export the PDF:\n\n{ex.Message}", "Foundry — export",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>Save the current design as a reusable template (PRD v2 G13).</summary>

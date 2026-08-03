@@ -57,7 +57,7 @@ public sealed partial class ProjectGenerator
             fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
             fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
             foreach (var f in fw.Files) f.Active = false;
-            PickMainFile(fw.Files).Active = true;
+            if (PickMainFile(fw.Files) is { } mainFile) mainFile.Active = true;
             project.Firmware = fw;
         }
         catch (Exception ex)
@@ -99,7 +99,7 @@ public sealed partial class ProjectGenerator
             fw.Files.RemoveAll(f => f.Name.Equals(pinmapName, StringComparison.OrdinalIgnoreCase));
             fw.Files.Add(new FirmwareFile { Name = pinmapName, Path = "/foundry/firmware/", Content = pinmap });
             foreach (var f in fw.Files) f.Active = false;
-            PickMainFile(fw.Files).Active = true;
+            if (PickMainFile(fw.Files) is { } mainFile) mainFile.Active = true;
             project.Firmware = fw;
             Diagnostics.AppLog.Info("build", $"AI build-fix applied · {fw.Files.Count} files");
             return true;
@@ -140,9 +140,20 @@ in the JSON itself (code comments inside "content" are fine). Keep the whole obj
 do not stop mid-file. Include the main sketch plus any helper/config files; omit the supplied pin-map file.
 """;
 
-    /// <summary>The sketch to show/flash first: a main.* file if present, else the largest source file.</summary>
-    public static FirmwareFile PickMainFile(IReadOnlyList<FirmwareFile> files)
+    /// <summary>
+    /// The sketch to show/flash first: a main.* file if present, else the largest source file.
+    ///
+    /// <para>
+    /// Returns null for an empty file set. This used to end <c>?? files[0]</c>, which threw
+    /// ArgumentOutOfRangeException on an empty list — and CompileAsync's catch-all turned that into
+    /// "Couldn't run the compiler: Index was out of range. Must be non-negative and less than the size of
+    /// the collection. (Parameter 'index')". It is the single most frequent error in the app log, and it
+    /// fires whenever a build starts against firmware that has not been generated yet.
+    /// </para>
+    /// </summary>
+    public static FirmwareFile? PickMainFile(IReadOnlyList<FirmwareFile> files)
     {
+        if (files.Count == 0) return null;
         var main = files.FirstOrDefault(f => f.Name.StartsWith("main", StringComparison.OrdinalIgnoreCase));
         if (main is not null) return main;
         bool IsSource(string n) => n.EndsWith(".ino") || n.EndsWith(".py") || n.EndsWith(".cpp") || n.EndsWith(".c");

@@ -23,8 +23,24 @@ public static class AppLog
     private static readonly object Gate = new();
     private static readonly LinkedList<LogEntry> Buffer = new();
 
-    public static string LogDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Foundry", "logs");
+    /// <summary>
+    /// Env var redirecting the log directory. The test projects set it so a test run does not write into the
+    /// user's real diagnostics — they did, and it actively hindered triage: an investigation of the app log
+    /// had to separate genuine failures from "store: f.json is unusable", which was a unit test exercising
+    /// backup recovery on its own temp file.
+    /// </summary>
+    public const string LogDirVar = "FOUNDRY_LOG_DIR";
+
+    public static string LogDir
+    {
+        get
+        {
+            var overridden = Environment.GetEnvironmentVariable(LogDirVar);
+            return string.IsNullOrWhiteSpace(overridden)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Foundry", "logs")
+                : overridden;
+        }
+    }
 
     private static string FilePath => Path.Combine(LogDir, $"foundry-{DateTime.Now:yyyyMMdd}.log");
 

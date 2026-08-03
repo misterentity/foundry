@@ -305,11 +305,17 @@ public sealed partial class ShellViewModel : ObservableObject, IDisposable
             System.IO.Directory.CreateDirectory(dir);
             var path = System.IO.Path.Combine(dir, "project-spec.pdf");
             var wiring = Rendering.WiringImage.Render(Project);
-            System.IO.File.WriteAllBytes(path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
-            Foundry.Core.Diagnostics.AppLog.Info("export", $"project PDF → {path}");
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true });
+            var written = Foundry.Core.Export.Exporters.WriteBytesUnlocked(
+                path, Foundry.Core.Export.PdfExporter.ProjectPdf(Project, wiring));
+            Foundry.Core.Diagnostics.AppLog.Info("export", $"project PDF → {written}");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = written, UseShellExecute = true });
         }
-        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            Foundry.Core.Diagnostics.AppLog.Error("export", $"PDF export failed: {ex.Message}");
+            System.Windows.MessageBox.Show($"Couldn't export the PDF:\n\n{ex.Message}", "Foundry — export",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        }
     }
 
     private CancellationTokenSource? _cts;

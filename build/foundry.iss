@@ -4,7 +4,7 @@
 ; (sidecar\dist\foundry-cad, optional) is bundled if present.
 
 #define AppName "Foundry"
-#define AppVersion "2.7.0"
+#define AppVersion "2.7.1"
 #define AppPublisher "Foundry"
 
 [Setup]
@@ -26,6 +26,21 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 
+[InstallDelete]
+; Inno only ever OVERWRITES what it ships; it never removes what a previous version left behind. That
+; turned {app} into an archaeological pile, and the consequence was not cosmetic:
+;
+;   An older build was published SELF-CONTAINED, so it installed hostfxr.dll, hostpolicy.dll, coreclr.dll
+;   and a partial .NET runtime into {app}. The current build is FRAMEWORK-DEPENDENT. On launch the apphost
+;   finds hostfxr.dll sitting next to Foundry.exe and prefers it over the machine-wide runtime, then
+;   resolves as if self-contained and reports "No frameworks were found." That is Event ID 1023 in the
+;   Windows Application log, and when it does start it silently runs on the stale pinned runtime rather
+;   than the .NET 8 the user has installed and patched.
+;
+; Wiping {app} first is safe: Foundry keeps NOTHING user-generated here. Projects, revisions, settings and
+; logs live in %AppData%\Foundry, and downloaded toolchains in %LocalAppData%\Foundry\tools.
+Type: filesandordirs; Name: "{app}\*"
+
 [Files]
 ; WPF app (from: dotnet publish Foundry.App -c Release -r win-x64 -o build\publish)
 ; ignoreversion is REQUIRED: our DLLs are all assembly-version 1.0.0.0, so without it Inno
@@ -33,6 +48,11 @@ RestartApplications=no
 Source: "publish\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; Frozen Python CAD sidecar (optional — only if pyinstaller build\sidecar.spec was run)
 Source: "..\sidecar\dist\foundry-cad\*"; DestDir: "{app}\sidecar"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist ignoreversion
+
+[UninstallDelete]
+; Uninstall likewise leaves anything it did not personally install. Remove the directory outright so a
+; reinstall never inherits a half-populated runtime. User data in %AppData% is deliberately preserved.
+Type: filesandordirs; Name: "{app}"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\Foundry.exe"

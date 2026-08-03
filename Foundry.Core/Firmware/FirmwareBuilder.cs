@@ -78,6 +78,14 @@ public static class FirmwareBuilder
             hay.Contains("esp32") ? "esp32:esp32:esp32" :
             (hay.Contains("esp8266") || hay.Contains("nodemcu") || hay.Contains("wemos")) ? "esp8266:esp8266:nodemcuv2" :
             (hay.Contains("rp2040") || hay.Contains("pico")) ? "rp2040:rp2040:rpipico" :
+            // STM32 is supported everywhere else in Foundry — ChipCatalog resolves the F103 pinout, the
+            // simulator has an STM32 target, RenodeReplGenerator has its port mapping — but it was never in
+            // this inference list. So an STM32 design fell through to the model's own board hint, which came
+            // back as "STM32:stm32". That vendor id does not exist (STM32duino publishes as
+            // "STMicroelectronics"), so `core install STM32:stm32` failed every single time: 57 occurrences
+            // in the log, all of them "Platform 'STM32:stm32' not found".
+            (hay.Contains("stm32") || hay.Contains("blue pill") || hay.Contains("bluepill"))
+                ? "STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8" :
             hay.Contains("mega") ? "arduino:avr:mega" :
             hay.Contains("nano") ? "arduino:avr:nano" :
             (hay.Contains("leonardo") || hay.Contains("32u4")) ? "arduino:avr:leonardo" :
@@ -100,6 +108,13 @@ public static class FirmwareBuilder
 
         var cli = Locate();
         if (cli is null) return BuildResult.NotInstalled();
+
+        // Nothing to compile is a state, not a failure — a build can be kicked off before the firmware pass
+        // has produced anything. Saying so beats the ArgumentOutOfRangeException this used to raise inside
+        // PickMainFile, which the catch-all below reported as "Couldn't run the compiler: Index was out of
+        // range." — the most frequent error in the app log.
+        if (project.Firmware.Files.Count == 0)
+            return BuildResult.Skipped("No firmware to compile yet — generate the firmware first.");
 
         var sketchRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_build_" + Guid.NewGuid().ToString("N")[..8]);
         var sketchDir = System.IO.Path.Combine(sketchRoot, "foundrybuild");
@@ -163,6 +178,11 @@ public static class FirmwareBuilder
         if (cli is null)
             return new CompiledImage(false, fqbn, null, null, null, outputDir,
                 new[] { new BuildDiagnostic("error", "", 0, "arduino-cli isn't installed.") });
+
+        // See CompileAsync: an image build against an empty firmware set is a state, not an index bug.
+        if (project.Firmware.Files.Count == 0)
+            return new CompiledImage(false, fqbn, null, null, null, outputDir,
+                new[] { new BuildDiagnostic("error", "", 0, "No firmware to compile yet — generate the firmware first.") });
 
         System.IO.Directory.CreateDirectory(outputDir);
         var sketchRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_image_" + Guid.NewGuid().ToString("N")[..8]);
@@ -438,6 +458,9 @@ public static class FirmwareBuilder
         ["esp32"]   = "https://espressif.github.io/arduino-esp32/package_esp32_index.json",
         ["esp8266"] = "https://arduino.esp8266.com/stable/package_esp8266com_index.json",
         ["rp2040"]  = "https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json",
+        // STM32duino. Without this, even the CORRECT vendor id cannot install: the platform is not in
+        // arduino-cli's built-in index either.
+        ["STMicroelectronics"] = "https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json",
     };
 
     /// <summary>The <c>--additional-urls</c> argument for an FQBN's vendor, or "" for the built-in index.</summary>
@@ -470,7 +493,13 @@ public static class FirmwareBuilder
             {
                 var detail = Detail(install.stdout, install.stderr);
                 Diagnostics.AppLog.Error("build", $"board core {platform} install failed · {detail}");
-                return $"Couldn't install the {platform} board core — {detail}";
+                // A vendor with no registered package index can NEVER install — arduino-cli only knows its
+                // built-in index plus the URLs above. Say that, instead of passing through a bare
+                // "Platform 'X:y' not found" that reads like a transient network problem.
+                return extra.Length == 0 && !platform.StartsWith("arduino:", StringComparison.OrdinalIgnoreCase)
+                    ? $"Foundry doesn't have a board-manager index for '{parts[0]}', so the {platform} core can't be installed. " +
+                      "Pick a supported board (ESP32, ESP8266, RP2040, STM32, or Arduino AVR)."
+                    : $"Couldn't install the {platform} board core — {detail}";
             }
             Diagnostics.AppLog.Info("build", $"board core {platform} installed");
             return null;

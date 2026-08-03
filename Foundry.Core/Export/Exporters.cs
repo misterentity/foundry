@@ -7,6 +7,51 @@ namespace Foundry.Core.Export;
 public static class Exporters
 {
     /// <summary>
+    /// Write bytes to <paramref name="path"/>, falling back to a numbered sibling when the file is locked.
+    ///
+    /// <para>
+    /// Every export writes a FIXED name ("project-spec.pdf"). On Windows a PDF open in a viewer holds a
+    /// share-lock, so re-exporting threw <c>IOException: The process cannot access the file ... because it
+    /// is being used by another process</c> — and the caller only wrote it to the log, so the button
+    /// appeared to do nothing at all.
+    /// </para>
+    ///
+    /// <para>
+    /// Returns the path actually written, which may differ from the one asked for. Only a sharing violation
+    /// is retried: a permission or disk-space failure is not fixed by picking another name in the same
+    /// folder, so those still throw for the caller to report.
+    /// </para>
+    /// </summary>
+    public static string WriteBytesUnlocked(string path, byte[] bytes, int maxAttempts = 20)
+    {
+        try
+        {
+            File.WriteAllBytes(path, bytes);
+            return path;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            var dir = Path.GetDirectoryName(path) ?? "";
+            var stem = Path.GetFileNameWithoutExtension(path);
+            var ext = Path.GetExtension(path);
+
+            for (var n = 2; n <= maxAttempts; n++)
+            {
+                var alt = Path.Combine(dir, $"{stem}-{n}{ext}");
+                try
+                {
+                    File.WriteAllBytes(alt, bytes);
+                    Diagnostics.AppLog.Info("export",
+                        $"{Path.GetFileName(path)} was locked (open elsewhere) — wrote {Path.GetFileName(alt)} instead.");
+                    return alt;
+                }
+                catch (IOException) when (File.Exists(alt)) { /* that one is locked too — try the next */ }
+            }
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Full BOM as CSV. This is the file someone actually orders from, so an estimate must not leave here
     /// looking like a distributor lookup: <c>Source</c> says LIVE or EST per line, and Stock/Lead are left
     /// EMPTY on an estimate rather than exporting a number the model invented.

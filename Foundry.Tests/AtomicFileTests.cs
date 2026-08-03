@@ -176,3 +176,70 @@ public class ProjectStoreDurabilityTests : IDisposable
         Assert.Throws<FileNotFoundException>(() => ProjectStore.Load(path));
     }
 }
+
+// "PDF export failed: The process cannot access the file 'project-spec.pdf' because it is being used by
+// another process." Every export writes a FIXED name, so re-exporting while the PDF is open in a viewer
+// threw -- and both call sites only wrote it to the log, so the button silently did nothing.
+public class LockedFileExportTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "foundry-lock-" + Guid.NewGuid().ToString("N")[..8]);
+
+    public LockedFileExportTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { } }
+
+    private string P => Path.Combine(_dir, "project-spec.pdf");
+    private static readonly byte[] Payload = { 1, 2, 3, 4 };
+
+    [Fact]
+    public void AnUnlockedTargetIsWrittenInPlace()
+    {
+        Assert.Equal(P, Foundry.Core.Export.Exporters.WriteBytesUnlocked(P, Payload));
+        Assert.Equal(Payload, File.ReadAllBytes(P));
+    }
+
+    // The real Windows failure: a viewer holds the file open with no write sharing.
+    [Fact]
+    public void ALockedTargetFallsBackToANumberedSibling()
+    {
+        File.WriteAllBytes(P, new byte[] { 9 });
+        using var hold = new FileStream(P, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var written = Foundry.Core.Export.Exporters.WriteBytesUnlocked(P, Payload);
+
+        Assert.NotEqual(P, written);
+        Assert.Equal(Path.Combine(_dir, "project-spec-2.pdf"), written);
+        Assert.Equal(Payload, File.ReadAllBytes(written));
+        Assert.Equal(new byte[] { 9 }, File.ReadAllBytes(P));   // the locked original is untouched
+    }
+
+    [Fact]
+    public void SuccessiveLocksKeepClimbing()
+    {
+        File.WriteAllBytes(P, new byte[] { 9 });
+        var alt2 = Path.Combine(_dir, "project-spec-2.pdf");
+        File.WriteAllBytes(alt2, new byte[] { 9 });
+
+        using var h1 = new FileStream(P, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var h2 = new FileStream(alt2, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        Assert.Equal(Path.Combine(_dir, "project-spec-3.pdf"),
+            Foundry.Core.Export.Exporters.WriteBytesUnlocked(P, Payload));
+    }
+
+    // A permission/disk failure is NOT fixed by another name in the same folder, so it must still surface.
+    [Fact]
+    public void ADirectoryInTheWay_ThrowsRatherThanSilentlyRenaming()
+    {
+        Directory.CreateDirectory(P);   // target path is a directory: UnauthorizedAccessException
+        Assert.ThrowsAny<Exception>(() => Foundry.Core.Export.Exporters.WriteBytesUnlocked(P, Payload));
+    }
+
+    [Fact]
+    public void ItGivesUpRatherThanLoopingForever()
+    {
+        File.WriteAllBytes(P, new byte[] { 9 });
+        using var hold = new FileStream(P, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Assert.ThrowsAny<IOException>(() =>
+            Foundry.Core.Export.Exporters.WriteBytesUnlocked(P, Payload, maxAttempts: 1));
+    }
+}

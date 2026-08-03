@@ -44,8 +44,12 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
         _fixer = fixer;
         // Firmware (incl. the netlist-derived pinmap.h) is generated in the Project; open the main sketch.
         var files = project.Firmware.Files;
+        // PickMainFile returns null for an empty set; the placeholder keeps the tab bindable rather than
+        // leaving a non-nullable field null (it used to guard the count separately, which the compiler
+        // could not tie to the call's nullability).
         _activeFile = files.FirstOrDefault(f => f.Active)
-            ?? (files.Count > 0 ? Foundry.Core.Generation.ProjectGenerator.PickMainFile(files) : new FirmwareFile());
+            ?? Foundry.Core.Generation.ProjectGenerator.PickMainFile(files)
+            ?? new FirmwareFile();
     }
 
     public Firmware F => Project.Firmware;
@@ -99,7 +103,8 @@ public sealed partial class FirmwareViewModel : TabViewModelBase
             if (!ok) { BuildSeverity = "fail"; BuildStatus = "Couldn't generate a firmware fix. Try again or edit manually."; return; }
             // refresh the file list + active sketch, then re-verify (same guard)
             OnPropertyChanged(nameof(F));
-            ActiveFile = Foundry.Core.Generation.ProjectGenerator.PickMainFile(Project.Firmware.Files);
+            // Keep the current sketch open if the fix produced nothing to switch to.
+            ActiveFile = Foundry.Core.Generation.ProjectGenerator.PickMainFile(Project.Firmware.Files) ?? ActiveFile;
             BuildStatus = "Firmware updated — re-compiling…";
             await CompileCore();
         }
