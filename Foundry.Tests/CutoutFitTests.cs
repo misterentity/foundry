@@ -194,6 +194,102 @@ public class CutoutFitTests
     }
 }
 
+// The CSG build clamps any cutout that would breach its face edge and carries on, so the case prints
+// perfectly with the hole somewhere other than where the design says. That was reported only as a count in
+// one status line on the enclosure tab — never on the report card, in the PDF, or in the export.
+public class CutoutBoundsTests
+{
+    // inner 80 x 60 x 25, wall 2  ->  outer 84 x 64 x 27
+    private static Enclosure Case(params Cutout[] c) =>
+        new() { Inner = new[] { 80.0, 60.0, 25.0 }, Wall = 2.0, Cutouts = c.ToList() };
+
+    private static Cutout Port(string face, double u, double v, double w = 10, double h = 6) =>
+        new() { Face = face, Shape = "rect", Size = new[] { w, h }, Pos = new[] { u, v }, Label = "USB-C" };
+
+    [Fact]
+    public void APortWellInsideItsFace_IsSilent() =>
+        Assert.Empty(CutoutFit.CheckBounds(Case(Port("front", 0, 0))));
+
+    // front face: u runs along ox=84, so the limit is 84/2 - 10/2 - 2 = 35.
+    [Theory]
+    [InlineData(34.9)]
+    [InlineData(35.0)]
+    [InlineData(-35.0)]
+    public void APortExactlyAtTheLimit_StillFits(double u) =>
+        Assert.Empty(CutoutFit.CheckBounds(Case(Port("front", u, 0))));
+
+    [Theory]
+    [InlineData(36.0)]
+    [InlineData(-36.0)]
+    [InlineData(60.0)]
+    public void APortPastTheLimit_Warns(double u)
+    {
+        var f = Assert.Single(CutoutFit.CheckBounds(Case(Port("front", u, 0))));
+        Assert.Equal("CUT-FIT", f.Code);
+        Assert.Equal("warn", f.Severity);
+        Assert.Contains("USB-C", f.Title);
+    }
+
+    [Fact]
+    public void TheWarningSaysHowFarPastTheEdgeItIs()
+    {
+        var f = Assert.Single(CutoutFit.CheckBounds(Case(Port("front", 38.0, 0))));
+        Assert.Contains("3 mm across", f.Description);   // 38 - 35
+    }
+
+    // Each face measures against different case axes; using the wrong pair silently mis-reports.
+    [Fact]
+    public void EachFaceIsMeasuredAgainstItsOwnAxes()
+    {
+        // left/right run along oy=64 -> limit 64/2 - 10/2 - 2 = 25. A u of 30 fits on FRONT but not LEFT.
+        Assert.Empty(CutoutFit.CheckBounds(Case(Port("front", 30, 0))));
+        Assert.Single(CutoutFit.CheckBounds(Case(Port("left", 30, 0))));
+
+        // top runs u along ox=84 and v along oy=64 (not oz).
+        Assert.Empty(CutoutFit.CheckBounds(Case(Port("top", 0, 26))));   // limit 64/2 - 6/2 - 2 = 27
+        Assert.Single(CutoutFit.CheckBounds(Case(Port("top", 0, 28))));
+    }
+
+    // Vertical on a side face is bounded by oz = inner H + wall = 27 (the base is open on top),
+    // NOT H + 2*wall. Limit is 27/2 - 6/2 - 2 = 8.5.
+    [Fact]
+    public void SideFaceVerticalUsesTheOpenTopOuterHeight()
+    {
+        Assert.Empty(CutoutFit.CheckBounds(Case(Port("front", 0, 8.5))));
+        var f = Assert.Single(CutoutFit.CheckBounds(Case(Port("front", 0, 10.5))));
+        Assert.Contains("2 mm up", f.Description);
+    }
+
+    // A circle's bound comes from D, not from Size — reading the wrong field lets a big hole run off the face.
+    [Fact]
+    public void ACircleIsBoundedByItsDiameter()
+    {
+        // front-face limit for D=20 is 42 - 10 - 2 = 30; for D=6 it is 42 - 3 - 2 = 37.
+        Cutout Circle(double d, double u) =>
+            new() { Face = "front", Shape = "circle", D = d, Pos = new[] { u, 0.0 }, Label = "Fan" };
+
+        Assert.Empty(CutoutFit.CheckBounds(Case(Circle(20, 30))));    // exactly at the limit
+        Assert.Single(CutoutFit.CheckBounds(Case(Circle(20, 31))));   // past it
+        Assert.Empty(CutoutFit.CheckBounds(Case(Circle(6, 31))));     // same spot, smaller hole, fine
+    }
+
+    [Fact]
+    public void BothAxesOverrunning_AreReportedTogether()
+    {
+        var f = Assert.Single(CutoutFit.CheckBounds(Case(Port("front", 40, 12))));
+        Assert.Contains("across and", f.Description);
+    }
+
+    [Fact]
+    public void NoEnclosure_IsSilent() =>
+        Assert.Empty(CutoutFit.CheckBounds(new Enclosure { Inner = Array.Empty<double>() }));
+
+    // The whole point: this must not stay a status line. It has to move the rollup.
+    [Fact]
+    public void AClampedPort_KeepsTheProjectOffAPass() =>
+        Assert.Equal("warn", ProjectValidator.Rollup(CutoutFit.CheckBounds(Case(Port("front", 40, 0)))));
+}
+
 // The Enclosure header asserted "derived from footprints" for every port — true for none of them
 // before this class existed and true for only some of them now. It states the ratio instead.
 // Lives here, not in a view-model test: EnclosureViewModel's constructor starts the CAD sidecar.

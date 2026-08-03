@@ -195,6 +195,10 @@ public static class EnclosureFit
         var board = PlaceBoard(project, realSizes, modelDir);
         if (board is not null) findings.AddRange(CutoutFit.Derive(project.Enclosure, board).Findings);
 
+        // Independent of the board: a port can be off the face regardless of what it lines up with, and
+        // the CSG build would quietly move it. Needs no placement, so it runs either way.
+        findings.AddRange(CutoutFit.CheckBounds(project.Enclosure));
+
         return findings;
     }
 

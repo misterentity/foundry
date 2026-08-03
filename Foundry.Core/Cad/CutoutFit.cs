@@ -32,6 +32,96 @@ public static class CutoutFit
     /// <summary>Clearance added around the part's cross-section so the port isn't a press fit.</summary>
     public const double PortClearanceMm = 0.6;
 
+    /// <summary>
+    /// Keep-out from the face edge the CSG build enforces. Mirrors <c>margin</c> in
+    /// <c>sidecar/enclosure.py::_csg_build</c> — if that changes, this must too.
+    /// </summary>
+    public const double FaceMarginMm = 2.0;
+
+    /// <summary>
+    /// Cutouts the enclosure's own faces cannot hold at the position asked for.
+    ///
+    /// <para>
+    /// The CSG build clamps any feature that would breach the face edge and carries on, so the case prints
+    /// perfectly with the hole somewhere other than where the design says it is. That clamp was reported
+    /// only as a count in one status line on the enclosure tab (<c>N port(s) moved to fit the face</c>) —
+    /// it never reached the report card, the PDF, or the export. A port moved 8 mm is a connector that
+    /// does not reach its socket, and nothing said so.
+    /// </para>
+    ///
+    /// <para>
+    /// Computing it here rather than reading the render's header means it is known before anything is
+    /// built, offline, with no sidecar — and it names which port moved, and by how far.
+    /// </para>
+    /// </summary>
+    public static List<Finding> CheckBounds(Enclosure enclosure)
+    {
+        var findings = new List<Finding>();
+        var inner = enclosure.Inner;
+        if (inner is not { Length: 3 }) return findings;
+
+        var t = enclosure.Wall;
+        // Outer base: closed floor, open top — the same derivation _csg_build uses.
+        double ox = inner[0] + 2 * t, oy = inner[1] + 2 * t, oz = inner[2] + t;
+
+        foreach (var c in enclosure.Cutouts ?? new List<Cutout>())
+        {
+            var (w, h) = FeatureSize(c);
+            var face = c.Face.ToLowerInvariant();
+            // Which case axes the face's (u, v) run along.
+            var (uHalf, vHalf) = face switch
+            {
+                "top" or "bottom" => (ox / 2, oy / 2),
+                "left" or "right" => (oy / 2, oz / 2),
+                _ => (ox / 2, oz / 2),           // front / back / side
+            };
+
+            var pu = c.Pos.Length > 0 ? c.Pos[0] : 0.0;
+            var pv = c.Pos.Length > 1 ? c.Pos[1] : 0.0;
+
+            var du = Overrun(pu, uHalf, w);
+            var dv = Overrun(pv, vHalf, h);
+            if (du <= 0 && dv <= 0) continue;
+
+            var label = string.IsNullOrWhiteSpace(c.Label) ? c.Ref ?? "cutout" : c.Label;
+            var axes = du > 0 && dv > 0 ? $"{du:0.#} mm across and {dv:0.#} mm up"
+                     : du > 0 ? $"{du:0.#} mm across"
+                     : $"{dv:0.#} mm up";
+
+            findings.Add(new Finding
+            {
+                Severity = "warn", Code = "CUT-FIT",
+                Title = $"“{label}” does not fit on the {face} face where it is placed",
+                Description =
+                    $"The opening runs past the usable edge of the {face} face by {axes}, so the build will " +
+                    $"pull it back inside and cut the hole somewhere other than where the design puts it. " +
+                    $"A moved port is a connector that no longer lines up.",
+                Refs = string.IsNullOrWhiteSpace(c.Ref) ? new() : new() { c.Ref! },
+                Fix = "Move the port away from the face edge, or make the case larger on that face.",
+            });
+        }
+        return findings;
+    }
+
+    /// <summary>How far past the clamp limit a feature sits, in mm; 0 when it fits.</summary>
+    private static double Overrun(double val, double half, double feature)
+    {
+        var limit = Math.Max(0.0, half - feature / 2 - FaceMarginMm);
+        return Math.Max(0.0, Math.Abs(val) - limit);
+    }
+
+    /// <summary>The feature's (width, height) on its face — same defaults the CSG build applies.</summary>
+    private static (double W, double H) FeatureSize(Cutout c)
+    {
+        if (string.Equals(c.Shape, "circle", StringComparison.OrdinalIgnoreCase))
+        {
+            var d = c.D is > 0 ? c.D.Value : 8.0;
+            return (d, d);
+        }
+        var size = c.Size;
+        return size is { Length: >= 2 } ? (size[0], size[1]) : (10.0, 6.0);
+    }
+
     /// <summary>The outcome for one cutout.</summary>
     public sealed record Result(Cutout Cutout, bool Derived, string? Reason);
 

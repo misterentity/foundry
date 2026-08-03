@@ -278,3 +278,75 @@ def test_a_bad_cutout_does_not_break_the_build():
         {"face": "nonsense", "shape": "??", "size": ["x", None]},
         {"face": "top", "shape": "circle", "d": 6.0, "pos": [0, 0], "label": "Reset"}]))
     assert mesh.volume > 0
+
+
+# ---- the clamp, and the C# mirror of it -------------------------------------------------------------
+#
+# _cutout_solid pulls any feature that would breach its face edge back inside and carries on, so the case
+# prints perfectly with the hole somewhere other than where the design says. Foundry.Core/Cad/CutoutFit.cs
+# CheckBounds predicts that clamp in C# so the report card can warn BEFORE anything is built. These pin
+# the numbers on this side; CutoutBoundsTests pins the identical numbers on the other. If the two ever
+# disagree, the desktop app promises a port position the printed part does not have.
+#
+# Geometry below matches CutoutBoundsTests exactly: inner 80 x 60 x 25, wall 2 -> outer 84 x 64 x 27,
+# margin 2.
+
+BOUNDS_INNER = [80.0, 60.0, 25.0]
+
+
+def _moved(cutouts):
+    _data, stats = enclosure.build_stl(
+        {"inner": BOUNDS_INNER, "wall_mm": WALL, "standoffs": 4, "lid": "screw",
+         "cutouts": cutouts, "vents": []})
+    return stats["movedCutouts"]
+
+
+def _port(face, u, v, w=10.0, h=6.0):
+    return {"face": face, "shape": "rect", "size": [w, h], "pos": [u, v], "label": "USB-C"}
+
+
+@pytest.mark.parametrize("u", [0.0, 34.9, 35.0, -35.0])
+def test_a_front_port_within_the_face_is_not_moved(u):
+    # limit = ox/2 - w/2 - margin = 42 - 5 - 2 = 35
+    assert _moved([_port("front", u, 0.0)]) == []
+
+
+@pytest.mark.parametrize("u,expected", [(36.0, 35.0), (-36.0, -35.0), (60.0, 35.0)])
+def test_a_front_port_past_the_face_is_moved_back_to_the_limit(u, expected):
+    moved = _moved([_port("front", u, 0.0)])
+    assert len(moved) == 1
+    assert moved[0]["requested"] == pytest.approx(u)
+    assert moved[0]["applied"] == pytest.approx(expected)
+
+
+def test_each_face_is_bounded_by_its_own_axes():
+    # front runs u along ox=84 (limit 35); left runs u along oy=64 (limit 32 - 5 - 2 = 25)
+    assert _moved([_port("front", 30.0, 0.0)]) == []
+    assert len(_moved([_port("left", 30.0, 0.0)])) == 1
+
+    # top runs v along oy=64, NOT oz. limit = 32 - 3 - 2 = 27
+    assert _moved([_port("top", 0.0, 26.0)]) == []
+    assert len(_moved([_port("top", 0.0, 28.0)])) == 1
+
+
+def test_a_side_face_vertical_is_bounded_by_the_open_top_outer_height():
+    # oz = H + wall = 27 (the base is open above), so limit = 13.5 - 3 - 2 = 8.5
+    assert _moved([_port("front", 0.0, 8.5)]) == []
+    moved = _moved([_port("front", 0.0, 10.5)])
+    assert len(moved) == 1
+    assert moved[0]["applied"] == pytest.approx(8.5)
+
+
+def test_a_circle_is_bounded_by_its_diameter():
+    def circle(d, u):
+        return {"face": "front", "shape": "circle", "d": d, "pos": [u, 0.0], "label": "Fan"}
+
+    assert _moved([circle(20.0, 30.0)]) == []      # limit 42 - 10 - 2 = 30, exactly at it
+    assert len(_moved([circle(20.0, 31.0)])) == 1
+    assert _moved([circle(6.0, 31.0)]) == []       # same spot, smaller hole
+
+
+def test_both_axes_can_be_reported_moved():
+    # 40 past the u limit of 35 AND 12 past the v limit of 8.5 -> clamp records both
+    moved = _moved([_port("front", 40.0, 12.0)])
+    assert len(moved) == 2
