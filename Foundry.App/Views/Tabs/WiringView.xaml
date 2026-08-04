@@ -147,11 +147,21 @@
 
       <!-- WIRING STAGE -->
       <Border Background="{StaticResource Brush.Surface0}" BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1" Padding="24" Margin="0,0,0,28">
+        <!-- Both diagrams have a FIXED intrinsic width — WiringDiagramControl.MeasureOverride discards
+             availableSize and lays out three columns, so it is ~950px for any project; BreadboardControl is
+             similar. With DownOnly the Viewbox never scaled UP, so once the page stopped being capped at
+             1280 the diagram sat marooned in the middle of the stage with ~500px of dead surface each side
+             at 2560 — on the tab whose entire purpose is the diagram.
+             Both controls render through OnRender(DrawingContext), i.e. pure vector, so scaling up is
+             resolution-independent and costs no sharpness. MaxWidth stops it becoming absurd on an
+             ultrawide, where a 3000px schematic would be worse than a centred one. -->
         <Grid>
-          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+          <Viewbox Stretch="Uniform" StretchDirection="Both" MaxWidth="1700" MaxHeight="1000"
+                   Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
             <r:WiringDiagramControl Project="{Binding Project}"/>
           </Viewbox>
-          <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}}">
+          <Viewbox Stretch="Uniform" StretchDirection="Both" MaxWidth="1700" MaxHeight="1000"
+                   Visibility="{Binding Breadboard, Converter={StaticResource BoolVis}}">
             <r:BreadboardControl Project="{Binding Project}" LivePinState="{Binding Sim.LivePinState}"/>
           </Viewbox>
         </Grid>

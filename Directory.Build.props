@@ -12,7 +12,7 @@
     informational version, so the two cannot disagree again. Bump this one line to release.
   -->
   <PropertyGroup>
-    <Version>2.8.1</Version>
+    <Version>2.8.2</Version>
   </PropertyGroup>
 
 </Project>

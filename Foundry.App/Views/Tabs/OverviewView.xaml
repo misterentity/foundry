@@ -140,9 +140,24 @@
                       </ItemsControl.ItemsPanel>
                       <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                          <Grid Margin="0,3">
+                          <!-- The label sits left and the value right, so the row's width IS the gap between
+                               them. The cards stretch with the window, so on a wide screen "Logic" and
+                               "3.3 V" drifted hundreds of px apart and stopped reading as a pair. Capping
+                               the ROW keeps them associated while the card itself still fills its cell.
+                               Left is required: MaxWidth with the default Stretch would centre the row. -->
+                          <!-- Two COLUMNS, not two overlaid TextBlocks. They previously shared one cell and
+                               merely happened not to touch because the cell was wide; the cards stretch with
+                               the window, so the label and its value drifted hundreds of px apart and stopped
+                               reading as a pair — and simply capping the width made them collide instead
+                               ("3.3 V" over "Logic"). A star label column plus an Auto value column cannot
+                               overlap at any width, and the cap keeps the pair together.
+                               Left is required: MaxWidth with the default Stretch would centre the row. -->
+                          <Grid Margin="0,3" MaxWidth="340" HorizontalAlignment="Left">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
                             <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkFaint}" Text="{Binding Key}"/>
-                            <TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkSoft}" HorizontalAlignment="Right" Text="{Binding Value}"/>
+                            <TextBlock Grid.Column="1" Margin="12,0,0,0" Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkSoft}" Text="{Binding Value}"/>
                           </Grid>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
