@@ -33,7 +33,11 @@
             </StackPanel>
           </Button>
           <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding SaveAsTemplateCommand}" Content="TEMPLATE" ToolTip="Save this design as a reusable template"/>
-          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportBundleCommand}" Content="BUNDLE" ToolTip="Export a shareable .foundryproj (project + firmware + BOM + netlist + guide)"/>
+          <!-- Was "BUNDLE" → a .foundryproj that only another Foundry install could open, and which held no
+               PDF, mesh or diagrams. It now packages the whole project as a plain .zip anyone can read. -->
+          <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportBundleCommand}"
+                  Content="{Binding PackageButtonLabel}"
+                  ToolTip="Package everything for sharing: spec PDF, firmware, printable enclosure, BOM, netlist, reports"/>
           <Button Style="{StaticResource BtnPrimary}" Command="{Binding ExportPdfCommand}">
             <StackPanel Orientation="Horizontal">
               <c:IconControl Glyph="download" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="EXPORT PDF"/>

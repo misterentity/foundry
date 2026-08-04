@@ -126,21 +126,103 @@ public sealed partial class OverviewViewModel : TabViewModelBase
         }
     }
 
-    /// <summary>Export a shareable .foundryproj bundle (project + deliverables) to the export folder.</summary>
+    /// <summary>True while the package is being assembled — the mesh build is a round-trip to the sidecar.</summary>
+    [ObservableProperty] private bool _packaging;
+
+    /// <summary>Button text; packaging takes seconds because it renders the PDF and builds the mesh.</summary>
+    public string PackageButtonLabel => Packaging ? "PACKAGING…" : "PACKAGE";
+    partial void OnPackagingChanged(bool value) => OnPropertyChanged(nameof(PackageButtonLabel));
+
+    /// <summary>
+    /// Export the complete project as one shareable zip: spec PDF, firmware, printable enclosure mesh,
+    /// fabrication data and every report, under a named folder with a README explaining each file.
+    ///
+    /// <para>
+    /// Core composes the archive but cannot produce the wiring images (WPF visuals) or the mesh (an HTTP
+    /// round-trip to the CAD sidecar), so they are gathered here and handed in. Anything unavailable is
+    /// listed in the package README rather than dropped silently.
+    /// </para>
+    /// </summary>
     [RelayCommand]
-    private void ExportBundle()
+    private async Task ExportBundle()
     {
+        if (Packaging) return;
+        Packaging = true;
         try
         {
             var dir = ConfigStore.Load().OutputFolder;
             Directory.CreateDirectory(dir);
-            var safe = string.Concat((Project.Title ?? "project").Select(ch => Path.GetInvalidFileNameChars().Contains(ch) ? '-' : ch));
-            var path = Path.Combine(dir, (string.IsNullOrWhiteSpace(safe) ? "project" : safe) + ProjectBundle.Extension);
-            ProjectBundle.Export(Project, path);
-            Foundry.Core.Diagnostics.AppLog.Info("export", $"bundle → {path}");
+            var path = Path.Combine(dir, ProjectPackage.Slug(Project.Title) + ProjectPackage.Extension);
+
+            // WPF visuals must be rendered on the UI thread; we are already on it.
+            var wiring = TryRender(() => Rendering.WiringImage.Render(Project), "wiring diagram");
+            var breadboard = TryRender(() => Rendering.WiringImage.RenderBreadboard(Project), "breadboard view");
+
+            var (mesh, meshExt) = await TryBuildMeshAsync();
+
+            var result = await Task.Run(() => ProjectPackage.Write(Project, path, new PackageAssets
+            {
+                WiringPng = wiring,
+                BreadboardPng = breadboard,
+                EnclosureMesh = mesh,
+                EnclosureMeshExt = meshExt,
+            }));
+
             Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+
+            var omitted = result.Omitted.Count == 0
+                ? ""
+                : $"\n\nNot included ({result.Omitted.Count}):\n• " + string.Join("\n• ", result.Omitted);
+            System.Windows.MessageBox.Show(
+                $"Packaged {result.Included.Count} files ({result.Bytes / 1024.0 / 1024.0:0.#} MB) to:\n{result.Path}{omitted}",
+                "Foundry — project package", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
         }
-        catch (Exception ex) { Foundry.Core.Diagnostics.AppLog.Error("export", $"Bundle export failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            // This used to log and nothing else, so a failed export looked like a button that did nothing.
+            Foundry.Core.Diagnostics.AppLog.Error("export", $"project package failed: {ex.Message}");
+            System.Windows.MessageBox.Show($"Couldn't build the package:\n\n{ex.Message}", "Foundry — export",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+        }
+        finally { Packaging = false; }
+    }
+
+    private static byte[]? TryRender(Func<byte[]?> render, string what)
+    {
+        try { return render(); }
+        catch (Exception ex)
+        {
+            Foundry.Core.Diagnostics.AppLog.Warn("export", $"{what} could not be rendered: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The print-arranged mesh, or null when the sidecar is unavailable. Always "print", never the preview
+    /// arrangement — the file someone else receives has to be slicable.
+    /// </summary>
+    private async Task<(byte[]? Mesh, string Ext)> TryBuildMeshAsync()
+    {
+        var fmt = (ConfigStore.Load().EnclosureFormat ?? "STL").Equals("3mf", StringComparison.OrdinalIgnoreCase)
+            ? "3mf" : "stl";
+        try
+        {
+            if (Project.Enclosure.Inner is not { Length: >= 3 } inner || inner.Take(3).All(v => v <= 0))
+                return (null, fmt);
+
+            var client = await Foundry.Core.Sidecar.SidecarHost.Shared.StartAsync();
+            if (client is null) return (null, fmt);
+
+            var mesh = await client.BuildEnclosureAsync(Foundry.Core.Sidecar.EnclosureSchema.ToJson(
+                Project.Enclosure, fmt, arrange: "print",
+                board: Foundry.Core.Cad.EnclosureFit.PlaceBoard(Project)));
+            return (mesh.Stl, fmt);
+        }
+        catch (Exception ex)
+        {
+            Foundry.Core.Diagnostics.AppLog.Warn("export", $"enclosure mesh unavailable for the package: {ex.Message}");
+            return (null, fmt);
+        }
     }
 
     /// <summary>Write the DigiKey BOM CSV and open the cart manager.</summary>

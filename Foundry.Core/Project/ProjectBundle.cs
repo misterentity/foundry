@@ -37,12 +37,26 @@ public static class ProjectBundle
             try { Write("firmware/" + SafeName(f.Name), f.Content); } catch { }
     }
 
-    /// <summary>Read the Project back from a bundle (the canonical project.json entry).</summary>
+    /// <summary>
+    /// Read the Project back from a bundle or a shared package.
+    ///
+    /// <para>
+    /// A <c>.foundryproj</c> keeps project.json at the root; a <see cref="Export.ProjectPackage"/> zip nests
+    /// it at <c>&lt;name&gt;/foundry/project.json</c> so the human-facing files sit at the top. Searching for
+    /// the entry rather than demanding an exact path means one Import handles both, and a recipient can
+    /// re-open the same file they were sent.
+    /// </para>
+    /// </summary>
     public static Project Import(string zipPath)
     {
         using var zip = ZipFile.OpenRead(zipPath);
+
         var entry = zip.GetEntry(ProjectEntry)
-            ?? throw new InvalidDataException("Not a Foundry bundle — project.json is missing.");
+            ?? zip.Entries.FirstOrDefault(e =>
+                   e.Name.Equals(ProjectEntry, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidDataException(
+                   "Not a Foundry bundle or package — no project.json inside.");
+
         using var r = new StreamReader(entry.Open());
         return ProjectStore.Deserialize(r.ReadToEnd());
     }
