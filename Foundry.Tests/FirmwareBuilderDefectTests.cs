@@ -1,3 +1,4 @@
+using System.Reflection;
 using Foundry.Core.Firmware;
 using Foundry.Core.Generation;
 using Foundry.Core.Project;
@@ -124,4 +125,33 @@ public class FirmwareBuilderDefectTests
         Assert.Equal("arduino:avr:uno", FirmwareBuilder.Fqbn(WithPrompt("a plain arduino uno blinker")));
         Assert.Equal("rp2040:rp2040:rpipico", FirmwareBuilder.Fqbn(WithPrompt("raspberry pi pico project")));
     }
+}
+
+// AppInfo.Version was a hardcoded const ("2.6.0") while Foundry.App.csproj stamped the exe 2.7.1. The
+// class comment called itself "single source of truth for the updater and UI" while being the drifted
+// copy. App.xaml.cs feeds this value to the update check, so a frozen constant makes the updater compare
+// the wrong version against the latest release and offer an update the user already has -- every launch.
+public class AppVersionTests
+{
+    [Fact]
+    public void TheReportedVersionMatchesTheAssemblyItWasBuiltFrom()
+    {
+        var asm = typeof(Foundry.Core.AppInfo).Assembly;
+        var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+        var expected = info.Contains('+') ? info[..info.IndexOf('+')] : info;
+
+        Assert.Equal(expected, Foundry.Core.AppInfo.Version);
+    }
+
+    [Fact]
+    public void ItIsAPlainThreePartVersion_WithNoBuildMetadata()
+    {
+        Assert.Matches(@"^\d+\.\d+\.\d+$", Foundry.Core.AppInfo.Version);
+        Assert.DoesNotContain("+", Foundry.Core.AppInfo.Version);
+    }
+
+    // The specific regression: a version that no longer tracks the build.
+    [Fact]
+    public void ItIsNotTheStaleHardcodedConstant() =>
+        Assert.NotEqual("2.6.0", Foundry.Core.AppInfo.Version);
 }

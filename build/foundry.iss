@@ -4,7 +4,7 @@
 ; (sidecar\dist\foundry-cad, optional) is bundled if present.
 
 #define AppName "Foundry"
-#define AppVersion "2.7.1"
+#define AppVersion "2.7.2"
 #define AppPublisher "Foundry"
 
 [Setup]
@@ -25,6 +25,13 @@ ArchitecturesAllowed=x64compatible
 WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
+; Without these the SETUP EXE ships with a blank FileVersion, so the artifact could not be identified from
+; its own metadata (Get-AuthenticodeSignature / file properties showed nothing to check a release against).
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription={#AppName} Setup
 
 [InstallDelete]
 ; Inno only ever OVERWRITES what it ships; it never removes what a previous version left behind. That

@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    THE single source of the application version.
+
+    It used to live in two places: <Version> in Foundry.App.csproj (which stamps the exe) and a hardcoded
+    AppInfo.Version const in Foundry.Core (which the UI and, critically, the UPDATER read). They drifted —
+    a 2.7.1 binary reported itself as 2.6.0, so App.xaml.cs handed "2.6.0" to the update check and would
+    offer an upgrade the user already had, permanently.
+
+    Declaring it here applies it to every project in the solution, and AppInfo now reads its own assembly's
+    informational version, so the two cannot disagree again. Bump this one line to release.
+  -->
+  <PropertyGroup>
+    <Version>2.7.2</Version>
+  </PropertyGroup>
+
+</Project>
