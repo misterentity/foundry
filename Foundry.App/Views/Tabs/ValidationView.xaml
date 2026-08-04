@@ -21,6 +21,13 @@
             <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding ExportReportCommand}">
               <StackPanel Orientation="Horizontal"><c:IconControl Glyph="download" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="EXPORT REPORT"/></StackPanel>
             </Button>
+            <!-- Resolve every deterministically-fixable finding at once. Hidden when there are none, so the
+                 row never offers an action that would do nothing. -->
+            <Button Style="{StaticResource BtnGhost}" Margin="0,0,8,0" Command="{Binding FixAllCommand}"
+                    Visibility="{Binding HasFixable, Converter={StaticResource BoolVis}}"
+                    ToolTip="Remap strapping/conflicting pins and connect missing rails, then re-validate">
+              <StackPanel Orientation="Horizontal"><c:IconControl Glyph="shield" IconSize="12" Margin="0,0,8,0"/><TextBlock Text="{Binding FixAllLabel}"/></StackPanel>
+            </Button>
             <Button Style="{StaticResource BtnPrimary}" Command="{Binding ReRunCommand}">
               <StackPanel Orientation="Horizontal"><c:IconControl Glyph="refresh" IconSize="12" Stroke="{StaticResource Brush.OnAccent}" Margin="0,0,8,0"/><TextBlock Text="RE-RUN CHECKS"/></StackPanel>
             </Button>

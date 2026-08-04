@@ -95,6 +95,9 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         OnPropertyChanged(nameof(Grade));
         OnPropertyChanged(nameof(GradeSeverity));
         OnPropertyChanged(nameof(Verdict));
+        OnPropertyChanged(nameof(FixableCount));
+        OnPropertyChanged(nameof(HasFixable));
+        OnPropertyChanged(nameof(FixAllLabel));
         FindingsChanged?.Invoke();
     }
 
@@ -113,6 +116,49 @@ public sealed partial class ValidationViewModel : TabViewModelBase
         }
         catch (Exception ex) { Status = $"Export failed: {ex.Message}"; }
     }
+
+    /// <summary>How many open findings the deterministic engine can resolve without asking the AI.</summary>
+    public int FixableCount => Project.Findings
+        .Count(f => f.Severity is "fail" or "warn" && ProjectValidator.CanAutoFix(f) && f.Refs.Count <= 1);
+
+    public bool HasFixable => FixableCount > 0;
+    public string FixAllLabel => $"FIX {FixableCount} AUTOMATICALLY";
+
+    /// <summary>
+    /// Resolve every deterministically-fixable finding in one action, instead of one click each.
+    ///
+    /// <para>
+    /// The engine loops — a remap frees the pin another finding wanted — re-validates after each pass, and
+    /// reverts wholesale if the result has MORE failures than it started with. Whatever it changed is
+    /// listed, because silently rewriting someone's netlist is not acceptable even when the edit is right.
+    /// </para>
+    /// </summary>
+    [RelayCommand]
+    private void FixAll()
+    {
+        var outcome = ProjectValidator.AutoFixAll(Project);
+        Refresh();
+
+        if (outcome.RolledBack)
+        {
+            Status = "Auto-fix would have made this worse — reverted, nothing changed.";
+            return;
+        }
+        if (outcome.Applied == 0)
+        {
+            Status = "Nothing here can be fixed deterministically — the rest need a person or the AI.";
+            return;
+        }
+
+        var left = outcome.Unfixable.Count;
+        Status = $"Fixed {outcome.Applied} · {outcome.BeforeVerdict} → {outcome.AfterVerdict}" +
+                 (left > 0 ? $" · {left} still need attention" : "") +
+                 $"\n{string.Join("\n", outcome.Changes)}";
+        FixesApplied?.Invoke(outcome);
+    }
+
+    /// <summary>Raised after an auto-fix pass so the shell can regenerate the netlist-derived artifacts.</summary>
+    public event Action<ProjectValidator.AutoFixOutcome>? FixesApplied;
 
     [RelayCommand]
     private void ReRun()

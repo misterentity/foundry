@@ -50,6 +50,114 @@ public static class ProjectValidator
     /// <summary>True if this finding has a deterministic netlist fix this engine can apply.</summary>
     public static bool CanAutoFix(Finding f) => f.AutoFixable;
 
+    /// <summary>
+    /// What an <see cref="AutoFixAll"/> pass did. <see cref="Changes"/> is one human-readable line per edit,
+    /// so the netlist is never rewritten without a record of what moved and why.
+    /// </summary>
+    public sealed record AutoFixOutcome(
+        int Applied, IReadOnlyList<string> Changes,
+        string BeforeVerdict, string AfterVerdict,
+        int BeforeFail, int AfterFail, int BeforeWarn, int AfterWarn,
+        bool RolledBack, IReadOnlyList<Finding> Remaining)
+    {
+        /// <summary>Findings still needing a person — no deterministic fix exists for them.</summary>
+        public IReadOnlyList<Finding> Unfixable =>
+            Remaining.Where(f => f.Severity is "fail" or "warn" && !CanAutoFix(f)).ToList();
+    }
+
+    /// <summary>
+    /// Resolve every finding this engine can fix deterministically, then re-validate — repeating until a
+    /// pass changes nothing.
+    ///
+    /// <para>
+    /// Fixing one at a time is not enough: a remap frees the pin a second finding wanted, and connecting a
+    /// rail can expose a conflict that was previously masked. So it loops. It is bounded by
+    /// <paramref name="maxPasses"/> and by requiring PROGRESS each pass, because two rules can otherwise
+    /// hand a design back and forth forever.
+    /// </para>
+    ///
+    /// <para>
+    /// It refuses to make things worse. The netlist is snapshotted first, and if the pass ends with MORE
+    /// failures than it started with, the snapshot is restored and nothing is applied — an automatic fix
+    /// that degrades a design is worse than no fix, because the user did not ask for the edit and may not
+    /// re-read the report.
+    /// </para>
+    ///
+    /// <para>
+    /// Grouped findings (several refs in one row) are left alone: those are resolved by the AI revision
+    /// path, which sees the whole design at once. This is the deterministic half only.
+    /// </para>
+    /// </summary>
+    public static AutoFixOutcome AutoFixAll(Project.Project p, int maxPasses = 8,
+        int batteryGoalDays = 0, string? modelDir = null)
+    {
+        Revalidate(p, batteryGoalDays, modelDir);
+
+        var beforeVerdict = p.Validation;
+        var beforeFail = p.Findings.Count(f => f.Severity == "fail");
+        var beforeWarn = p.Findings.Count(f => f.Severity == "warn");
+        var snapshot = ProjectStore.Serialize(p);
+
+        var changes = new List<string>();
+        // A finding can legitimately recur under a different pin; the guard is on the exact (code, ref)
+        // pair, so the engine never tries the same edit twice and cannot ping-pong.
+        var attempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var pass = 0; pass < maxPasses; pass++)
+        {
+            var fixable = p.Findings
+                .Where(f => f.Severity is "fail" or "warn")
+                .Where(CanAutoFix)
+                .Where(f => f.Refs.Count <= 1)
+                .Where(f => attempted.Add($"{f.Code}|{f.Refs.FirstOrDefault()}"))
+                .ToList();
+            if (fixable.Count == 0) break;
+
+            var appliedThisPass = 0;
+            foreach (var f in fixable)
+            {
+                var target = f.Refs.FirstOrDefault() ?? "";
+                if (!TryAutoFix(p, f)) continue;
+                appliedThisPass++;
+                changes.Add($"{f.Code} {target}: {f.Fix ?? f.Title}".Trim());
+            }
+
+            if (appliedThisPass == 0) break;   // no progress — stop rather than spin
+            Revalidate(p, batteryGoalDays, modelDir);
+        }
+
+        var afterFail = p.Findings.Count(f => f.Severity == "fail");
+        var afterWarn = p.Findings.Count(f => f.Severity == "warn");
+
+        if (afterFail > beforeFail)
+        {
+            var restored = ProjectStore.Deserialize(snapshot);
+            CopyDesignInto(p, restored);
+            Revalidate(p, batteryGoalDays, modelDir);
+            Diagnostics.AppLog.Warn("validation",
+                $"auto-fix increased failures ({beforeFail} → {afterFail}) — reverted, nothing applied.");
+            return new AutoFixOutcome(0, Array.Empty<string>(), beforeVerdict, p.Validation,
+                beforeFail, p.Findings.Count(f => f.Severity == "fail"), beforeWarn,
+                p.Findings.Count(f => f.Severity == "warn"), RolledBack: true, p.Findings);
+        }
+
+        if (changes.Count > 0)
+            Diagnostics.AppLog.Info("validation",
+                $"auto-fixed {changes.Count} finding(s): {beforeVerdict} → {p.Validation} " +
+                $"({beforeFail}→{afterFail} fail, {beforeWarn}→{afterWarn} warn)");
+
+        return new AutoFixOutcome(changes.Count, changes, beforeVerdict, p.Validation,
+            beforeFail, afterFail, beforeWarn, afterWarn, RolledBack: false, p.Findings);
+    }
+
+    /// <summary>Restore the DESIGN fields a netlist edit can touch, leaving identity/chat/history alone.</summary>
+    private static void CopyDesignInto(Project.Project target, Project.Project source)
+    {
+        target.Connections = source.Connections;
+        target.Components = source.Components;
+        target.Firmware = source.Firmware;
+    }
+
     /// <summary>Apply the fix to the netlist in place. Returns false if nothing could be changed.</summary>
     public static bool TryAutoFix(Project.Project p, Finding f)
     {

@@ -355,8 +355,24 @@ Output ONLY the JSON object.
             ? FirmwarePlatform.MicroPython : FirmwarePlatform.ArduinoCpp;
 
         project.Firmware = FirmwareGenerator.Generate(project.Connections, kb, platform);
-        project.Findings = RulesEngine.Validate(project.Connections, kb, batteryGoalDays: 0);
-        project.Validation = Validation.ProjectValidator.Rollup(project.Findings);
+
+        // Resolve what the deterministic engine can resolve BEFORE the design is handed over. A fresh
+        // project used to arrive carrying failures the engine already knew how to fix — a strapping pin to
+        // remap, an unconnected ground — and left the user to click through them one at a time. This is the
+        // determinism boundary doing its job: the model proposes, the engine disposes.
+        //
+        // AutoFixAll re-validates internally, refuses to apply anything that increases the failure count,
+        // and records every edit. Regenerating the firmware afterwards matters: the pin map is derived from
+        // the netlist, so a remap that is not followed by a regenerate leaves pinmap.h pointing at the pin
+        // the design no longer uses.
+        var fix = Validation.ProjectValidator.AutoFixAll(project);
+        if (fix.Applied > 0)
+        {
+            kb = new ComponentKb(project.Components);
+            project.Firmware = FirmwareGenerator.Generate(project.Connections, kb, platform);
+            Diagnostics.AppLog.Info("generation",
+                $"auto-fixed {fix.Applied} finding(s) before hand-off · {fix.BeforeVerdict} → {fix.AfterVerdict}");
+        }
 
         var peakMa = kb.All.Sum(c => c.CurrentMaActive);
         project.Kpis = new ProjectKpis
