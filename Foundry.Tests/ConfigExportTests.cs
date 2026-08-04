@@ -12,7 +12,8 @@ public class ConfigStoreTests
     {
         var cfg = new AppConfig
         {
-            ModelId = "claude-opus-4-6", MaxOutputTokens = 4096, Temperature = 0.4,
+            // A CURRENT model id — a retired one is rewritten on load by design (see ModelMigrationTests).
+            ModelId = ModelCatalog.GenerationModelId, MaxOutputTokens = 4096, Temperature = 0.4,
             FirmwarePlatform = "MicroPython", EnclosureFormat = "3MF", Units = "mm",
             OutputFolder = Path.Combine(Path.GetTempPath(), "foundry-out"),
         };

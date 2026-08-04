@@ -82,15 +82,15 @@
               </Grid>
               <TextBox Style="{StaticResource FieldInput}" Text="{Binding AnthropicKey, UpdateSourceTrigger=PropertyChanged}"/>
               <TextBlock Foreground="{StaticResource Brush.InkMute}" FontFamily="{StaticResource Font.Mono}" FontSize="10.5" TextWrapping="Wrap" Margin="0,8,0,0"
-                         Text="Used for the staged generation pipeline. Default model: claude-sonnet-4-6 · max 8192 output tokens."/>
+                         Text="Used for the staged generation pipeline. Generation uses claude-opus-5; chat edits use claude-sonnet-5."/>
             </StackPanel>
             <Grid Margin="0,12,0,0">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Border Grid.Column="0" Style="{StaticResource Card}" Padding="14" Margin="0,0,6,0">
-                <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Default model"/><TextBlock Style="{StaticResource Serif}" FontSize="22" Margin="0,4,0,0" Text="Sonnet 4.6"/><TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,4,0,0" Text="Balanced. ~$0.04 / project."/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Default model"/><TextBlock Style="{StaticResource Serif}" FontSize="22" Margin="0,4,0,0" Text="Sonnet 5"/><TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,4,0,0" Text="Balanced. ~$0.04 / project."/></StackPanel>
               </Border>
               <Border Grid.Column="1" Style="{StaticResource Card}" Padding="14" Margin="6,0,0,0">
-                <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Hard mode"/><TextBlock Style="{StaticResource Serif}" FontSize="22" Margin="0,4,0,0" Text="Opus 4.6"/><TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,4,0,0" Text="For complex designs. ~$0.40."/></StackPanel>
+                <StackPanel><TextBlock Style="{StaticResource Kicker}" Text="Hard mode"/><TextBlock Style="{StaticResource Serif}" FontSize="22" Margin="0,4,0,0" Text="Opus 5"/><TextBlock Style="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource Brush.InkMute}" Margin="0,4,0,0" Text="For complex designs. ~$0.40."/></StackPanel>
               </Border>
             </Grid>
           </StackPanel>
