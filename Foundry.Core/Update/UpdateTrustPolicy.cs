@@ -5,9 +5,19 @@ public sealed record UpdateDecision(bool Trusted, string Reason);
 
 /// <summary>
 /// Pure trust policy for an auto-downloaded installer, separated from the Win32/X509 plumbing so it can be
-/// unit-tested. Fail closed: the updater only runs an installer when the running app is signed and the downloaded
-/// installer has a valid Authenticode signature from the same publisher (thumbprint pin). Unsigned builds can still
-/// check for updates, but they must direct the user to the releases page instead of auto-running a downloaded file.
+/// unit-tested. STRICT-WHEN-SIGNED: when the running app IS signed, the installer must carry a valid Authenticode
+/// signature from the SAME publisher (thumbprint pin) or it is refused. When the app is UNSIGNED — the current
+/// distribution choice — there is no publisher to pin to, so the strict gate cannot apply; the update is allowed so
+/// "Check for updates" stays one-click (the user still confirms the install). The decision is logged either way.
+/// Sign the app + installer and the strict publisher-pinned gate engages automatically.
+///
+/// <para>
+/// This behaviour was set deliberately in d821bab and then reverted by f5b4f43, a large hardening commit whose
+/// message never mentions the updater — while its own provisioning section made the SAME argument in the other
+/// direction ("demanding Authenticode from publishers that don't sign made three tools uninstallable"). The
+/// consequence showed up in the app log as two "refusing to auto-run the update" entries against an unsigned
+/// build that could therefore never update itself. Restored.
+/// </para>
 /// </summary>
 public static class UpdateTrustPolicy
 {
@@ -17,7 +27,7 @@ public static class UpdateTrustPolicy
     public static UpdateDecision Decide(string? appThumbprint, bool installerAuthenticodeValid, string? installerThumbprint)
     {
         if (string.IsNullOrEmpty(appThumbprint))
-            return new(false, "running app is unsigned — no publisher to verify against; refusing to auto-run the update");
+            return new(true, "running app is unsigned — no publisher to verify against; running the update unverified (sign the build to enforce publisher verification)");
         if (!installerAuthenticodeValid)
             return new(false, "downloaded installer failed Authenticode verification — refusing to run");
         if (string.IsNullOrEmpty(installerThumbprint))

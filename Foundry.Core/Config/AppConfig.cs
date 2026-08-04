@@ -53,11 +53,39 @@ public static class ConfigStore
                 // migrating that would silently promote every chat edit to the expensive generation model.
                 if (!string.IsNullOrWhiteSpace(cfg.ChatModelId))
                     cfg.ChatModelId = ModelCatalog.Migrate(cfg.ChatModelId);
+                cfg.MaxOutputTokens = MigrateTokenCap(cfg.MaxOutputTokens);
                 return cfg;
             }
         }
         catch { /* fall through to defaults */ }
         return new AppConfig();
+    }
+
+    /// <summary>The output cap that shipped as the default before 69f343a raised it.</summary>
+    private const int SupersededTokenCap = 8192;
+
+    /// <summary>
+    /// Lift a config still carrying the SUPERSEDED default output cap.
+    ///
+    /// <para>
+    /// 69f343a raised the default from 8192 to 16384 titled "fix generation truncation on complex designs"
+    /// — but the value is persisted, so an install that had already saved a config never received the fix
+    /// and kept truncating. The app log shows the result: 43 "response truncated at the 8192-token cap"
+    /// retries and 21 "firmware pass failed … using deterministic fallback" in a single day, i.e. the user
+    /// silently losing generated firmware to a setting they never chose.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately narrow: only the exact superseded default moves. Any other value — 4096, 32768 — is a
+    /// real choice and is left alone.
+    /// </para>
+    /// </summary>
+    private static int MigrateTokenCap(int current)
+    {
+        if (current != SupersededTokenCap) return current;
+        Diagnostics.AppLog.Info("config",
+            $"raising the output cap {SupersededTokenCap} → {new AppConfig().MaxOutputTokens} (the old default truncated complex designs).");
+        return new AppConfig().MaxOutputTokens;
     }
 
     private static bool IsLoadable(string json)

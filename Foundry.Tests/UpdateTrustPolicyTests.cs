@@ -4,14 +4,38 @@ namespace Foundry.Tests;
 
 public class UpdateTrustPolicyTests
 {
-    // Unsigned build: there's no publisher to pin to, so the updater must fail closed and direct users to the
-    // releases page instead of auto-running a downloaded installer.
+    // Unsigned build — the current distribution choice. There is no publisher to pin to, so the strict gate
+    // cannot apply and refusing only forces a manual download of the SAME installer from the releases page.
+    // The update is allowed (the user still confirms the install) and the decision is logged as unverified.
+    //
+    // This was set in d821bab, silently reverted by the f5b4f43 hardening commit, and the consequence
+    // reached the app log: "refusing to auto-run the update" on a build that could never be signed, so the
+    // app could never update itself. Signing the build re-engages the strict gate automatically.
     [Fact]
-    public void UnsignedApp_IsRefused_NoPublisherToVerify()
+    public void UnsignedApp_IsAllowed_ButReportedAsUnverified()
     {
         var d = UpdateTrustPolicy.Decide(appThumbprint: null, installerAuthenticodeValid: false, installerThumbprint: null);
-        Assert.False(d.Trusted);
+        Assert.True(d.Trusted);
         Assert.Contains("unsigned", d.Reason);
+        Assert.Contains("unverified", d.Reason);
+    }
+
+    [Fact]
+    public void UnsignedApp_IsAllowedEvenWhenTheInstallerIsAlsoUnsigned()
+    {
+        var d = UpdateTrustPolicy.Decide(appThumbprint: "", installerAuthenticodeValid: false, installerThumbprint: "");
+        Assert.True(d.Trusted);
+    }
+
+    // The moment the app IS signed, every strict check applies again — that is the whole point of
+    // "strict when signed", and it is what stops this from being a permanent hole.
+    [Fact]
+    public void SigningTheApp_ReEngagesTheStrictGate()
+    {
+        Assert.False(UpdateTrustPolicy.Decide("ABC123", false, "ABC123").Trusted);   // bad Authenticode
+        Assert.False(UpdateTrustPolicy.Decide("ABC123", true, null).Trusted);        // unsigned installer
+        Assert.False(UpdateTrustPolicy.Decide("ABC123", true, "DIFFERENT").Trusted); // wrong publisher
+        Assert.True(UpdateTrustPolicy.Decide("ABC123", true, "ABC123").Trusted);     // same publisher
     }
 
     [Fact]

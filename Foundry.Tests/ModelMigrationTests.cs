@@ -94,8 +94,8 @@ public class ModelMigrationTests : IDisposable
         var cfg = ConfigStore.Load(path);
 
         Assert.Equal("claude-opus-5", cfg.ModelId);
-        // Everything else the user set must survive the migration untouched.
-        Assert.Equal(8192, cfg.MaxOutputTokens);
+        // Everything else the user CHOSE must survive; the token cap is itself migrated (see below).
+        Assert.Equal(16384, cfg.MaxOutputTokens);
         Assert.Equal("MicroPython", cfg.FirmwarePlatform);
         Assert.Equal("STL", cfg.EnclosureFormat);
     }
@@ -124,5 +124,66 @@ public class ModelMigrationTests : IDisposable
 
         Assert.Equal("claude-opus-5", cfg.ModelId);
         Assert.Equal("claude-sonnet-5", cfg.ChatModelId);
+    }
+}
+
+// Two settings were persisted, then superseded by a later default — and the saved value won, so installs
+// never received fixes that were shipped as default changes. Found by reading the app log.
+public class SettingsMigrationTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "foundry-set-" + Guid.NewGuid().ToString("N")[..8]);
+
+    public SettingsMigrationTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch { } }
+
+    private AppConfig LoadJson(string json)
+    {
+        var path = Path.Combine(_dir, Guid.NewGuid().ToString("N")[..6] + ".json");
+        File.WriteAllText(path, json);
+        return ConfigStore.Load(path);
+    }
+
+    // 69f343a raised the default 8192 -> 16384, titled "fix generation truncation on complex designs".
+    // A config saved before that kept 8192 and kept truncating: the app log shows 43 truncation retries and
+    // 21 "firmware pass failed ... using deterministic fallback" in one day.
+    [Fact]
+    public void TheSupersededTokenCapIsRaised() =>
+        Assert.Equal(16384, LoadJson("""{ "MaxOutputTokens": 8192 }""").MaxOutputTokens);
+
+    // Narrow on purpose: anything that is not the old default is a real choice.
+    [Theory]
+    [InlineData(4096)]
+    [InlineData(12000)]
+    [InlineData(32768)]
+    [InlineData(64000)]
+    public void ADeliberateTokenCapIsLeftAlone(int chosen) =>
+        Assert.Equal(chosen, LoadJson($$"""{ "MaxOutputTokens": {{chosen}} }""").MaxOutputTokens);
+
+    [Fact]
+    public void ANewConfigAlreadyHasTheRaisedCap() =>
+        Assert.Equal(16384, new AppConfig().MaxOutputTokens);
+
+    // The real file from this machine: retired model AND superseded cap, everything else untouched.
+    [Fact]
+    public void TheRealWorldConfigIsFullyMigrated()
+    {
+        var cfg = LoadJson("""
+        {
+          "ModelId": "claude-opus-4-7",
+          "ChatModelId": null,
+          "MaxOutputTokens": 8192,
+          "Temperature": 1,
+          "FirmwarePlatform": "MicroPython",
+          "OutputFolder": "D:/Foundry",
+          "EnclosureFormat": "STL",
+          "Units": "mm"
+        }
+        """);
+
+        Assert.Equal("claude-opus-5", cfg.ModelId);
+        Assert.Equal(16384, cfg.MaxOutputTokens);
+        Assert.Equal("MicroPython", cfg.FirmwarePlatform);
+        Assert.Equal("STL", cfg.EnclosureFormat);
+        Assert.Equal(1.0, cfg.Temperature);
     }
 }

@@ -343,3 +343,47 @@ public class ProjectPackageTests : IDisposable
         Assert.NotEmpty(Entries(Zip));   // still a readable archive, not appended garbage
     }
 }
+
+// "export: spec PDF failed with the wiring image (The provided document content contains conflicting size
+// constraints...)" — straight from the app log. Wiring() used FitWidth(), which scales the image to the
+// FULL column width preserving aspect ratio, so a tall diagram resolved to a height greater than the page
+// and QuestPDF refused to lay the document out at all. One figure took down the whole specification.
+public class SpecPdfLayoutTests
+{
+    private static Project Demo() => DemoData.CreateSoilMoistureProject();
+
+    [Fact]
+    public void AVeryTallWiringDiagram_DoesNotBreakTheDocument()
+    {
+        var ex = Record.Exception(() =>
+            Foundry.Core.Export.PdfExporter.ProjectPdf(Demo(), TallPngFixture.Bytes));
+
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void TheTallDiagramStillProducesARealPdf()
+    {
+        var pdf = Foundry.Core.Export.PdfExporter.ProjectPdf(Demo(), TallPngFixture.Bytes);
+
+        Assert.Equal("%PDF-", System.Text.Encoding.ASCII.GetString(pdf, 0, 5));
+        Assert.True(pdf.Length > 1000);
+    }
+
+    // And the package therefore keeps the figure instead of reporting it dropped.
+    [Fact]
+    public void ThePackageKeepsTheWiringFigure()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "foundry-pdf-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var r = Foundry.Core.Export.ProjectPackage.Write(Demo(), Path.Combine(dir, "p.zip"),
+                new Foundry.Core.Export.PackageAssets { WiringPng = TallPngFixture.Bytes });
+
+            Assert.Contains("project-spec.pdf", r.Included);
+            Assert.DoesNotContain(r.Omitted, o => o.Contains("wiring diagram figure", StringComparison.OrdinalIgnoreCase));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+}

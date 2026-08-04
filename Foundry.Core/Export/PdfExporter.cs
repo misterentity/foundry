@@ -174,7 +174,13 @@ public static class PdfExporter
     {
         if (wiringPng is null || wiringPng.Length == 0) return;
         SectionTitle(col, "Wiring diagram");
-        col.Item().Background("#0A0A0E").Padding(8).Image(wiringPng).FitWidth();
+        // FitWidth scales to the FULL column width preserving aspect ratio, so a tall diagram — a design
+        // with many nets, rendered at 2x DPI — resolves to a height greater than the page and QuestPDF
+        // throws "conflicting size constraints ... some elements may require more space than is available",
+        // taking the whole spec PDF with it. A4 less margins, header, footer and padding leaves ~660pt;
+        // FitArea bounds BOTH dimensions, and the cap keeps it inside a partially-used column.
+        col.Item().Background("#0A0A0E").Padding(8)
+           .MaxHeight(600).Image(wiringPng).FitArea();
     }
 
     private static void Netlist(ColumnDescriptor col, Project.Project p)
