@@ -18,8 +18,10 @@
 
   <!-- .win-wrap : gradient backdrop + padding -->
   <Grid Background="{StaticResource Brush.WinWrap}">
-    <!-- centered .win -->
-    <Border MaxWidth="1640" Margin="18"
+    <!-- The app shell fills the window. This carried MaxWidth="1640", so on anything wider than about
+         1676px the entire application stopped growing and floated in the middle of the backdrop with
+         several hundred pixels of dead space either side — on a 2560-wide window, ~460px per side. -->
+    <Border Margin="18"
             Background="{StaticResource Brush.Bg}"
             BorderBrush="{StaticResource Brush.Hairline2}" BorderThickness="1">
       <Border.Effect>

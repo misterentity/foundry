@@ -3,7 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Foundry.App.Controls">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Margin="32,28,32,60">
+    <!-- Content fills the window. This was MaxWidth=1280 + Center, so past ~1280 the page stopped
+         growing and floated in dead space; Stretch is required because a Centered StackPanel with no
+         MaxWidth sizes to its content instead of the available width. Prose blocks keep their own
+         narrow MaxWidth further down - that is line-length for readability, not a layout cap. -->
+    <StackPanel HorizontalAlignment="Stretch" Margin="32,28,32,60">
 
       <!-- PAGE HEAD -->
       <Grid Margin="0,0,0,28">

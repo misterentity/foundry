@@ -3,7 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Foundry.App.Controls">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Margin="32,28,32,60">
+    <!-- Content fills the window. This was MaxWidth=1280 + Center, so past ~1280 the page stopped
+         growing and floated in dead space; Stretch is required because a Centered StackPanel with no
+         MaxWidth sizes to its content instead of the available width. Prose blocks keep their own
+         narrow MaxWidth further down - that is line-length for readability, not a layout cap. -->
+    <StackPanel HorizontalAlignment="Stretch" Margin="32,28,32,60">
 
       <!-- PAGE HEAD -->
       <Grid Margin="0,0,0,28">
@@ -13,7 +17,7 @@
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="44" LineHeight="52">
             <Run Text="How to "/><Run Text="build." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
-          <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
+          <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left" Margin="0,16,0,0"
                      Text="Each step references the components and nets it touches. Export to Markdown or PDF for the workshop bench."/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,4">
@@ -47,7 +51,7 @@
                            Text="{Binding N, StringFormat='{}{0:00}'}" VerticalAlignment="Top"/>
                 <StackPanel Grid.Column="1" Margin="24,0,0,0">
                   <TextBlock Style="{StaticResource Serif}" FontSize="30" Text="{Binding Title}"/>
-                  <TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" MaxWidth="700" LineHeight="22" Margin="0,8,0,0" Text="{Binding Body}"/>
+                  <TextBlock Style="{StaticResource Mono}" FontSize="13" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" MaxWidth="700" HorizontalAlignment="Left" LineHeight="22" Margin="0,8,0,0" Text="{Binding Body}"/>
                   <ItemsControl ItemsSource="{Binding Chips}" Margin="0,14,0,0">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>

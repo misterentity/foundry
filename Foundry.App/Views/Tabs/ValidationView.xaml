@@ -3,7 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:Foundry.App.Controls">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Margin="32,28,32,60">
+    <!-- Content fills the window. This was MaxWidth=1280 + Center, so past ~1280 the page stopped
+         growing and floated in dead space; Stretch is required because a Centered StackPanel with no
+         MaxWidth sizes to its content instead of the available width. Prose blocks keep their own
+         narrow MaxWidth further down - that is line-length for readability, not a layout cap. -->
+    <StackPanel HorizontalAlignment="Stretch" Margin="32,28,32,60">
 
       <!-- PAGE HEAD -->
       <Grid Margin="0,0,0,28">
@@ -13,7 +17,7 @@
           <TextBlock Style="{StaticResource PageH1}" Margin="0,8,0,0" FontSize="44" LineHeight="52">
             <Run Text="Sanity "/><Run Text="check." Foreground="{DynamicResource Brush.Accent}"/>
           </TextBlock>
-          <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" Margin="0,16,0,0"
+          <TextBlock Style="{StaticResource Mono}" Foreground="{StaticResource Brush.InkSoft}" FontSize="13" TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left" Margin="0,16,0,0"
                      Text="Power budget, voltage/logic level mismatches, pin conflicts, I²C collisions — all evaluated deterministically against the assembled Project. AI never decides validation verdicts."/>
         </StackPanel>
         <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Margin="0,0,0,4">
@@ -77,7 +81,7 @@
           </Border>
           <StackPanel VerticalAlignment="Center" Margin="18,0,0,0">
             <TextBlock Style="{StaticResource Kicker}" Foreground="{StaticResource Brush.InkSoft}" Text="REPORT CARD · SAFE TO POWER ON?"/>
-            <TextBlock Style="{StaticResource Serif}" FontSize="20" Margin="0,4,0,0" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" MaxWidth="760" Text="{Binding Verdict}"/>
+            <TextBlock Style="{StaticResource Serif}" FontSize="20" Margin="0,4,0,0" Foreground="{StaticResource Brush.Ink}" TextWrapping="Wrap" MaxWidth="760" HorizontalAlignment="Left" Text="{Binding Verdict}"/>
           </StackPanel>
         </StackPanel>
       </Border>
@@ -110,7 +114,7 @@
 
                 <StackPanel Grid.Column="1" Margin="18,16">
                   <TextBlock Style="{StaticResource Serif}" FontSize="22" Text="{Binding Title}"/>
-                  <TextBlock Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" MaxWidth="700" Margin="0,6,0,0" Text="{Binding Description}"/>
+                  <TextBlock Style="{StaticResource Mono}" FontSize="12" Foreground="{StaticResource Brush.InkSoft}" TextWrapping="Wrap" MaxWidth="700" HorizontalAlignment="Left" Margin="0,6,0,0" Text="{Binding Description}"/>
                   <ItemsControl ItemsSource="{Binding Refs}" Margin="0,10,0,0">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>

@@ -21,6 +21,22 @@ public partial class MainWindow : Window
         var shot = Environment.GetEnvironmentVariable("FOUNDRY_SHOT");
         if (!string.IsNullOrEmpty(shot))
         {
+            // FOUNDRY_SHOT_SIZE=WxH renders at a specific window size. Layout defects are size-dependent —
+            // a cap or a fixed column only shows up past a certain width — so verifying them needs the
+            // size to be a parameter of the capture, not whatever the default happens to be.
+            var size = Environment.GetEnvironmentVariable("FOUNDRY_SHOT_SIZE");
+            if (!string.IsNullOrEmpty(size))
+            {
+                var wh = size.Split('x', 'X');
+                if (wh.Length == 2 && double.TryParse(wh[0], out var sw) && double.TryParse(wh[1], out var sh))
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                    Left = 0; Top = 0;
+                    MinWidth = Math.Min(MinWidth, sw);
+                    MinHeight = Math.Min(MinHeight, sh);
+                    Width = sw; Height = sh;
+                }
+            }
             var delayMs = int.TryParse(Environment.GetEnvironmentVariable("FOUNDRY_SHOT_DELAY_MS"), out var d) ? d : 1200;
             ContentRendered += (_, _) =>
             {
