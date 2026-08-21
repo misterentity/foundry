@@ -22,15 +22,15 @@ jobs:
       SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
       SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       # The avr8js runtime ships as a COMMITTED bundle (sidecar-avr/dist/avr8js-runtime.js). Re-build it and
       # fail if it differs from what's committed — otherwise an index.js edit that wasn't re-bundled ships green.
@@ -95,7 +95,7 @@ jobs:
       - name: Test (Core + App ViewModels)
         run: dotnet test Foundry.sln -c Release
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -117,7 +117,7 @@ jobs:
         run: ./build/sign.ps1 -Target "build/AppPackages/FoundrySetup.exe"
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: build/AppPackages/FoundrySetup.exe
           generate_release_notes: true
@@ -129,13 +129,13 @@ jobs:
   pcb-live:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -163,7 +163,7 @@ jobs:
 
       # The fab e2e test routes with FreeRouting (Java 25 + the pinned jar) — install both so the route→DRC→
       # gerber half of the moat (the orderable artifact) is exercised against real tools, not just fakes.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'

@@ -106,15 +106,15 @@ public static class FirmwareBuilder
         if (project.Firmware.Platform.Contains("python", StringComparison.OrdinalIgnoreCase))
             return BuildResult.Skipped("MicroPython firmware — no compile step (flash to your board to run it).");
 
-        var cli = Locate();
-        if (cli is null) return BuildResult.NotInstalled();
-
         // Nothing to compile is a state, not a failure — a build can be kicked off before the firmware pass
         // has produced anything. Saying so beats the ArgumentOutOfRangeException this used to raise inside
         // PickMainFile, which the catch-all below reported as "Couldn't run the compiler: Index was out of
         // range." — the most frequent error in the app log.
         if (project.Firmware.Files.Count == 0)
             return BuildResult.Skipped("No firmware to compile yet — generate the firmware first.");
+
+        var cli = Locate();
+        if (cli is null) return BuildResult.NotInstalled();
 
         var sketchRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_build_" + Guid.NewGuid().ToString("N")[..8]);
         var sketchDir = System.IO.Path.Combine(sketchRoot, "foundrybuild");
@@ -174,15 +174,15 @@ public static class FirmwareBuilder
             return new CompiledImage(false, fqbn, null, null, null, outputDir,
                 new[] { new BuildDiagnostic("error", "", 0, "MicroPython firmware has no compiled image — flash to your board to run it.") });
 
-        var cli = Locate();
-        if (cli is null)
-            return new CompiledImage(false, fqbn, null, null, null, outputDir,
-                new[] { new BuildDiagnostic("error", "", 0, "arduino-cli isn't installed.") });
-
         // See CompileAsync: an image build against an empty firmware set is a state, not an index bug.
         if (project.Firmware.Files.Count == 0)
             return new CompiledImage(false, fqbn, null, null, null, outputDir,
                 new[] { new BuildDiagnostic("error", "", 0, "No firmware to compile yet — generate the firmware first.") });
+
+        var cli = Locate();
+        if (cli is null)
+            return new CompiledImage(false, fqbn, null, null, null, outputDir,
+                new[] { new BuildDiagnostic("error", "", 0, "arduino-cli isn't installed.") });
 
         System.IO.Directory.CreateDirectory(outputDir);
         var sketchRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "foundry_image_" + Guid.NewGuid().ToString("N")[..8]);

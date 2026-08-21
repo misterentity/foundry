@@ -9,6 +9,6 @@
   },
   "devDependencies": {
     "avr8js": "0.21.0",
-    "esbuild": "^0.21.0"
+    "esbuild": "^0.28.2"
   }
 }
